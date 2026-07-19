@@ -10,25 +10,34 @@ _G.Config = _G.Config or {}
 local HORST_ENABLED = _G.Config.Horst == true
 local GEM_TARGET = _G.Config.GemTarget  -- nil = ไม่ส่ง DONE
 local UPDATE_INTERVAL = 30
+local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
+
+-- ตัวนับ Steps
+local TOTAL_STEPS = 9
+local currentStep = 0
+
+local function printStep(stepName)
+    currentStep = currentStep + 1
+    print(string.format("[%d/%d] %s", currentStep, TOTAL_STEPS, stepName))
+end
 
 -- ========================================
 -- -1. Load Horst API (ถ้า Config เปิด)
 -- ========================================
 if HORST_ENABLED then
-    print("Step -1: Loading Horst API...")
+    printStep("Loading Horst API...")
     local success, err = pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
     end)
 
     if success then
-        print("✅ Step -1 Complete: Horst API loaded!")
         if GEM_TARGET then
-            print("🎯 Gem Target:", GEM_TARGET)
+            print("   🎯 Gem Target:", GEM_TARGET)
         else
-            print("📡 Status Update Only Mode (No DONE signal)")
+            print("   📡 Status Update Only Mode")
         end
     else
-        warn("❌ Failed to load Horst API:", err)
+        warn("   ❌ Failed to load Horst API:", err)
         HORST_ENABLED = false
     end
     task.wait(1)
@@ -37,7 +46,7 @@ end
 -- ========================================
 -- 0. StatsGUI (โหลดก่อนอันแรก)
 -- ========================================
-print("Step 0: Loading Stats GUI...")
+printStep("Loading Stats GUI...")
 do
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -59,7 +68,7 @@ do
     -- Frame หลัก
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0.75, 0, 0.6, 0)
+    mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
     mainFrame.Position = UDim2.new(0.5, 0, 0.65, 0)
     mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = Color3.fromRGB(245, 235, 220)
@@ -253,11 +262,15 @@ do
     local function updateStats()
         local success, err = pcall(function()
             local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            if not replica then return end
+            if not replica then
+                error("Replica not found")
+            end
 
             local data = replica.Data
             local itemData = data.ItemData
-            if not itemData then return end
+            if not itemData then
+                error("ItemData not found")
+            end
 
             -- Gem
             local gem = 0
@@ -297,6 +310,33 @@ do
     end)
 
     -- ========================================
+    -- Toggle GUI with N key (+ Render3D ถ้าเปิด Config)
+    -- ========================================
+    local UserInputService = game:GetService("UserInputService")
+    local isGuiVisible = true
+
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+
+        if input.KeyCode == Enum.KeyCode.N then
+            isGuiVisible = not isGuiVisible
+            mainFrame.Visible = isGuiVisible
+
+            if TOGGLE_RENDER3D then
+                if isGuiVisible then
+                    game:GetService("RunService"):Set3dRenderingEnabled(false)
+                else
+                    game:GetService("RunService"):Set3dRenderingEnabled(true)
+                end
+            end
+        end
+    end)
+
+    if TOGGLE_RENDER3D then
+        game:GetService("RunService"):Set3dRenderingEnabled(false)
+    end
+
+    -- ========================================
     -- Horst Status Reporter (ส่งข้อมูลทุก 30 วิ)
     -- ========================================
     if HORST_ENABLED then
@@ -332,30 +372,22 @@ do
                     level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
 
                 -- ส่ง Status Update
-                _G.Horst_SetDescription(message, encoded_json)
-                print("📡 Horst Status Update:", message)
+                if _G.Horst_SetDescription then
+                    _G.Horst_SetDescription(message, encoded_json)
+                end
 
                 -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
-                if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
-                    print(string.format("🎯 Gem Target Reached! (%s/%s)", formatNumber(gem), formatNumber(GEM_TARGET)))
-
+                if GEM_TARGET and gem >= GEM_TARGET and not doneSent and _G.Horst_AccountChangeDone then
                     local ok, doneErr = _G.Horst_AccountChangeDone()
                     if ok then
-                        print("✅ Horst: Account change DONE sent successfully!")
                         doneSent = true
-                    else
-                        warn("❌ Horst: Failed to send DONE:", doneErr)
                     end
                 end
             end)
-
-            if not success then
-                warn("❌ Horst Status Update Error:", err)
-            end
         end
 
         -- ส่งรอบแรกทันที
-        task.wait(1)  -- รอให้ข้อมูล replica พร้อม
+        task.wait(1)
         sendHorstStatus()
 
         -- วนลูปส่งทุก 30 วิ
@@ -365,11 +397,8 @@ do
                 sendHorstStatus()
             end
         end)
-
-        print("✅ Horst Status Reporter started (Update every", UPDATE_INTERVAL, "seconds)")
     end
 end
-print("✅ Step 0 Complete: Stats GUI loaded!")
 task.wait(1)
 
 -- Config (สามารถแก้ไขได้จาก loadstring)
@@ -404,11 +433,9 @@ end
 -- เช็คและรอ Wave รีเซ็ต
 -- ========================================
 local function waitForWaveReset()
-    print("Monitoring Wave counter for reset...")
     local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
     local topHUD = playerGui:FindFirstChild("TopGameHUD")
     if not topHUD then
-        print("⚠️ TopGameHUD not found")
         return
     end
 
@@ -428,9 +455,7 @@ local function waitForWaveReset()
 
         if currentWave > maxWave then
             maxWave = currentWave
-            print(string.format("Wave: %d/%d", currentWave, 15))
         elseif currentWave < maxWave and currentWave == 0 then
-            print("✅ Wave reset detected! Starting new cycle...")
             return
         end
 
@@ -440,11 +465,7 @@ end
 
 -- เช็คว่าอยู่ในแมพหรือไม่
 if isInTargetMap() then
-    print("========================================")
-    print("✅ Already in School Grounds - Act 1!")
-    print("Skipping setup steps, monitoring Wave...")
-    print("========================================")
-
+    
     -- ปิด Tutorial popup (ถ้ามี)
     local function closeTutorial()
         local success = pcall(function()
@@ -475,14 +496,12 @@ if isInTargetMap() then
                         task.wait(0.2)
                         GuiService.SelectedCoreObject = nil
 
-                        print("✅ Tutorial popup closed")
                         return
                     end
                 end
             end
         end)
         if not success then
-            print("ℹ️ No Tutorial popup found")
         end
     end
 
@@ -490,7 +509,6 @@ if isInTargetMap() then
     task.wait(0.5)
 
     -- รัน RemoveLobbyMesh เท่านั้น
-    print("Running RemoveLobbyMesh...")
     local Config = _G.Config
 
     local g = game
@@ -528,7 +546,6 @@ if isInTargetMap() then
 
     if mapFolder then
         -- ลบ children ของ Map (เกมจะสร้าง folder ใหม่ถ้าลบทั้งก้อน)
-        print("  ลบ workspace.Map children...")
         for _, obj in pairs(mapFolder:GetChildren()) do
             obj:Destroy()
         end
@@ -546,10 +563,8 @@ if isInTargetMap() then
             invisibleFloor.CanCollide = true
             invisibleFloor.Material = Enum.Material.SmoothPlastic
             invisibleFloor.Parent = workspace
-            print("  ✅ สร้างพื้นล่องหนแล้ว")
         end
     elseif lobbyFolder then
-        print("  ลบ workspace.Lobby children...")
         for _, obj in pairs(lobbyFolder:GetChildren()) do
             obj:Destroy()
         end
@@ -613,7 +628,6 @@ if isInTargetMap() then
         end
     end
 
-    print("✅ RemoveLobbyMesh Complete!")
 
     -- ====================================
     -- ระบบวาง + อัพเกรด (เหมือน Path B)
@@ -640,16 +654,8 @@ if isInTargetMap() then
     end
 
     local function placeAndUpgrade()
-        local PLACEMENTS = {
-            {slot = "2", cframe = CFrame.new(3102.2963867188, 1798.9315185547, 3265.6330566406)},
-            {slot = "2", cframe = CFrame.new(3099.0529785156, 1798.9315185547, 3265.447265625)},
-            {slot = "2", cframe = CFrame.new(3102.6994628906, 1798.7340087891, 3269.0915527344)},
-            {slot = "2", cframe = CFrame.new(3099.4106445312, 1798.7340087891, 3268.8071289062)},
-        }
-
-        local AUTO_UPGRADE_PRIORITY = 1
         local DELAY_AFTER_PLACE = 1
-        local DELAY_AFTER_UPGRADE = 0.3
+        local AUTO_UPGRADE_PRIORITY = 1
 
         local function getCurrentMoney()
             local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
@@ -661,28 +667,40 @@ if isInTargetMap() then
         end
 
         local function getUnitCost(slot)
-            local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
-            if not bottomHUD then return 0 end
-            local hotbarContainer = bottomHUD:GetChildren()[2]:GetChildren()[5]
             local targetSlot = tonumber(slot)
+            if not targetSlot then return 0 end
 
-            for _, child in ipairs(hotbarContainer:GetChildren()) do
-                if child:IsA("TextButton") and child.LayoutOrder == targetSlot then
-                    local frame = child.Frame
-                    if frame then
-                        local children = frame:GetChildren()
-                        if children[3] and children[3]:IsA("Frame") then
-                            local innerFrame = children[3].Frame
-                            if innerFrame and innerFrame.TextLabel then
-                                local costText = innerFrame.TextLabel.ContentText
-                                local cleaned = (costText:gsub("[^%d]", ""))
-                                return tonumber(cleaned) or 0
+            while true do
+                local success, cost = pcall(function()
+                    local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
+                    if not bottomHUD then return 0 end
+                    local hotbarContainer = bottomHUD:GetChildren()[2]:GetChildren()[5]
+
+                    for _, child in ipairs(hotbarContainer:GetChildren()) do
+                        if child:IsA("TextButton") and child.LayoutOrder == targetSlot then
+                            local frame = child.Frame
+                            if frame then
+                                local children = frame:GetChildren()
+                                if children[3] and children[3]:IsA("Frame") then
+                                    local innerFrame = children[3].Frame
+                                    if innerFrame and innerFrame.TextLabel then
+                                        local costText = innerFrame.TextLabel.ContentText
+                                        local cleaned = (costText:gsub("[^%d]", ""))
+                                        return tonumber(cleaned) or 0
+                                    end
+                                end
                             end
                         end
                     end
+                    return 0
+                end)
+
+                if success then
+                    return cost
+                else
+                    task.wait(0.5)
                 end
             end
-            return 0
         end
 
         local playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
@@ -691,31 +709,37 @@ if isInTargetMap() then
             return
         end
 
-        local placedIDs = {}
+        local allPlacedIDs = {}
         local connection = ReplicaClient.OnNew("GameUnit", function(replica)
             local unitID = replica.Data.ID
-            if unitID and not table.find(placedIDs, unitID) then
-                table.insert(placedIDs, unitID)
+            if unitID and not table.find(allPlacedIDs, unitID) then
+                table.insert(allPlacedIDs, unitID)
             end
         end)
 
-        print("🎯 เริ่มวาง units...")
-        for i, placement in ipairs(PLACEMENTS) do
-            local cost = getUnitCost(placement.slot)
+        local function placeUnit(slot, cframe)
+            local cost = getUnitCost(slot)
+            local startCount = #allPlacedIDs
 
             while true do
                 local money = getCurrentMoney()
                 if money >= cost then
                     local success = pcall(function()
-                        playerReplica:FireServer("PlaceGameUnit", placement.slot, placement.cframe)
+                        playerReplica:FireServer("PlaceGameUnit", slot, cframe)
                     end)
                     if success then
                         task.wait(DELAY_AFTER_PLACE)
-                        break
+
+                        -- รอให้ unit ถูกเพิ่มเข้า allPlacedIDs
+                        local waited = 0
+                        while #allPlacedIDs <= startCount and waited < 5 do
+                            task.wait(0.1)
+                            waited = waited + 0.1
+                        end
+
+                        return true
                     else
-                        warn("❌ วางไม่สำเร็จ")
-                        connection:Disconnect()
-                        return
+                        return false
                     end
                 else
                     task.wait(1)
@@ -723,32 +747,150 @@ if isInTargetMap() then
             end
         end
 
+        -- Phase 1: วาง 2 ตัวแรก (ไม่อัพเกรด)
+        local phase1Units = {}
+        placeUnit("2", CFrame.new(3089.634765625, 1798.9315185547, 3303.287109375))
+        table.insert(phase1Units, allPlacedIDs[#allPlacedIDs])
+
+        placeUnit("2", CFrame.new(3085.5629882812, 1798.9315185547, 3307.3232421875))
+        table.insert(phase1Units, allPlacedIDs[#allPlacedIDs])
+
+        -- Phase 2: วาง 2 ตัวถัดไป (ไม่อัพเกรด)
+        local phase2Units = {}
+        placeUnit("2", CFrame.new(3076.7241210938, 1798.7340087891, 3331.4426269531))
+        table.insert(phase2Units, allPlacedIDs[#allPlacedIDs])
+
+        placeUnit("2", CFrame.new(3073.0454101562, 1798.7340087891, 3335.3151855469))
+        table.insert(phase2Units, allPlacedIDs[#allPlacedIDs])
+
+        -- Phase 3: รอ 30 วิ แล้วขาย 2 ตัวแรก
+        task.wait(30)
+
+        for _, unitID in ipairs(phase1Units) do
+            pcall(function()
+                playerReplica:FireServer("SellGameUnit", unitID)
+            end)
+            task.wait(0.5)
+        end
+
+        -- Phase 4: วาง 2 ตัวแทนที่ (ไม่อัพเกรด)
+        local phase3Units = {}
+        placeUnit("2", CFrame.new(3102.9411621094, 1798.7340087891, 3348.0209960938))
+        table.insert(phase3Units, allPlacedIDs[#allPlacedIDs])
+
+        placeUnit("2", CFrame.new(3100.6657714844, 1798.7340087891, 3350.0747070312))
+        table.insert(phase3Units, allPlacedIDs[#allPlacedIDs])
+
+        -- Phase 5: รอ 15 วิ แล้วขาย 2 ตัว Phase 2
+        task.wait(15)
+
+        for _, unitID in ipairs(phase2Units) do
+            pcall(function()
+                playerReplica:FireServer("SellGameUnit", unitID)
+            end)
+            task.wait(0.5)
+        end
+
+        -- Phase 6: วาง 2 ตัวสุดท้าย
+        local phase4Units = {}
+        placeUnit("2", CFrame.new(3091.6513671875, 1798.9315185547, 3367.1286621094))
+        table.insert(phase4Units, allPlacedIDs[#allPlacedIDs])
+
+        placeUnit("2", CFrame.new(3093.73828125, 1798.9315185547, 3365.0720214844))
+        table.insert(phase4Units, allPlacedIDs[#allPlacedIDs])
+
+        -- Phase 7: รอ 10 วิ แล้วขาย 2 ตัว Phase 3 (จุดที่ 5,6)
+        task.wait(10)
+
+        for _, unitID in ipairs(phase3Units) do
+            pcall(function()
+                playerReplica:FireServer("SellGameUnit", unitID)
+            end)
+            task.wait(0.5)
+        end
+
+        -- Phase 8: วาง 2 ตัวใหม่แทนที่และอัพเกรด
+        local phase5Units = {}
+        placeUnit("2", CFrame.new(3086.2294921875, 1798.9315185547, 3366.8635253906))
+        table.insert(phase5Units, allPlacedIDs[#allPlacedIDs])
+
+        placeUnit("2", CFrame.new(3087.6696777344, 1798.9315185547, 3363.1516113281))
+        table.insert(phase5Units, allPlacedIDs[#allPlacedIDs])
+
         task.wait(2)
         connection:Disconnect()
 
-        if #placedIDs > 0 then
-            print("⚡ เปิด Auto Upgrade...")
-            for _, unitID in ipairs(placedIDs) do
-                pcall(function()
-                    playerReplica:FireServer("ChangeGameUnitAutoUpgradePriority", unitID, AUTO_UPGRADE_PRIORITY)
-                end)
-                task.wait(DELAY_AFTER_UPGRADE)
-            end
-            print(string.format("✅ วาง + อัพเกรดสำเร็จ %d units", #placedIDs))
-        else
-            warn("⚠️ ไม่มี units ที่วางสำเร็จ")
+        -- Phase 9: อัพเกรดเฉพาะ Phase 4 + Phase 5 (4 ตัวสุดท้าย)
+        local finalUnits = {}
+        for _, id in ipairs(phase4Units) do table.insert(finalUnits, id) end
+        for _, id in ipairs(phase5Units) do table.insert(finalUnits, id) end
+
+        for _, unitID in ipairs(finalUnits) do
+            pcall(function()
+                playerReplica:FireServer("ChangeGameUnitAutoUpgradePriority", unitID, AUTO_UPGRADE_PRIORITY)
+            end)
+            task.wait(0.3)
         end
     end
 
+    -- Anti-AFK Walk Loop (เดินวนในแมพ)
+    spawn(function()
+        local Players = game:GetService("Players")
+        local player = Players.LocalPlayer
+
+        task.wait(5)
+
+        local waypoints = {
+            Vector3.new(3089, 0, 3271),
+            Vector3.new(3089, 0, 3350)
+        }
+
+        local currentWaypointIndex = 1
+
+        while true do
+            task.wait(0.1)
+
+            if not isInTargetMap() then
+                break
+            end
+
+            local character = player.Character
+            if not character then
+                task.wait(1)
+                continue
+            end
+
+            local humanoid = character:FindFirstChild("Humanoid")
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+
+            if not humanoid or not hrp then
+                task.wait(1)
+                continue
+            end
+
+            local targetPos = waypoints[currentWaypointIndex]
+            local distance = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
+
+            if distance > 5 then
+                humanoid:MoveTo(Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z))
+                task.wait(0.5)
+            else
+                currentWaypointIndex = currentWaypointIndex + 1
+                if currentWaypointIndex > #waypoints then
+                    currentWaypointIndex = 1
+                end
+                task.wait(0.5)
+            end
+        end
+    end)
+
     -- Main Loop
-    print("🔄 เริ่ม Auto Loop...")
     local lastWave = -1
 
     while true do
         local currentWave = getCurrentWave()
 
         if currentWave == 0 or (lastWave > 0 and currentWave < lastWave) then
-            print("🔄 Wave reset - รอ Wave > 0...")
             while getCurrentWave() == 0 do
                 task.wait(0.5)
             end
@@ -768,7 +910,7 @@ end
 -- ========================================
 -- 1. RemoveLobbyMesh.lua (Boost FPS)
 -- ========================================
-print("Step 1: Running RemoveLobbyMesh...")
+printStep("Removing Lobby Mesh...")
 
 local Config = _G.Config
 
@@ -908,13 +1050,12 @@ if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
     floor.Parent = workspace.Lobby
 end
 
-print("✅ Step 1 Complete: Boost FPS Success!")
 task.wait(1)
 
 -- ========================================
 -- 2. Settings.lua
 -- ========================================
-print("Step 2: Applying Settings...")
+printStep("Applying Settings...")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
@@ -971,16 +1112,12 @@ for _, rarity in ipairs({"Rare", "Epic"}) do
     task.wait(0.3)
 end
 
-print("✅ Step 2 Complete: Applied All Settings!")
-task.wait(1)
-
-print("✅ Step 2 Complete: Applied All Settings!")
 task.wait(1)
 
 -- ========================================
 -- 3. AutoClaimStarter.lua
 -- ========================================
-print("Step 3: Claiming Starter Unit...")
+printStep("Claiming Starter Unit...")
 
 local GuiService = game:GetService("GuiService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -1000,8 +1137,6 @@ if playerGui:FindFirstChild("Prompt") then
         if child:FindFirstChild("Folder") then
             local textLabel = child.Folder.Frame.Frame:FindFirstChild("TextLabel")
             if textLabel and (textLabel.ContentText == TARGET_UNIT or textLabel.Text == TARGET_UNIT) then
-                print(string.format("Found %s, selecting...", TARGET_UNIT))
-
                 -- กดปุ่มเลือกตัวละคร
                 local button = child.Folder.Frame:FindFirstChild("TextButton")
                 if button then
@@ -1047,7 +1182,6 @@ if playerGui:FindFirstChild("Prompt") then
                         task.wait(0.1)
                         VirtualInputManager:SendMouseButtonEvent(screenSize.X - 10, screenSize.Y - 10, 0, false, game, 0)
 
-                        print(string.format("✅ Successfully claimed %s!", TARGET_UNIT))
                     end
                 end
                 break
@@ -1055,22 +1189,20 @@ if playerGui:FindFirstChild("Prompt") then
         end
     end
 else
-    print("⚠️ Prompt not found!")
 end
 
-print("✅ Step 3 Complete: Claimed Starter Unit!")
 task.wait(1)
 
 -- ========================================
 -- 4. AutoClaimCalendar.lua
 -- ========================================
-print("Step 4: Claiming Calendar Rewards...")
+printStep("Claiming Calendar Rewards...")
 
 local START_DAY = 1
 local END_DAY = 7
 local DELAY_BETWEEN_CLAIMS = 0.5
 
-print("Claiming ReleaseCalendar rewards...")
+
 for day = START_DAY, END_DAY do
     pcall(function()
         Nodes.CLAIM_CALENDAR:FireServer("ReleaseCalendar", day)
@@ -1088,7 +1220,7 @@ for day = START_DAY, END_DAY do
     task.wait(0.3)
 end
 
-print("Claiming DailyRewards...")
+
 for day = START_DAY, END_DAY do
     pcall(function()
         Nodes.CLAIM_CALENDAR:FireServer("DailyRewards", day)
@@ -1104,13 +1236,74 @@ for day = START_DAY, END_DAY do
     task.wait(0.3)
 end
 
-print("✅ Step 4 Complete: Claimed All Calendar Rewards!")
+task.wait(1)
+
+-- ========================================
+-- 4.5. Redeem Codes
+-- ========================================
+printStep("Redeeming Codes...")
+
+do
+    local CODES = {
+        "sorryforguilds",
+        "SorryForRestart",
+        "200KCCU",
+        "100K!",
+        "30KLIKES!",
+        "EXPEDITIONS",
+        "SorryForBugs",
+        "AE#1",
+        "Release",
+    }
+
+    local function redeemCode(code)
+        local success, result = pcall(function()
+            local request = Nodes.CLAIM_CODE:Request(code)
+            request:Timeout(5)
+            return request:Wait()
+        end)
+
+        if success then
+            if result and result.Success then
+
+                -- กดมุมซ้ายบนเพื่อปิด popup
+                local VirtualInputManager = game:GetService("VirtualInputManager")
+                task.wait(0.2)
+                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
+                task.wait(0.1)
+                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
+                task.wait(0.2)
+
+                return true
+            else
+                warn(string.format("❌ Failed: %s - %s", code, result and result.Message or "Already claimed or invalid"))
+                return false
+            end
+        else
+            warn(string.format("❌ Error: %s - %s", code, tostring(result)))
+            return false
+        end
+    end
+
+    local successCount = 0
+    local failCount = 0
+
+    for i, code in ipairs(CODES) do
+        if redeemCode(code) then
+            successCount = successCount + 1
+        else
+            failCount = failCount + 1
+        end
+        task.wait(0.5)
+    end
+
+end
 task.wait(1)
 
 -- ========================================
 -- 5. เช็คตัวละครที่มีอยู่
 -- ========================================
-print("Step 5: Checking Inventory...")
+printStep("Checking Inventory...")
 
 local function openInventory()
     local GuiService = game:GetService("GuiService")
@@ -1143,7 +1336,6 @@ local function checkForTargetUnits()
     task.wait(2)
 
     if not playerGui:FindFirstChild("UnitInventory") then
-        print("⚠️ Inventory not found!")
         return false
     end
 
@@ -1173,7 +1365,6 @@ local function checkForTargetUnits()
     end
 
     if not scrollFrame then
-        print("⚠️ ScrollingFrame not found!")
         return false
     end
 
@@ -1192,7 +1383,6 @@ local function checkForTargetUnits()
                     -- เช็คว่าตรงกับตัวที่ต้องการไหม
                     for _, targetUnit in pairs(targetUnits) do
                         if string.find(unitName, targetUnit) then
-                            print(string.format("✅ Found Target Unit: %s", unitName))
                             return true
                         end
                     end
@@ -1201,7 +1391,6 @@ local function checkForTargetUnits()
         end
     end
 
-    print("❌ No target units found in inventory")
     return false
 end
 
@@ -1215,7 +1404,7 @@ local hasTargetUnit = checkForTargetUnits()
 -- 6. AutoSummon (ถ้าไม่มีตัวที่ต้องการ)
 -- ========================================
 if not hasTargetUnit then
-    print("Step 6: No target units found. Starting summon...")
+    printStep("Auto Summon...")
 
     local BANNER_ID = "Standard"
     local AMOUNT_PER_SUMMON = 50
@@ -1223,7 +1412,6 @@ if not hasTargetUnit then
     local DELAY = 2
 
     for i = 1, TOTAL_ROUNDS do
-        print(string.format("🎲 Summon Round %d/%d", i, TOTAL_ROUNDS))
 
         pcall(function()
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
@@ -1238,22 +1426,20 @@ if not hasTargetUnit then
         task.wait(0.5)
     end
 
-    print("✅ Step 6 Complete: Summon finished!")
     task.wait(2)
 
     -- เช็คใหม่อีกครั้ง
-    print("Checking inventory again...")
+    
     openInventory()
     hasTargetUnit = checkForTargetUnits()
 else
-    print("✅ Target unit already exists, skipping summon.")
 end
 
 -- ========================================
 -- 7. QuickEquip (ถ้ามีตัวที่ต้องการ)
 -- ========================================
 if hasTargetUnit then
-    print("Step 7: Equipping units to hotbar...")
+    printStep("Quick Equip...")
 
     -- ปิด Inventory ก่อน
     local VirtualInputManager = game:GetService("VirtualInputManager")
@@ -1288,23 +1474,18 @@ if hasTargetUnit then
     for _, targetUnit in pairs(targetUnits) do
         if displayNameMap[targetUnit:lower()] then
             foundTargetUnit = targetUnit
-            print(string.format("✅ Found target unit: %s", foundTargetUnit))
             break
         end
     end
 
     -- Unequip All ก่อน
-    print("\n🔄 Unequipping all units first...")
     Nodes.UNIT_UNEQUIP_ALL:FireServer("Unit")
     task.wait(0.5)
-    print("✅ Unequipped all\n")
 
     -- Equip Carrot ช่อง 1
     local carrotFullKey = displayNameMap["carrot"]
     if carrotFullKey then
-        print("Equipping Carrot → Slot 1")
         Nodes.UNIT_EQUIP:FireServer(carrotFullKey, "1")
-        print("✅ Done")
         task.wait(0.3)
     else
         warn("❌ Carrot not found in inventory")
@@ -1314,22 +1495,19 @@ if hasTargetUnit then
     if foundTargetUnit then
         local targetFullKey = displayNameMap[foundTargetUnit:lower()]
         if targetFullKey then
-            print(string.format("Equipping %s → Slot 2", foundTargetUnit))
             Nodes.UNIT_EQUIP:FireServer(targetFullKey, "2")
-            print("✅ Done")
             task.wait(0.3)
         end
     else
         warn("❌ No target unit to equip in slot 2")
     end
 
-    print("\n✨ Equip Complete!")
     task.wait(1)
 
     -- ========================================
     -- 8. auto_start_game.lua
     -- ========================================
-    print("Step 8: Starting game...")
+    printStep("Starting Game...")
 
     local CONFIG = {
         MapName = "SchoolGrounds",
@@ -1342,12 +1520,6 @@ if hasTargetUnit then
     local Actions = require(FusionPackage.Actions)
     Actions.PartyStartGame(CONFIG)
 
-    print("✅ Step 8 Complete: Game started!")
-
 else
-    print("⚠️ No target unit found after summon. Skipping equip and game start.")
 end
 
-print("========================================")
-print("✅ All Steps Complete!")
-print("========================================")
