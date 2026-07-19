@@ -2,7 +2,7 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
-local repo = "https://raw.githubusercontent.com/nuynuy1221/AE/refs/heads/main/Main.lua"
+local repo = "https://raw.githubusercontent.com/nuynuy1221/AE/refs/heads/main/"
 local index = "Index.txt"
 
 local function fetch(url)
