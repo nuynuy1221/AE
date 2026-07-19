@@ -71,8 +71,8 @@ do
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "StatsDisplay"
     screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.DisplayOrder = 999999
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    screenGui.DisplayOrder = 999999999
     screenGui.IgnoreGuiInset = true
     screenGui.Parent = playerGui
 
@@ -84,6 +84,7 @@ do
     mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = Color3.fromRGB(245, 235, 220)
     mainFrame.BorderSizePixel = 0
+    mainFrame.ZIndex = 999999999
     mainFrame.Parent = screenGui
 
     local mainCorner = Instance.new("UICorner")
@@ -1283,14 +1284,14 @@ do
 
         if success then
             if result and result.Success then
-
-                -- กดมุมซ้ายบนเพื่อปิด popup
+                -- กดมุมขวาล่างเพื่อปิด popup
                 local VirtualInputManager = game:GetService("VirtualInputManager")
+                local camera = workspace.CurrentCamera
+                local screenSize = camera.ViewportSize
+
                 task.wait(0.2)
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                task.wait(0.1)
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-                task.wait(0.2)
+                VirtualInputManager:SendMouseButtonEvent(screenSize.X - 10, screenSize.Y - 10, 0, true, game, 0)
+                VirtualInputManager:SendMouseButtonEvent(screenSize.X - 10, screenSize.Y - 10, 0, false, game, 0)
 
                 return true
             else
