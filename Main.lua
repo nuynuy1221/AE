@@ -302,58 +302,67 @@ do
     if HORST_ENABLED then
         local doneSent = false
 
+        -- ฟังก์ชันส่ง Status
+        local function sendHorstStatus()
+            local success, err = pcall(function()
+                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                if not replica then return end
+
+                local data = replica.Data
+                local itemData = data.ItemData
+                if not itemData then return end
+
+                -- ดึงข้อมูล Stats
+                local level = data.Level or 0
+                local gem = itemData.Gem and itemData.Gem.Amount or 0
+                local gold = itemData.Gold and itemData.Gold.Amount or 0
+                local trait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
+
+                -- สร้าง Status Message
+                local HttpService = game:GetService("HttpService")
+                local json_data = {
+                    Level = level,
+                    Gem = gem,
+                    Gold = gold,
+                    Trait = trait
+                }
+                local encoded_json = HttpService:JSONEncode(json_data)
+
+                local message = string.format("⭐ Level : %d, 💎 Gem : %s, 🪙 Gold : %s, 🎲 Trait : %s",
+                    level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
+
+                -- ส่ง Status Update
+                _G.Horst_SetDescription(message, encoded_json)
+                print("📡 Horst Status Update:", message)
+
+                -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
+                if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
+                    print(string.format("🎯 Gem Target Reached! (%s/%s)", formatNumber(gem), formatNumber(GEM_TARGET)))
+
+                    local ok, doneErr = _G.Horst_AccountChangeDone()
+                    if ok then
+                        print("✅ Horst: Account change DONE sent successfully!")
+                        doneSent = true
+                    else
+                        warn("❌ Horst: Failed to send DONE:", doneErr)
+                    end
+                end
+            end)
+
+            if not success then
+                warn("❌ Horst Status Update Error:", err)
+            end
+        end
+
+        -- ส่งรอบแรกทันที
+        task.wait(1)  -- รอให้ข้อมูล replica พร้อม
+        sendHorstStatus()
+
+        -- วนลูปส่งทุก 30 วิ
         spawn(function()
             while true do
                 task.wait(UPDATE_INTERVAL)
-
-                local success, err = pcall(function()
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    if not replica then return end
-
-                    local data = replica.Data
-                    local itemData = data.ItemData
-                    if not itemData then return end
-
-                    -- ดึงข้อมูล Stats
-                    local level = data.Level or 0
-                    local gem = itemData.Gem and itemData.Gem.Amount or 0
-                    local gold = itemData.Gold and itemData.Gold.Amount or 0
-                    local trait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
-
-                    -- สร้าง Status Message
-                    local HttpService = game:GetService("HttpService")
-                    local json_data = {
-                        Level = level,
-                        Gem = gem,
-                        Gold = gold,
-                        Trait = trait
-                    }
-                    local encoded_json = HttpService:JSONEncode(json_data)
-
-                    local message = string.format("⭐ Level %d, 💎 Gem %s, 🪙 Gold %s, 🎲 Trait %s",
-                        level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
-
-                    -- ส่ง Status Update
-                    _G.Horst_SetDescription(message, encoded_json)
-                    print("📡 Horst Status Update:", message)
-
-                    -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
-                    if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
-                        print(string.format("🎯 Gem Target Reached! (%s/%s)", formatNumber(gem), formatNumber(GEM_TARGET)))
-
-                        local ok, doneErr = _G.Horst_AccountChangeDone()
-                        if ok then
-                            print("✅ Horst: Account change DONE sent successfully!")
-                            doneSent = true
-                        else
-                            warn("❌ Horst: Failed to send DONE:", doneErr)
-                        end
-                    end
-                end)
-
-                if not success then
-                    warn("❌ Horst Status Update Error:", err)
-                end
+                sendHorstStatus()
             end
         end)
 
