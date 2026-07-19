@@ -4,6 +4,17 @@ repeat wait() until game:IsLoaded()
 -- ========================================
 
 -- ========================================
+-- Anti-AFK (โหลดก่อนอันแรก)
+-- ========================================
+local Players = game:GetService("Players")
+local VirtualUser = game:GetService("VirtualUser")
+
+Players.LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- ========================================
 -- CONFIG (รองรับ External Config)
 -- ========================================
 _G.Config = _G.Config or {}
@@ -377,10 +388,17 @@ do
                 end
 
                 -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
-                if GEM_TARGET and gem >= GEM_TARGET and not doneSent and _G.Horst_AccountChangeDone then
-                    local ok, doneErr = _G.Horst_AccountChangeDone()
-                    if ok then
-                        doneSent = true
+                if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
+                    if _G.Horst_AccountChangeDone then
+                        local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
+                        if ok then
+                            print(string.format("📡 Sent DONE: %s Gems", formatNumber(GEM_TARGET)))
+                            doneSent = true
+                        else
+                            warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
+                        end
+                    else
+                        warn("❌ Horst_AccountChangeDone function not found")
                     end
                 end
             end)
