@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 2.07
+-- 2.16
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -2207,7 +2207,6 @@ do
         "30KLIKES!",
         "EXPEDITIONS",
         "AE#1",
-        "SorryForBugs",
         "wfade",
         "RELEASE",
     }
@@ -3322,7 +3321,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                     local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, currentTrait))
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, currentTrait))
 
                     _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
 
@@ -3359,7 +3358,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
                         _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
 
@@ -3478,7 +3477,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                         local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, finalTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, finalTrait))
 
                         _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
 
@@ -3505,7 +3504,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                         local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
 
                         _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
 
