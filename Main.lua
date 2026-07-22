@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 7.35
+-- 7.38
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2978,6 +2978,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 local success = false
                 local finalTrait = currentTrait
 
+                -- เช็คว่า ROLL_UNIT_TRAIT มีอยู่หรือไม่
+                print(string.format("🔍 [Node Check] ROLL_UNIT_TRAIT exists: %s, type: %s",
+                    tostring(Nodes.ROLL_UNIT_TRAIT ~= nil),
+                    type(Nodes.ROLL_UNIT_TRAIT)))
+
+                -- เปิด Trait Reroll Menu ก่อน
+                print("🔓 [Menu] Opening TraitReroll menu...")
+                pcall(function()
+                    Nodes.TOGGLE_MENU:FireSelf("TraitReroll")
+                end)
+                task.wait(1)
+
                 print(string.format("🎲 [Reroll Loop] Starting with %d rerolls available", traitRerolls))
 
                 while attempts < traitRerolls do
@@ -2991,12 +3003,11 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         traitToRoll = targetTrait
                     end
 
-                    -- สุ่ม Trait (ใช้ Actions แทน Nodes)
-                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                    local Actions = require(FusionPackage.Actions)
+                    print(string.format("   Params: fullKey=%s, traitToRoll=%s", unitInfo.fullKey, tostring(traitToRoll)))
 
+                    -- สุ่ม Trait (กลับไปใช้ Nodes + เพิ่ม delay)
                     local rollSuccess, rollError = pcall(function()
-                        Actions.RerollTrait(unitInfo.fullKey, traitToRoll)
+                        Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
                     end)
 
                     if not rollSuccess then
@@ -3007,7 +3018,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     print(string.format("✅ [Attempt %d] FireServer success, waiting for result...", attempts))
 
-                    task.wait(0.5)
+                    task.wait(2)  -- เพิ่ม delay จาก 0.5 เป็น 2 วินาที
 
                     -- เช็ค Trait ใหม่
                     local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
