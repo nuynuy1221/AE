@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.20
+-- 4.25
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -705,8 +705,33 @@ local statsGuiSuccess, statsGuiError = pcall(function()
             end
         end)
 
-        -- ส่งรอบแรกทันที
-        sendHorstStatus()
+        -- ส่งรอบแรกทันที (แต่ไม่เช็ค GEM_TARGET ถ้ามี SummonUnits Config)
+        -- ใช้ flag ชั่วคราวเพื่อข้าม GEM_TARGET check ในรอบแรก
+        local skipFirstGemCheck = hasSummonConfig
+        if skipFirstGemCheck then
+            -- ถ้ามี SummonUnits Config ให้ส่งแค่ Description ไม่ตรวจสอบ GEM_TARGET
+            local success = pcall(function()
+                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                if replica and replica.Data and replica.Data.ItemData then
+                    local data = replica.Data
+                    local itemData = data.ItemData
+                    local level = data.Level or 0
+                    local gem = itemData.Gem and itemData.Gem.Amount or 0
+                    local gold = itemData.Gold and itemData.Gold.Amount or 0
+                    local trait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
+
+                    local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
+                        level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
+
+                    if _G.Horst_SetDescription then
+                        _G.Horst_SetDescription(message, "")
+                    end
+                end
+            end)
+        else
+            -- ถ้าไม่มี SummonUnits Config ให้ทำงานปกติ (รวมเช็ค GEM_TARGET)
+            sendHorstStatus()
+        end
 
         -- Real-time update (เช็คทุก 1 วินาที แทน 0.3 วิ - ประหยัดสเปค)
         spawn(function()
