@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 1.18
+-- 1.52
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -654,6 +654,8 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
                 if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
                     if _G.Horst_AccountChangeDone then
+                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
@@ -2362,7 +2364,9 @@ if GET_TOY_MAKER then
                 local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                 local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s", currentGems, currentRR, currentTrait))
+                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
+
+                task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
@@ -2401,7 +2405,9 @@ if GET_TOY_MAKER then
                     local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                     local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s (Out of RR)", currentGems, currentRR, currentTrait))
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
+
+                    task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
@@ -2460,7 +2466,9 @@ if GET_TOY_MAKER then
                         local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s", currentGems, currentRR, currentTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
+
+                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
@@ -2490,7 +2498,9 @@ if GET_TOY_MAKER then
                 local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                 local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s (Out of RR)", currentGems, currentRR, currentTrait))
+                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
+
+                task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
@@ -2734,6 +2744,8 @@ local function sendSummonStatus(foundUnits, isComplete)
         end)
 
         if isComplete and _G.Horst_AccountChangeDone then
+            task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+
             pcall(_G.Horst_AccountChangeDone)
             _G.ScriptShouldStop = true
             print("✅ Summon completed - Script will stop...")
@@ -3304,6 +3316,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, currentTrait))
 
+                    task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
@@ -3338,6 +3352,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
+
+                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
@@ -3456,6 +3472,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, finalTrait))
 
+                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
@@ -3480,6 +3498,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
+
+                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
