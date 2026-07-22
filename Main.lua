@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.41
+-- 4.51
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2099,6 +2099,40 @@ printStep("Checking Inventory...")
 
 -- ลบฟังก์ชัน openInventory และ closeInventory เพราะไม่จำเป็นแล้ว
 -- ใช้ Nodes.GET_DATA_VALUE:InvokeSelf("UnitData") โดยตรง
+
+-- ฟังก์ชัน Debug: แสดงทุก units ที่มีใน Inventory
+local function debugListAllUnits()
+    local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+    if not unitData then
+        print("⚠️ [Debug] No UnitData found")
+        return
+    end
+
+    local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
+    local allUnits = {}
+
+    for fullKey, data in pairs(unitData) do
+        local internalName = fullKey:match("^(.+)#") or fullKey
+        local unitInfo = UnitInfo[internalName]
+        if unitInfo then
+            local displayName = unitInfo.DisplayName or internalName
+            table.insert(allUnits, displayName)
+        end
+    end
+
+    print("🔍 [Debug] All units in Inventory (" .. #allUnits .. " total):")
+    if #allUnits > 0 then
+        table.sort(allUnits)
+        for _, unitName in ipairs(allUnits) do
+            print("   - " .. unitName)
+        end
+    else
+        print("   (empty)")
+    end
+end
+
+-- เรียกใช้ debug function
+debugListAllUnits()
 
 -- ฟังก์ชันเช็คว่ามี units ใน Inventory (พร้อม Trait)
 local function checkInventoryForUnits(targetUnits, returnWithTrait)
