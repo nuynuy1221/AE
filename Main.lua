@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.16
+-- 5.23
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -2989,12 +2989,16 @@ if hasSummonConfig then
                 if isSecretSummon then break end
             end
 
+            -- Debug log
+            print(string.format("🔍 Debug - isSecretSummon: %s, CHANGE_ACC_SECRETS: %s", tostring(isSecretSummon), tostring(CHANGE_ACC_SECRETS)))
+
             -- ถ้าเป็น Secret + Change_Acc_Secrets = true → Fallback ไป Mythic
             if isSecretSummon and CHANGE_ACC_SECRETS then
                 print("ℹ️ Secret unit not found - checking for Mythic fallback...")
 
                 -- เช็คว่ามี Mythic ใน Inventory หรือไม่
                 local mythicFallback = checkInventoryForUnits(MYTHIC_UNITS)
+                print(string.format("🔍 Debug - Mythic units found: %d", #mythicFallback))
 
                 if #mythicFallback > 0 then
                     print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
