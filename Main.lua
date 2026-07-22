@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.03
+-- 5.16
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -3014,7 +3014,8 @@ if hasSummonConfig then
 end
 
 -- เช็คตัว Legendary (ถ้าไม่มี Summon Config หรือข้ามมาแล้ว)
-if not shouldSummon then
+-- แต่ไม่ override hasTargetUnit ถ้ามีค่าอยู่แล้ว (เช่น จาก Mythic Fallback)
+if not shouldSummon and not hasTargetUnit then
 
     local function checkForTargetUnits()
         local targetUnits = {
@@ -3901,7 +3902,7 @@ if hasTargetUnit then
         end
     end
 
-    -- หา target unit ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น - ไม่ใช่ Mythic/Secret)
+    -- หา target unit ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น - ไม่ว่าจะมี Config หรือไม่)
     local LEGENDARY_UNITS = {
         "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
         "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
