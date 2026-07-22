@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 7.30
+-- 7.35
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2991,9 +2991,12 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         traitToRoll = targetTrait
                     end
 
-                    -- สุ่ม Trait
+                    -- สุ่ม Trait (ใช้ Actions แทน Nodes)
+                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+                    local Actions = require(FusionPackage.Actions)
+
                     local rollSuccess, rollError = pcall(function()
-                        Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
+                        Actions.RerollTrait(unitInfo.fullKey, traitToRoll)
                     end)
 
                     if not rollSuccess then
@@ -3010,9 +3013,12 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
 
                     if not newTrait then
+                        warn(string.format("❌ [Attempt %d] Failed to get new trait", attempts))
                         task.wait(0.3)
                         continue
                     end
+
+                    print(string.format("🔍 [Attempt %d] Old Trait: %s → New Trait: %s", attempts, currentTrait, newTrait))
 
                     finalTrait = newTrait
 
