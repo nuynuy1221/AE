@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.53
+-- 5.03
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -2974,10 +2974,41 @@ if hasSummonConfig then
                 end
             end
         else
-            -- ไม่มีตัว + Gems ไม่พอ → ต้องฟาร์ม Gems ก่อน
+            -- ไม่มีตัว + Gems ไม่พอ → เช็คว่ามี Mythic Fallback หรือไม่
             warn(string.format("⚠️ Target unit not found in inventory. Need to farm more gems. Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
-            print("ℹ️ Script will proceed to farming to collect gems...")
-            -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
+
+            -- เช็คว่า Config เป็น Secret unit หรือไม่
+            local isSecretSummon = false
+            for _, configUnit in ipairs(SUMMON_CONFIG) do
+                for _, secretUnit in ipairs(SECRET_UNITS) do
+                    if configUnit == secretUnit then
+                        isSecretSummon = true
+                        break
+                    end
+                end
+                if isSecretSummon then break end
+            end
+
+            -- ถ้าเป็น Secret + Change_Acc_Secrets = true → Fallback ไป Mythic
+            if isSecretSummon and CHANGE_ACC_SECRETS then
+                print("ℹ️ Secret unit not found - checking for Mythic fallback...")
+
+                -- เช็คว่ามี Mythic ใน Inventory หรือไม่
+                local mythicFallback = checkInventoryForUnits(MYTHIC_UNITS)
+
+                if #mythicFallback > 0 then
+                    print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
+                    sendSummonStatus(mythicFallback, false)
+                    hasTargetUnit = true
+                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) แต่มี hasTargetUnit = true (ไป Trait Reroll)
+                else
+                    print("⚠️ No Mythic fallback found - will proceed to farming")
+                    -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
+                end
+            else
+                print("ℹ️ Script will proceed to farming to collect gems...")
+                -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
+            end
         end
     end
 end
