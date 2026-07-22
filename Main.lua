@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 1.02
+-- 1.12
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -699,7 +699,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
 
         -- Real-time update (เช็คทุก 1 วินาที แทน 0.3 วิ - ประหยัดสเปค)
         spawn(function()
-            while HORST_ENABLED do
+            while HORST_ENABLED and not _G.ScriptShouldStop do
                 task.wait(1)  -- เช็คทุก 1 วินาที (ประหยัดสเปค)
 
                 local success, err = pcall(function()
@@ -2735,6 +2735,8 @@ local function sendSummonStatus(foundUnits, isComplete)
 
         if isComplete and _G.Horst_AccountChangeDone then
             pcall(_G.Horst_AccountChangeDone)
+            _G.ScriptShouldStop = true
+            print("✅ Summon completed - Script will stop...")
         end
     end
 end
