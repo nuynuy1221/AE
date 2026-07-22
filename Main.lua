@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 11.52
+-- 12.11
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -757,7 +757,7 @@ _G.Config = _G.Config or {
 }
 
 -- ========================================
--- เช็คว่าอยู่ในแมพ School Grounds - Act 1 หรือไม่
+-- ฟังก์ชันเช็คแมพ - ต้องเช็คหลัง Stats GUI โหลดเสร็จ
 -- ========================================
 local function isInTargetMap()
     local success, result = pcall(function()
@@ -800,9 +800,8 @@ local function isInToyMakerTournament()
                 local data = mapReplica.Data
                 local parameters = data.Parameters or {}
 
-                -- เช็คว่าเป็น Tournament Mode + competitive act
-                if parameters.Gamemode == "Tournament" and
-                   parameters.ActName == "competitive" then
+                -- เช็คว่าเป็น Tournament Mode (ทุก Act)
+                if parameters.Gamemode == "Tournament" then
                     return true
                 end
             end
@@ -964,11 +963,17 @@ local function applyPerformanceOptimizations()
     end
 end
 
+-- ========================================
+-- เช็คแมพหลังโหลด Stats GUI เสร็จแล้ว
+-- ========================================
+print("🔍 Checking current map...")
+
 -- ตอนนี้อยู่ในแมพหรือไม่
 if isInTargetMap() then
+    print("✅ In Story Mode (School Grounds - Act 1)")
     spawn(function()
         -- ปิด Tutorial popup (ถ้ามี)
-    local function closeTutorial()
+        local function closeTutorial()
         local success = pcall(function()
             local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
             local prompt = playerGui:FindFirstChild("Prompt")
@@ -1842,6 +1847,50 @@ end
 if isInToyMakerTournament() then
     print("🏆 Detected Toy Maker Tournament - Starting 3 minute countdown...")
 
+    -- ปิด Tutorial popup (ถ้ามี)
+    local function closeTutorial()
+        local success = pcall(function()
+            local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
+            local prompt = playerGui:FindFirstChild("Prompt")
+            if not prompt then return end
+
+            local tutorialLabel = prompt.Frame.Frame.Folder.Frame.Frame.Frame.TextLabel
+            if tutorialLabel then
+                local text = tutorialLabel.ContentText or tutorialLabel.Text
+                if text == "Tutorial" then
+                    local closeButton = prompt.Frame.Frame.Folder.Frame:FindFirstChild("PrimaryButton")
+                    if closeButton then
+                        local GuiService = game:GetService("GuiService")
+                        local VirtualInputManager = game:GetService("VirtualInputManager")
+
+                        GuiService.SelectedCoreObject = nil
+                        task.wait(0.1)
+
+                        closeButton.Selectable = true
+                        GuiService.SelectedCoreObject = closeButton
+                        task.wait(0.1)
+
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                        task.wait(0.05)
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+
+                        task.wait(0.2)
+                        GuiService.SelectedCoreObject = nil
+
+                        print("✅ Tutorial closed")
+                        return
+                    end
+                end
+            end
+        end)
+        if not success then
+            print("⚠️ Tutorial popup not found or already closed")
+        end
+    end
+
+    closeTutorial()
+    task.wait(0.5)
+
     local countdown = 180  -- 3 นาที
     while countdown > 0 do
         if countdown % 30 == 0 then  -- print ทุก 30 วิ
@@ -2448,16 +2497,6 @@ if GET_TOY_MAKER then
                             user_id = Players.LocalPlayer.UserId,
                             status = "DONE",
                             description = string.format("Toy Maker (%s / Out of Reroll) | Gems: %d", currentTrait, gems)
-                        })
-                    })
-                end)
-            end
-            return  -- หยุดสคริปต์
-                        Headers = {["Content-Type"] = "application/json"},
-                        Body = HttpService:JSONEncode({
-                            user_id = Players.LocalPlayer.UserId,
-                            status = "DONE",
-                            description = string.format("Toy Maker (%s / Out of Reroll)", currentTrait)
                         })
                     })
                 end)
