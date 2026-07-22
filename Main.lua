@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.23
+-- 5.28
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -2989,16 +2989,12 @@ if hasSummonConfig then
                 if isSecretSummon then break end
             end
 
-            -- Debug log
-            print(string.format("🔍 Debug - isSecretSummon: %s, CHANGE_ACC_SECRETS: %s", tostring(isSecretSummon), tostring(CHANGE_ACC_SECRETS)))
-
             -- ถ้าเป็น Secret + Change_Acc_Secrets = true → Fallback ไป Mythic
             if isSecretSummon and CHANGE_ACC_SECRETS then
                 print("ℹ️ Secret unit not found - checking for Mythic fallback...")
 
                 -- เช็คว่ามี Mythic ใน Inventory หรือไม่
                 local mythicFallback = checkInventoryForUnits(MYTHIC_UNITS)
-                print(string.format("🔍 Debug - Mythic units found: %d", #mythicFallback))
 
                 if #mythicFallback > 0 then
                     print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
@@ -3442,8 +3438,36 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 targetUnitName = availableUnits[1].name
                 print(string.format("   Auto-selected: %s (Priority)", targetUnitName))
             else
+                -- ไม่เจอ Config units → ลอง Fallback ไป Mythic
                 warn("   ⚠️ No summon config units found in inventory")
-                targetUnitName = nil
+
+                -- ถ้าเป็น Secret Summon + Change_Acc_Secrets → ใช้ Mythic Fallback
+                if isSecretSummon and CHANGE_ACC_SECRETS then
+                    print("   ℹ️ Checking Mythic fallback for Trait Reroll...")
+                    local mythicUnits = checkInventoryForUnits(MYTHIC_UNITS, true)
+
+                    if #mythicUnits > 0 then
+                        -- เรียงตาม Priority
+                        table.sort(mythicUnits, function(a, b)
+                            local priorityA = 999
+                            local priorityB = 999
+
+                            for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
+                                if a.name == unitName then priorityA = i end
+                                if b.name == unitName then priorityB = i end
+                            end
+
+                            return priorityA < priorityB
+                        end)
+
+                        targetUnitName = mythicUnits[1].name
+                        print(string.format("   ✅ Auto-selected Mythic fallback: %s (Priority)", targetUnitName))
+                    else
+                        targetUnitName = nil
+                    end
+                else
+                    targetUnitName = nil
+                end
             end
         else
             warn("   ⚠️ Cannot use 'auto' without SummonConfig or target unit")
