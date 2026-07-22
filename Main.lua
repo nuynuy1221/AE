@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 12.51
+-- 1.02
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -217,6 +217,12 @@ end
 -- 0. StatsGUI (โหลดก่อนอันแรก)
 -- ========================================
 printStep("Loading Stats GUI...")
+
+-- ========================================
+-- Global Flag สำหรับหยุดสคริปต์
+-- ========================================
+_G.ScriptShouldStop = false  -- ใช้ _G เพื่อให้เข้าถึงได้ทุกที่
+
 local statsGuiSuccess, statsGuiError = pcall(function()
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -651,6 +657,8 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag เพื่อหยุดสคริปต์หลัก
+                            print("✅ GEM_TARGET reached - Script will stop...")
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
                         end
@@ -967,6 +975,12 @@ end
 -- เช็คแมพหลังโหลด Stats GUI เสร็จแล้ว
 -- ========================================
 print("🔍 Checking current map...")
+
+-- เช็ค flag ก่อนทำงานต่อ
+if _G.ScriptShouldStop then
+    print("⛔ Script stopped by DONE signal")
+    return
+end
 
 -- ตอนนี้อยู่ในแมพหรือไม่
 if isInTargetMap() then
@@ -2353,9 +2367,15 @@ if GET_TOY_MAKER then
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
+                        _G.ScriptShouldStop = true
+                        print("✅ GEM_TARGET reached - Script will stop...")
+                        return
                     end
                 else
                     _G.Horst_AccountChangeDone()
+                    _G.ScriptShouldStop = true
+                    print("✅ Toy Maker has target trait - Script will stop...")
+                    return
                 end
             end
             return  -- หยุดสคริปต์
@@ -2386,9 +2406,15 @@ if GET_TOY_MAKER then
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ GEM_TARGET reached - Script will stop...")
+                            return
                         end
                     else
                         _G.Horst_AccountChangeDone()
+                        _G.ScriptShouldStop = true
+                        print("✅ Toy Maker out of RR - Script will stop...")
+                        return
                     end
                 end
                 return  -- หยุดสคริปต์
@@ -2439,9 +2465,15 @@ if GET_TOY_MAKER then
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
+                                _G.ScriptShouldStop = true
+                                print("✅ GEM_TARGET reached - Script will stop...")
+                                return
                             end
                         else
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ Toy Maker trait reroll succeeded - Script will stop...")
+                            return
                         end
                     end
                     return  -- หยุดสคริปต์
@@ -2463,9 +2495,15 @@ if GET_TOY_MAKER then
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
+                        _G.ScriptShouldStop = true
+                        print("✅ GEM_TARGET reached - Script will stop...")
+                        return
                     end
                 else
                     _G.Horst_AccountChangeDone()
+                    _G.ScriptShouldStop = true
+                    print("✅ Toy Maker all rerolls used - Script will stop...")
+                    return
                 end
             end
             return  -- หยุดสคริปต์
@@ -3267,9 +3305,15 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ GEM_TARGET reached - Script will stop...")
+                            return
                         end
                     else
                         _G.Horst_AccountChangeDone()
+                        _G.ScriptShouldStop = true
+                        print("✅ Trait Reroll completed - Script will stop...")
+                        return
                     end
                 end
             else
@@ -3296,9 +3340,15 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
+                                _G.ScriptShouldStop = true
+                                print("✅ GEM_TARGET reached - Script will stop...")
+                                return
                             end
                         else
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ Out of RR - Script will stop...")
+                            return
                         end
                     end
                 else
@@ -3407,9 +3457,15 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
+                                _G.ScriptShouldStop = true
+                                print("✅ GEM_TARGET reached - Script will stop...")
+                                return
                             end
                         else
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ Trait Reroll succeeded - Script will stop...")
+                            return
                         end
                     end
                 else
@@ -3426,9 +3482,15 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
+                                _G.ScriptShouldStop = true
+                                print("✅ GEM_TARGET reached - Script will stop...")
+                                return
                             end
                         else
                             _G.Horst_AccountChangeDone()
+                            _G.ScriptShouldStop = true
+                            print("✅ All rerolls used - Script will stop...")
+                            return
                         end
                     end
                 end
