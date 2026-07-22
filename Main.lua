@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 2.54
+-- 4.14
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -103,6 +103,9 @@ local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D 
 -- Toy Maker Tournament Config
 local GET_TOY_MAKER = _G.Config.GetToyMaker == true  -- false = ไม่ต้องทำอะไร
 local TARGET_TRAIT_TOY_MAKER = _G.Config.TargetTraitToyMaker or {"Unbound", "Primordial", "Forsaken", "Draconic"}
+
+-- Secret Unit Config
+local CHANGE_ACC_SECRETS = _G.Config.Change_Acc_Secrets == true  -- true = ส่ง DONE หลัง Trait Reroll ของ Secret, false = ข้ามไปฟาร์มตามปกติ
 
 -- Summon Config
 local SUMMON_CONFIG = _G.Config.SummonUnits or {}
@@ -2380,30 +2383,30 @@ if GET_TOY_MAKER then
                         _G.Horst_AccountChangeDone()
                         print("✅ GEM_TARGET reached - Script will stop...")
 
-                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                         while true do
-                            task.wait(5)
                             pcall(function()
                                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                 local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                 local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                                 _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
                             end)
+                            task.wait(5)
                         end
                     end
                 else
                     _G.Horst_AccountChangeDone()
                     print("✅ Toy Maker has target trait - Script will stop...")
 
-                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                    -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                     while true do
-                        task.wait(5)
                         pcall(function()
                             local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                             local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                             local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                             _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
                         end)
+                        task.wait(5)
                     end
                 end
             end
@@ -2441,30 +2444,30 @@ if GET_TOY_MAKER then
                             _G.Horst_AccountChangeDone()
                             print("✅ GEM_TARGET reached - Script will stop...")
 
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                             while true do
-                                task.wait(5)
                                 pcall(function()
                                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                     local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                     local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
                                 end)
+                                task.wait(5)
                             end
                         end
                     else
                         _G.Horst_AccountChangeDone()
                         print("✅ Toy Maker out of RR - Script will stop...")
 
-                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                         while true do
-                            task.wait(5)
                             pcall(function()
                                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                 local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                 local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                                 _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
                             end)
+                            task.wait(5)
                         end
                     end
                 end
@@ -2537,15 +2540,15 @@ if GET_TOY_MAKER then
                             _G.Horst_AccountChangeDone()
                             print("✅ Toy Maker trait reroll succeeded - Script will stop...")
 
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                             while true do
-                                task.wait(5)
                                 pcall(function()
                                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                     local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                     local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
                                 end)
+                                task.wait(5)
                             end
                         end
                     end
@@ -2574,15 +2577,15 @@ if GET_TOY_MAKER then
                         _G.Horst_AccountChangeDone()
                         print("✅ GEM_TARGET reached - Script will stop...")
 
-                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
                         while true do
-                            task.wait(5)
                             pcall(function()
                                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                 local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                 local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
                                 _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
                             end)
+                            task.wait(5)
                         end
                     end
                 else
@@ -3312,6 +3315,21 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
     local targetUnitName = traitRerollTargetUnit
     local targetTrait = TRAIT_REROLL_CONFIG.TargetTrait
 
+    -- เช็คว่า SUMMON_CONFIG เป็น Secret unit หรือไม่
+    local isSecretSummon = false
+    if hasSummonConfig and CHANGE_ACC_SECRETS then  -- ต้องเปิด Config ด้วย
+        for _, configUnit in ipairs(SUMMON_CONFIG) do
+            for _, secretUnit in ipairs(SECRET_UNITS) do
+                if configUnit == secretUnit then
+                    isSecretSummon = true
+                    print(string.format("   ℹ️ Config targets Secret unit '%s' + Change_Acc_Secrets enabled - will send DONE after Trait Reroll", configUnit))
+                    break
+                end
+            end
+            if isSecretSummon then break end
+        end
+    end
+
     -- ถ้า TargetUnit เป็น "auto" → เลือกตาม Priority
     if targetUnitName == "auto" then
         if hasSummonConfig and hasTargetUnit then
@@ -3406,16 +3424,53 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
+                    -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                    if isSecretSummon then
+                        _G.Horst_AccountChangeDone()
+                        print("✅ Secret unit Trait completed - Script will stop...")
+
+                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        while true do
+                            pcall(function()
+                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
+                            end)
+                            task.wait(5)
+                        end
+                    end
+
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
                             print("✅ GEM_TARGET reached - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
+                                end)
+                                task.wait(5)
+                            end
                         end
                     else
                         _G.Horst_AccountChangeDone()
                         print("✅ Trait Reroll completed - Script will stop...")
-                        return
+
+                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        while true do
+                            pcall(function()
+                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
+                            end)
+                            task.wait(5)
+                        end
                     end
                 end
             else
@@ -3443,16 +3498,53 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            _G.Horst_AccountChangeDone()
+                            print("✅ Secret unit (Out of RR) - Script will stop...")
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                end)
+                                task.wait(5)
+                            end
+                        end
+
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
                                 print("✅ GEM_TARGET reached - Script will stop...")
-                                return
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         else
                             _G.Horst_AccountChangeDone()
                             print("✅ Out of RR - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                end)
+                                task.wait(5)
+                            end
                         end
                     end
                 else
@@ -3574,16 +3666,53 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            _G.Horst_AccountChangeDone()
+                            print("✅ Secret unit Trait succeeded - Script will stop...")
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
+                                end)
+                                task.wait(5)
+                            end
+                        end
+
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
                                 print("✅ GEM_TARGET reached - Script will stop...")
-                                return
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         else
                             _G.Horst_AccountChangeDone()
                             print("✅ Trait Reroll succeeded - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
+                                end)
+                                task.wait(5)
+                            end
                         end
                     end
                 else
@@ -3601,16 +3730,53 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            _G.Horst_AccountChangeDone()
+                            print("✅ Secret unit (all rerolls used) - Script will stop...")
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                end)
+                                task.wait(5)
+                            end
+                        end
+
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
                                 print("✅ GEM_TARGET reached - Script will stop...")
-                                return
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         else
                             _G.Horst_AccountChangeDone()
                             print("✅ All rerolls used - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                end)
+                                task.wait(5)
+                            end
                         end
                     end
                 end
