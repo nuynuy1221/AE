@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 2.45
+-- 2.54
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -3487,6 +3487,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 local finalTrait = currentTrait
 
                 while attempts < traitRerolls do
+                    -- เช็ค RR ปัจจุบันก่อนสุ่มแต่ละรอบ
+                    local currentReplica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local currentRR = 0
+                    if currentReplica and currentReplica.Data and currentReplica.Data.ItemData and currentReplica.Data.ItemData.TraitReroll then
+                        currentRR = currentReplica.Data.ItemData.TraitReroll.Amount or 0
+                    end
+
+                    if currentRR <= 0 then
+                        print(string.format("⚠️ Out of RR during reroll (attempt %d/%d)", attempts, traitRerolls))
+                        break
+                    end
+
                     attempts = attempts + 1
 
                     -- กำหนด Trait ที่จะส่งไป
