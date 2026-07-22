@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.38
+-- 4.41
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2286,6 +2286,11 @@ if hasSummonConfig then
         SUMMON_CONFIG = allTargets
     end
 
+    -- Debug: แสดง SUMMON_CONFIG
+    print("🔍 [Debug] SUMMON_CONFIG:", table.concat(SUMMON_CONFIG, ", "))
+    print("🔍 [Debug] hasSummonConfig:", hasSummonConfig)
+    print("🔍 [Debug] autoSummonMode:", autoSummonMode)
+
     -- เช็ค Level และ Gems
     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
     local level = replica and replica.Data and replica.Data.Level or 0
@@ -2296,6 +2301,14 @@ if hasSummonConfig then
 
         -- เช็คว่ามีตัวที่ต้องการใน Inventory แล้วหรือยัง
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
+
+        -- Debug: แสดงผลการเช็ค Inventory
+        print("🔍 [Debug] foundInInventory count:", #foundInInventory)
+        if #foundInInventory > 0 then
+            print("🔍 [Debug] Found units:", table.concat(foundInInventory, ", "))
+        else
+            print("🔍 [Debug] No units found in inventory")
+        end
 
         if autoSummonMode then
             -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
