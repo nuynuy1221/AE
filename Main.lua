@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.31
+-- 4.38
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -101,13 +101,20 @@ local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D 
 
 -- Summon Config
 local SUMMON_CONFIG = _G.Config.SummonUnits or {}
--- ถ้าเป็น string ("auto") ให้แปลงเป็น table ชั่วคราว
+-- ถ้าเป็น string ให้แปลงเป็น table (ยกเว้น "auto" จะถูก override ภายหลัง)
 if type(SUMMON_CONFIG) == "string" then
-    SUMMON_CONFIG = {}  -- จะถูก override ภายหลัง
+    if SUMMON_CONFIG:lower() == "auto" then
+        SUMMON_CONFIG = {}  -- จะถูก override เป็น Secret + Mythic ภายหลัง
+    else
+        SUMMON_CONFIG = {SUMMON_CONFIG}  -- แปลง "Shadow" → {"Shadow"}
+    end
 end
 local MYTHIC_UNITS = {"Cursed Student", "Elf Mage", "Flame Emperor", "Hollow", "Lady Giant", "Puppet", "Salmon Sorcerer", "String Demon"}
 local SECRET_UNITS = {"Shadow"}
-local hasSummonConfig = _G.Config.SummonUnits and (_G.Config.SummonUnits == "auto" or #_G.Config.SummonUnits > 0)
+local hasSummonConfig = _G.Config.SummonUnits and (
+    (type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits ~= "") or
+    (type(_G.Config.SummonUnits) == "table" and #_G.Config.SummonUnits > 0)
+)
 
 -- Trait Reroll Config
 local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
