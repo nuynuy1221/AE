@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 2.16
+-- 2.45
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -659,13 +659,12 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                             _G.Horst_SetDescription(message, encoded_json)
                         end
 
-                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE
                             print("✅ GEM_TARGET reached - Script will stop...")
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
@@ -2380,12 +2379,32 @@ if GET_TOY_MAKER then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
                         print("✅ GEM_TARGET reached - Script will stop...")
-                        return
+
+                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        while true do
+                            task.wait(5)
+                            pcall(function()
+                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
+                            end)
+                        end
                     end
                 else
                     _G.Horst_AccountChangeDone()
                     print("✅ Toy Maker has target trait - Script will stop...")
-                    return
+
+                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                    while true do
+                        task.wait(5)
+                        pcall(function()
+                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
+                        end)
+                    end
                 end
             end
             return  -- หยุดสคริปต์
@@ -2421,12 +2440,32 @@ if GET_TOY_MAKER then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
                             print("✅ GEM_TARGET reached - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                task.wait(5)
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
+                                end)
+                            end
                         end
                     else
                         _G.Horst_AccountChangeDone()
                         print("✅ Toy Maker out of RR - Script will stop...")
-                        return
+
+                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        while true do
+                            task.wait(5)
+                            pcall(function()
+                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
+                            end)
+                        end
                     end
                 end
                 return  -- หยุดสคริปต์
@@ -2482,12 +2521,32 @@ if GET_TOY_MAKER then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
                                 print("✅ GEM_TARGET reached - Script will stop...")
-                                return
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    task.wait(5)
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
+                                    end)
+                                end
                             end
                         else
                             _G.Horst_AccountChangeDone()
                             print("✅ Toy Maker trait reroll succeeded - Script will stop...")
-                            return
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                task.wait(5)
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
+                                end)
+                            end
                         end
                     end
                     return  -- หยุดสคริปต์
@@ -2514,12 +2573,32 @@ if GET_TOY_MAKER then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
                         print("✅ GEM_TARGET reached - Script will stop...")
-                        return
+
+                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                        while true do
+                            task.wait(5)
+                            pcall(function()
+                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
+                            end)
+                        end
                     end
                 else
                     _G.Horst_AccountChangeDone()
                     print("✅ Toy Maker all rerolls used - Script will stop...")
-                    return
+
+                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                    while true do
+                        task.wait(5)
+                        pcall(function()
+                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
+                        end)
+                    end
                 end
             end
             return  -- หยุดสคริปต์
