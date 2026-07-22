@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.17
+-- 5.21
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -215,7 +215,7 @@ end
 -- 0. StatsGUI (โหลดก่อนอันแรก)
 -- ========================================
 printStep("Loading Stats GUI...")
-do
+local statsGuiSuccess, statsGuiError = pcall(function()
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local RunService = game:GetService("RunService")
@@ -742,6 +742,10 @@ do
             end
         end)
     end
+end)
+
+if not statsGuiSuccess then
+    warn("❌ StatsGUI failed to load:", statsGuiError)
 end
 task.wait(1)
 
