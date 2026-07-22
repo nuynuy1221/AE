@@ -1,5 +1,9 @@
 repeat wait() until game:IsLoaded()
--- 12.22
+-- 12.51
+-- ========================================
+-- Main Script - รวมทุกฟังก์ชันตามลำดับ
+-- เพิ่ม: Toy Maker Tournament Mode
+-- ========================================
 
 -- ========================================
 -- 0. Check PlayerGui (ต้องโหลดก่อนทุกอย่าง)
@@ -632,7 +636,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 }
                 local encoded_json = HttpService:JSONEncode(json_data)
 
-                local message = string.format("⭐ Level : %d, 💎 Gem : %s, 🪙 Gold : %s, 🎲 Trait : %s",
+                local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
                     level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
 
                 -- ส่ง Status Update
@@ -2339,29 +2343,20 @@ if GET_TOY_MAKER then
             -- Trait ตรงแล้ว - ส่ง DONE
             print(string.format("✅ Toy Maker has target trait: %s", currentTrait))
 
-            if HORST_ENABLED then
-                pcall(function()
-                    local HttpService = game:GetService("HttpService")
-                    local request = http_request or request or (syn and syn.request)
+            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                    -- ดึงจำนวน Gems
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local gems = 0
-                    if replica and replica.Data and replica.Data.Currencies then
-                        gems = replica.Data.Currencies.Gems or 0
+                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s", currentGems, currentRR, currentTrait))
+
+                if GEM_TARGET then
+                    if currentGems >= GEM_TARGET then
+                        _G.Horst_AccountChangeDone()
                     end
-
-                    request({
-                        Url = "https://horst.gg/api/update",
-                        Method = "POST",
-                        Headers = {["Content-Type"] = "application/json"},
-                        Body = HttpService:JSONEncode({
-                            user_id = Players.LocalPlayer.UserId,
-                            status = "DONE",
-                            description = string.format("Toy Maker (%s) | Gems: %d", currentTrait, gems)
-                        })
-                    })
-                end)
+                else
+                    _G.Horst_AccountChangeDone()
+                end
             end
             return  -- หยุดสคริปต์
         else
@@ -2381,28 +2376,20 @@ if GET_TOY_MAKER then
                 -- หมด Reroll แล้ว - ส่ง DONE พร้อมสถานะ
                 print(string.format("❌ Out of Trait Rerolls - Final Trait: %s", currentTrait))
 
-                if HORST_ENABLED then
-                    pcall(function()
-                        local HttpService = game:GetService("HttpService")
-                        local request = http_request or request or (syn and syn.request)
+                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                    local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                        -- ดึงจำนวน Gems
-                        local gems = 0
-                        if replica and replica.Data and replica.Data.Currencies then
-                            gems = replica.Data.Currencies.Gems or 0
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s (Out of RR)", currentGems, currentRR, currentTrait))
+
+                    if GEM_TARGET then
+                        if currentGems >= GEM_TARGET then
+                            _G.Horst_AccountChangeDone()
                         end
-
-                        request({
-                            Url = "https://horst.gg/api/update",
-                            Method = "POST",
-                            Headers = {["Content-Type"] = "application/json"},
-                            Body = HttpService:JSONEncode({
-                                user_id = Players.LocalPlayer.UserId,
-                                status = "DONE",
-                                description = string.format("Toy Maker (%s / Out of Reroll) | Gems: %d", currentTrait, gems)
-                            })
-                        })
-                    end)
+                    else
+                        _G.Horst_AccountChangeDone()
+                    end
                 end
                 return  -- หยุดสคริปต์
             end
@@ -2442,29 +2429,20 @@ if GET_TOY_MAKER then
                 if gotTarget then
                     print(string.format("✅ Toy Maker | Trait: %s | Used: %d | Left: %d", currentTrait, rerollCount, maxRerolls - rerollCount))
 
-                    if HORST_ENABLED then
-                        pcall(function()
-                            local HttpService = game:GetService("HttpService")
-                            local request = http_request or request or (syn and syn.request)
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                        local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                            -- ดึงจำนวน Gems
-                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                            local gems = 0
-                            if replica and replica.Data and replica.Data.Currencies then
-                                gems = replica.Data.Currencies.Gems or 0
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s", currentGems, currentRR, currentTrait))
+
+                        if GEM_TARGET then
+                            if currentGems >= GEM_TARGET then
+                                _G.Horst_AccountChangeDone()
                             end
-
-                            request({
-                                Url = "https://horst.gg/api/update",
-                                Method = "POST",
-                                Headers = {["Content-Type"] = "application/json"},
-                                Body = HttpService:JSONEncode({
-                                    user_id = Players.LocalPlayer.UserId,
-                                    status = "DONE",
-                                    description = string.format("Toy Maker (%s) | Gems: %d", currentTrait, gems)
-                                })
-                            })
-                        end)
+                        else
+                            _G.Horst_AccountChangeDone()
+                        end
                     end
                     return  -- หยุดสคริปต์
                 end
@@ -2475,29 +2453,20 @@ if GET_TOY_MAKER then
             -- ใช้ Reroll หมดแล้ว
             print(string.format("⚠️ Toy Maker | Final Trait: %s | Used: %d (all rerolls)", currentTrait, rerollCount))
 
-            if HORST_ENABLED then
-                pcall(function()
-                    local HttpService = game:GetService("HttpService")
-                    local request = http_request or request or (syn and syn.request)
+            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                    -- ดึงจำนวน Gems
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local gems = 0
-                    if replica and replica.Data and replica.Data.Currencies then
-                        gems = replica.Data.Currencies.Gems or 0
+                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: %s (Out of RR)", currentGems, currentRR, currentTrait))
+
+                if GEM_TARGET then
+                    if currentGems >= GEM_TARGET then
+                        _G.Horst_AccountChangeDone()
                     end
-
-                    request({
-                        Url = "https://horst.gg/api/update",
-                        Method = "POST",
-                        Headers = {["Content-Type"] = "application/json"},
-                        Body = HttpService:JSONEncode({
-                            user_id = Players.LocalPlayer.UserId,
-                            status = "DONE",
-                            description = string.format("Toy Maker (%s / Out of Reroll) | Gems: %d", currentTrait, gems)
-                        })
-                    })
-                end)
+                else
+                    _G.Horst_AccountChangeDone()
+                end
             end
             return  -- หยุดสคริปต์
         end
@@ -2721,7 +2690,7 @@ local function sendSummonStatus(foundUnits, isComplete)
     end
 
     if #descParts > 0 then
-        local message = table.concat(descParts, " | ")
+        local message = table.concat(descParts, " • ")
         pcall(function()
             _G.Horst_SetDescription(message, "")
         end)
@@ -3288,17 +3257,19 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 print(string.format("✅ %s already has target Trait: %s", targetUnitName, currentTrait))
 
                 -- ส่ง Horst Description + DONE
-                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                    _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, currentTrait))
+                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                    local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, currentTrait))
 
                     if GEM_TARGET then
-                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         if currentGems >= GEM_TARGET then
-                            _G.Horst_Done()
+                            _G.Horst_AccountChangeDone()
                         end
                     else
-                        _G.Horst_Done()
+                        _G.Horst_AccountChangeDone()
                     end
                 end
             else
@@ -3316,16 +3287,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     warn("❌ No Trait Reroll items available")
 
                     -- ส่ง Horst Description + DONE (Out of RR)
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                        _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, currentTrait))
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                        local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
                         if GEM_TARGET then
-                            local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                             if currentGems >= GEM_TARGET then
-                                _G.Horst_Done()
+                                _G.Horst_AccountChangeDone()
                             end
                         else
-                            _G.Horst_Done()
+                            _G.Horst_AccountChangeDone()
                         end
                     end
                 else
@@ -3424,34 +3397,38 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         targetUnitName, finalTrait, attempts, traitRerolls - attempts))
 
                     -- สำเร็จ
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                        _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, finalTrait))
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                        local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                        local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, finalTrait))
 
                         if GEM_TARGET then
-                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                            local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                             if currentGems >= GEM_TARGET then
-                                _G.Horst_Done()
+                                _G.Horst_AccountChangeDone()
                             end
                         else
-                            _G.Horst_Done()
+                            _G.Horst_AccountChangeDone()
                         end
                     end
                 else
                     -- ใช้หมด
                     print(string.format("⚠️ %s | Final Trait: %s | Used: %d (all rerolls)", targetUnitName, finalTrait, traitRerolls))
 
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                        _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, finalTrait))
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
+                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                        local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                        local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
 
                         if GEM_TARGET then
-                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                            local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                             if currentGems >= GEM_TARGET then
-                                _G.Horst_Done()
+                                _G.Horst_AccountChangeDone()
                             end
                         else
-                            _G.Horst_Done()
+                            _G.Horst_AccountChangeDone()
                         end
                     end
                 end
