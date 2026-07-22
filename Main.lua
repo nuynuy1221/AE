@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.14
+-- 4.20
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -655,7 +655,8 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 end
 
                 -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
-                if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
+                -- ⚠️ ข้ามการเช็คถ้ามี SummonUnits Config (ต้องให้ไปสุ่มก่อน)
+                if GEM_TARGET and gem >= GEM_TARGET and not doneSent and not hasSummonConfig then
                     if _G.Horst_AccountChangeDone then
                         -- ส่ง Description ก่อน
                         if _G.Horst_SetDescription then
@@ -668,7 +669,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                         if ok then
                             doneSent = true
                             _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE
-                            print("✅ GEM_TARGET reached - Script will stop...")
+                            print("✅ GEM_TARGET reached (no summon config) - Script will stop...")
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
                         end
