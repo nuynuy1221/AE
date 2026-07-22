@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.21
+-- 7.15
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -139,9 +139,6 @@ local TRAIT_REROLL_PRIORITY = {
     "Salmon Sorcerer",  -- Priority 8 (Mythic)
     "String Demon"      -- Priority 9 (Mythic)
 }
-
--- Secret Units ที่ไม่แสดงในหน้า Banner
-local SECRET_UNITS = {"Shadow"}
 
 local function printStep(stepName)
     print(string.format("🔄 %s", stepName))
@@ -868,28 +865,31 @@ local function applyPerformanceOptimizations()
     end
 
     for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("Texture") or obj:IsA("Decal") then
-            obj.Transparency = 1
-        elseif obj:IsA("SurfaceAppearance") then
-            obj:Destroy()
-        elseif obj:IsA("Part") or obj:IsA("Union") or obj:IsA("CornerWedgePart") or obj:IsA("TrussPart") or obj:IsA("UnionOperation") then
-            obj.Material = "Plastic"
-            obj.Color = Color3.fromRGB(128, 128, 128)
-            obj.Reflectance = 0
-        elseif obj:IsA("MeshPart") then
-            obj.Material = "Plastic"
-            obj.Color = Color3.fromRGB(128, 128, 128)
-            obj.Reflectance = 0
-            obj.TextureID = ""
-        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
-            pcall(function()
-                obj.Lifetime = NumberRange.new(0, 0)
-            end)
-        elseif obj:IsA("Explosion") then
-            obj.BlastPressure = 1
-            obj.BlastRadius = 1
-        elseif obj:IsA("Fire") or obj:IsA("SpotLight") or obj:IsA("Smoke") then
-            obj.Enabled = false
+        local success, err = pcall(function()
+            if obj:IsA("Texture") or obj:IsA("Decal") then
+                obj.Transparency = 1
+            elseif obj:IsA("SurfaceAppearance") then
+                obj:Destroy()
+            elseif obj:IsA("Part") or obj:IsA("Union") or obj:IsA("CornerWedgePart") or obj:IsA("TrussPart") or obj:IsA("UnionOperation") then
+                obj.Material = "Plastic"
+                obj.Color = Color3.fromRGB(128, 128, 128)
+                obj.Reflectance = 0
+            elseif obj:IsA("MeshPart") then
+                obj.Material = "Plastic"
+                obj.Color = Color3.fromRGB(128, 128, 128)
+                obj.Reflectance = 0
+                obj.TextureID = ""
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
+                obj.Enabled = false
+            elseif obj:IsA("Explosion") then
+                obj.BlastPressure = 1
+                obj.BlastRadius = 1
+            elseif obj:IsA("Fire") or obj:IsA("SpotLight") or obj:IsA("Smoke") then
+                obj.Enabled = false
+            end
+        end)
+        if not success then
+            print(string.format("⚠️ [Performance] Failed to modify %s (%s): %s", obj.Name, obj.ClassName, tostring(err)))
         end
     end
 
@@ -902,24 +902,24 @@ local function applyPerformanceOptimizations()
     for _, player in pairs(game.Players:GetPlayers()) do
         if player.Character then
             for _, part in pairs(player.Character:GetDescendants()) do
-                if part:IsA("Texture") or part:IsA("Decal") then
-                    part.Transparency = 1
-                elseif part:IsA("MeshPart") then
-                    part.TextureID = ""
-                    part.Material = "Plastic"
-                    part.Color = Color3.fromRGB(128, 128, 128)
-                    part.Reflectance = 0
-                elseif part:IsA("BasePart") then
-                    part.Material = "Plastic"
-                    part.Color = Color3.fromRGB(128, 128, 128)
-                    part.Reflectance = 0
-                elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
-                    pcall(function()
-                        part.Lifetime = NumberRange.new(0, 0)
-                    end)
-                elseif part:IsA("Fire") or part:IsA("SpotLight") or part:IsA("Smoke") then
-                    part.Enabled = false
-                end
+                pcall(function()
+                    if part:IsA("Texture") or part:IsA("Decal") then
+                        part.Transparency = 1
+                    elseif part:IsA("MeshPart") then
+                        part.TextureID = ""
+                        part.Material = "Plastic"
+                        part.Color = Color3.fromRGB(128, 128, 128)
+                        part.Reflectance = 0
+                    elseif part:IsA("BasePart") then
+                        part.Material = "Plastic"
+                        part.Color = Color3.fromRGB(128, 128, 128)
+                        part.Reflectance = 0
+                    elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+                        part.Enabled = false
+                    elseif part:IsA("Fire") or part:IsA("SpotLight") or part:IsA("Smoke") then
+                        part.Enabled = false
+                    end
+                end)
             end
         end
     end
@@ -1591,6 +1591,13 @@ if isInTargetMap() then
 
             print("🔄 [Wave Reset] Selling all existing units...")
 
+            -- ดึง playerReplica ใหม่
+            local playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
+            if not playerReplica then
+                warn("❌ [sellAllUnits] Failed to get playerReplica")
+                return false
+            end
+
             -- Method 1: ใช้ Dependencies.GameUnits (เร็วกว่า)
             local success1 = pcall(function()
                 local dependenciesModule = ReplicatedStorage:FindFirstChild("Dependencies")
@@ -1752,16 +1759,16 @@ if isInTargetMap() then
                                             pcall(function()
                                                 game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
                                             end)
-
-                                        return  -- หยุดสคริปต์
+                                            return  -- หยุดสคริปต์
+                                        else
+                                            warn("⚠️ [Wave Reset] No target units found in banner - continuing farming")
+                                        end
                                     else
-                                        warn("⚠️ [Wave Reset] No target units found in banner - continuing farming")
+                                        warn("⚠️ [Wave Reset] Failed to check banner (timeout or error) - continuing farming")
                                     end
-                                else
-                                    warn("⚠️ [Wave Reset] Failed to check banner (timeout or error) - continuing farming")
                                 end
                             else
-                                print(string.format("   ⏭️ Gems < 10000 - skipping banner check"))
+                                print(string.format("   ⏭️ Gems < 2500 - skipping banner check"))
                             end
                         else
                             warn("⚠️ [Wave Reset] Failed to get Replica for banner check")
@@ -1857,12 +1864,26 @@ task.wait(1)
 local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
 local Actions = require(FusionPackage.Actions)
 
+-- เริ่มต้น: ขาย Rare + Epic เท่านั้น (ไม่ขาย Legendary)
 for _, rarity in ipairs({"Rare", "Epic"}) do
     pcall(function()
         Actions.ToggleAutoSell("Standard", rarity, false, true)
     end)
     task.wait(0.3)
 end
+
+-- เปิดขาย Shiny units ทุก Rarity (Rare, Epic)
+print("🔧 Enabling Shiny AutoSell...")
+for _, rarity in ipairs({"Rare", "Epic"}) do
+    pcall(function()
+        -- Parameter 3 = true หมายถึง Shiny
+        Actions.ToggleAutoSell("Standard", rarity, true, true)
+    end)
+    task.wait(0.3)
+end
+
+print("✅ AutoSell enabled: Rare, Epic (including Shiny)")
+print("ℹ️ Legendary AutoSell will be enabled after obtaining Legendary units")
 
 task.wait(1)
 
@@ -2150,12 +2171,13 @@ local function checkInventoryForUnits(targetUnits, returnWithTrait)
             for _, targetUnit in ipairs(targetUnits) do
                 if displayName == targetUnit then
                     if returnWithTrait then
-                        -- return พร้อม Trait
+                        -- return พร้อม Trait และ Shiny
                         table.insert(foundUnits, {
                             name = displayName,
                             trait = data.Trait or "None",
                             fullKey = fullKey,
-                            unitID = data.ID
+                            unitID = data.ID,
+                            isShiny = data.Shiny or false
                         })
                     else
                         -- return แค่ชื่อ
@@ -2201,36 +2223,68 @@ local function selectBestUnitForReroll(units)
         traitPriorityMap[traitName] = priority
     end
 
-    -- แยกตัวที่ Trait = None
-    local noneUnits = {}
-    local withTraitUnits = {}
+    -- แยก Shiny และ Non-Shiny
+    local shinyUnits = {}
+    local normalUnits = {}
 
     for _, unit in ipairs(units) do
-        if unit.trait == "None" then
-            table.insert(noneUnits, unit)
+        if unit.isShiny then
+            table.insert(shinyUnits, unit)
         else
-            table.insert(withTraitUnits, unit)
+            table.insert(normalUnits, unit)
         end
     end
 
-    -- ถ้ามีตัวที่ Trait = None → เลือกตัวแรก
-    if #noneUnits > 0 then
-        return noneUnits[1]
+    -- ฟังก์ชันเลือกตัวที่ดีที่สุดจาก list
+    local function selectFromList(list)
+        if #list == 0 then return nil end
+        if #list == 1 then return list[1] end
+
+        -- แยกตัวที่ Trait = None
+        local noneUnits = {}
+        local withTraitUnits = {}
+
+        for _, unit in ipairs(list) do
+            if unit.trait == "None" then
+                table.insert(noneUnits, unit)
+            else
+                table.insert(withTraitUnits, unit)
+            end
+        end
+
+        -- ถ้ามีตัวที่ Trait = None → เลือกตัวแรก
+        if #noneUnits > 0 then
+            return noneUnits[1]
+        end
+
+        -- ถ้าไม่มี None → เลือกตัวที่ Trait กากสุด (priority ต่ำสุด)
+        if #withTraitUnits > 0 then
+            table.sort(withTraitUnits, function(a, b)
+                local priorityA = traitPriorityMap[a.trait] or 999
+                local priorityB = traitPriorityMap[b.trait] or 999
+                return priorityA < priorityB  -- priority ต่ำกว่า = กากกว่า
+            end)
+            return withTraitUnits[1]
+        end
+
+        return list[1]
+    end  -- ปิด selectFromList function
+
+    -- เลือก Shiny ก่อน (ถ้ามี)
+    if #shinyUnits > 0 then
+        local selected = selectFromList(shinyUnits)
+        if selected then return selected end
     end
 
-    -- ถ้าไม่มี None → เลือกตัวที่ Trait กากสุด (priority ต่ำสุด)
-    if #withTraitUnits > 0 then
-        table.sort(withTraitUnits, function(a, b)
-            local priorityA = traitPriorityMap[a.trait] or 999
-            local priorityB = traitPriorityMap[b.trait] or 999
-            return priorityA < priorityB  -- priority ต่ำกว่า = กากกว่า
-        end)
-        return withTraitUnits[1]
+    -- ถ้าไม่มี Shiny หรือเลือกไม่ได้ → เลือกตัวธรรมดา
+    if #normalUnits > 0 then
+        local selected = selectFromList(normalUnits)
+        if selected then return selected end
     end
 
     -- Fallback (ไม่น่าเกิด)
     return units[1]
-end
+end  -- ปิด selectBestUnitForReroll function
 
 -- ฟังก์ชันส่ง Horst Description
 local function sendSummonStatus(foundUnits, isComplete)
@@ -2363,13 +2417,6 @@ if hasSummonConfig then
                 if isSecretUnit then
                     -- Secret unit: ข้าม Banner check (มีเสมอ)
                     shouldSummon = true
-
-                    -- ตั้ง AutoSell Legendary
-                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                    local Actions = require(FusionPackage.Actions)
-                    pcall(function()
-                        Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-                    end)
                 else
                     -- Mythic unit: เช็ค Banner ตามปกติ
                     local bannerUnits = checkCurrentBanner()
@@ -2387,13 +2434,6 @@ if hasSummonConfig then
 
                     if hasMatch then
                         shouldSummon = true
-
-                        -- ตั้ง AutoSell Legendary
-                        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                        local Actions = require(FusionPackage.Actions)
-                        pcall(function()
-                            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-                        end)
                     else
                         if #foundInInventory > 0 then
                             sendSummonStatus(foundInInventory, false)
@@ -2481,6 +2521,70 @@ end
 -- ========================================
 if shouldSummon then
     printStep("Auto Summon (Mythic/Secret)...")
+
+    -- ========================================
+    -- 6.1 เช็คและตั้งค่า AutoSell Legendary ก่อนสุ่ม
+    -- ========================================
+    print("🔍 Checking for Legendary units before summon...")
+
+    local LEGENDARY_UNITS = {
+        "The Hero",
+        "Scissor",
+        "Ice Queen",
+        "Water Princess",
+        "Forbidden Teacher",
+        "Greed"
+    }
+
+    local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+    local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
+    local hasLegendary = false
+
+    if unitData then
+        for fullKey, data in pairs(unitData) do
+            local internalName = fullKey:match("^(.+)#") or fullKey
+            local unitInfo = UnitInfo[internalName]
+
+            if unitInfo then
+                local displayName = unitInfo.DisplayName or internalName
+
+                for _, legendaryUnit in ipairs(LEGENDARY_UNITS) do
+                    if displayName == legendaryUnit then
+                        hasLegendary = true
+                        print(string.format("   ✅ Found Legendary: %s", displayName))
+                        break
+                    end
+                end
+
+                if hasLegendary then break end
+            end
+        end
+    end
+
+    if hasLegendary then
+        print("🔧 Enabling Legendary AutoSell before summon (Non-Shiny + Shiny)...")
+
+        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+        local Actions = require(FusionPackage.Actions)
+
+        -- เปิดขาย Legendary (Non-Shiny)
+        pcall(function()
+            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
+        end)
+        task.wait(0.3)
+
+        -- เปิดขาย Legendary (Shiny)
+        pcall(function()
+            Actions.ToggleAutoSell("Standard", "Legendary", true, true)
+        end)
+        task.wait(0.3)
+
+        print("✅ Legendary AutoSell enabled before summon (including Shiny)")
+    else
+        print("ℹ️ No Legendary units found - Legendary AutoSell remains disabled")
+    end
+
+    task.wait(1)
 
     local BANNER_ID = "Standard"
     local AMOUNT_PER_SUMMON = 50  -- 50 ต่อรอบ (x10 summon)
@@ -2582,29 +2686,16 @@ if shouldSummon then
                                 break
                             end
                         end
-                    end
-                    if hasMatch then break end
-                end
-
-                if not isSecretUnit then
-                    -- ถ้าไม่ใช่ Secret unit และไม่มี match ใน Banner
-                    local bannerUnits = checkCurrentBanner()
-                    local hasMatch = false
-                    for _, configUnit in pairs(SUMMON_CONFIG) do
-                        for _, bannerUnit in pairs(bannerUnits) do
-                            if configUnit == bannerUnit then
-                                hasMatch = true
-                                break
-                            end
-                        end
+                        if hasMatch then break end
                     end
 
                     if not hasMatch then
-                    if #foundInInventory > 0 then
-                        sendSummonStatus(foundInInventory, false)
+                        if #foundInInventory > 0 then
+                            sendSummonStatus(foundInInventory, false)
+                        end
+                        warn("⚠️ Target units no longer in banner - stopping summon")
+                        break
                     end
-                    warn("⚠️ Target units no longer in banner - stopping summon")
-                    break
                 end
             end
         end
@@ -2768,82 +2859,57 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
         local unitsWithTrait = checkInventoryForUnits({targetUnitName}, true)
 
         if #unitsWithTrait > 0 then
-            -- เลือกตัวที่ดีที่สุดสำหรับสุ่ม Trait (None > Worst Trait)
+            -- เลือกตัวที่ดีที่สุดสำหรับสุ่ม Trait (เลือก Shiny ก่อน)
             local unitInfo = selectBestUnitForReroll(unitsWithTrait)
             local currentTrait = unitInfo.trait
 
-            print(string.format("   Selected unit: %s (Trait: %s, Full Key: %s)", unitInfo.name, currentTrait, unitInfo.fullKey))
+            print(string.format("   Selected unit: %s (Trait: %s, Shiny: %s, Full Key: %s)",
+                unitInfo.name, currentTrait, tostring(unitInfo.isShiny or false), unitInfo.fullKey))
 
-        -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
-        local hasTargetTrait = false
-        local shouldSkipReroll = false  -- ใหม่: ตัวแปรบอกว่าควรข้ามการสุ่มหรือไม่
+            -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
+            local hasTargetTrait = false
 
-        if not targetTrait then
-            -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
-            hasTargetTrait = (currentTrait ~= "None")
-        elseif type(targetTrait) == "table" then
-            -- เป็น array
-            if #targetTrait == 0 then
-                -- {} = empty table → ไม่ต้องสุ่ม Trait (ส่ง DONE ทันที)
-                shouldSkipReroll = true
-                hasTargetTrait = true  -- ถือว่ามีแล้ว (เพื่อข้ามการสุ่ม)
-            else
-                -- มีสมาชิก → เช็คว่ามีใน list หรือไม่
-                for _, trait in ipairs(targetTrait) do
-                    if currentTrait == trait then
-                        hasTargetTrait = true
-                        break
-                    end
-                end
-            end
-        else
-            -- string เดียว
-            hasTargetTrait = (currentTrait == targetTrait)
-        end
+            print(string.format("🔍 [Trait Check] Current Trait: %s, Target: %s (type: %s)",
+                currentTrait, tostring(targetTrait), type(targetTrait)))
 
-        if hasTargetTrait then
-            if shouldSkipReroll then
-                -- กรณี TargetTrait = {} → ไม่ต้องสุ่ม
-                print(string.format("✅ %s | No trait reroll needed (empty config)", targetUnitName))
-            else
-                -- มี Trait ที่ต้องการแล้ว
-                print(string.format("✅ %s already has Trait: %s", targetUnitName, currentTrait))
-            end
-
-            -- ส่ง Horst Description + DONE
-            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                local traitText = currentTrait
-                _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, traitText))
-
-                if GEM_TARGET then
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                    if currentGems >= GEM_TARGET then
-                        _G.Horst_Done()
-                    end
+            if not targetTrait then
+                -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
+                hasTargetTrait = (currentTrait ~= "None")
+                print(string.format("   Mode: Random (any except None), hasTargetTrait: %s", tostring(hasTargetTrait)))
+            elseif type(targetTrait) == "table" then
+                if #targetTrait == 0 then
+                    -- {} = empty table → ไม่ต้องสุ่ม Trait
+                    hasTargetTrait = true
+                    print("   Mode: Empty table → Skip reroll")
                 else
-                    _G.Horst_Done()
+                    -- เช็คว่ามีใน list หรือไม่
+                    print(string.format("   Mode: Table with %d traits: %s", #targetTrait, table.concat(targetTrait, ", ")))
+                    for _, trait in ipairs(targetTrait) do
+                        if currentTrait == trait then
+                            hasTargetTrait = true
+                            break
+                        end
+                    end
+                    print(string.format("   Match found: %s", tostring(hasTargetTrait)))
                 end
-            end
-        else
-            -- ต้องสุ่ม Trait
-            printStep(string.format("Rerolling Trait for %s...", targetUnitName))
-
-            -- เช็ค Trait Reroll จำนวน
-            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            local traitRerolls = 0
-            if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
-                traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
+            else
+                -- string เดียว
+                hasTargetTrait = (currentTrait == targetTrait)
+                print(string.format("   Mode: Single string, match: %s", tostring(hasTargetTrait)))
             end
 
-            if traitRerolls <= 0 then
-                warn("❌ No Trait Reroll items available")
+            print(string.format("🔍 [Final Decision] hasTargetTrait: %s", tostring(hasTargetTrait)))
 
-                -- ส่ง Horst Description + DONE (Out of RR)
+            if hasTargetTrait then
+                -- มี Trait ที่ต้องการแล้ว → ข้ามการสุ่ม
+                print(string.format("✅ %s already has target Trait: %s", targetUnitName, currentTrait))
+
+                -- ส่ง Horst Description + DONE
                 if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
-                    _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, currentTrait))
+                    _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, currentTrait))
 
                     if GEM_TARGET then
+                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                         local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         if currentGems >= GEM_TARGET then
                             _G.Horst_Done()
@@ -2853,6 +2919,33 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
                 end
             else
+                -- ยังไม่มี Trait ที่ต้องการ → เริ่มสุ่ม
+                printStep(string.format("Rerolling Trait for %s...", targetUnitName))
+
+                -- เช็ค Trait Reroll จำนวน
+                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                local traitRerolls = 0
+                if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
+                    traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
+                end
+
+                if traitRerolls <= 0 then
+                    warn("❌ No Trait Reroll items available")
+
+                    -- ส่ง Horst Description + DONE (Out of RR)
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
+                        _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, currentTrait))
+
+                        if GEM_TARGET then
+                            local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                            if currentGems >= GEM_TARGET then
+                                _G.Horst_Done()
+                            end
+                        else
+                            _G.Horst_Done()
+                        end
+                    end
+                else
                 -- ฟังก์ชันเช็ค Trait ปัจจุบันพร้อม retry
                 local function getCurrentTrait(fullKey, maxRetries)
                     maxRetries = maxRetries or 10
@@ -2978,15 +3071,15 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         end
                     end
                 end
-            end
-        end
+                end  -- ปิด else ของ if traitRerolls <= 0
+            end  -- ปิด if hasTargetTrait
         else
             warn(string.format("❌ Unit '%s' not found in inventory", targetUnitName))
-        end
+        end  -- ปิด if #unitsWithTrait > 0
     end  -- ปิด if targetUnitName then
 
     task.wait(1)
-end
+end  -- ปิด if shouldDoTraitReroll and traitRerollTargetUnit
 
 -- ========================================
 -- 7. QuickEquip (ถ้ามีตัวที่ต้องการ)
@@ -2998,12 +3091,21 @@ if hasTargetUnit then
     local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
     local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
 
-    -- สร้าง displayNameMap
+    -- สร้าง displayNameMap (เลือก Shiny ก่อน)
     local displayNameMap = {}
     for fullKey, data in pairs(unitData) do
         local internalName = fullKey:match("^(.+)#") or fullKey
         local displayName = UnitInfo[internalName] and UnitInfo[internalName].DisplayName or internalName
-        displayNameMap[displayName:lower()] = fullKey
+        local lowerName = displayName:lower()
+        local isShiny = data.Shiny or false
+
+        -- เลือก Shiny ก่อน หรือถ้ายังไม่มีก็เอาตัวปกติ
+        if not displayNameMap[lowerName] or isShiny then
+            displayNameMap[lowerName] = fullKey
+            if isShiny then
+                print(string.format("   ✨ Found SHINY %s: %s", displayName, fullKey))
+            end
+        end
     end
 
     -- หา target unit ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น - ไม่ใช่ Mythic/Secret)
