@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 5.11
+-- 5.17
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -100,10 +100,48 @@ local UPDATE_INTERVAL = 30
 local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
 
 -- Summon Config
-local SUMMON_CONFIG = _G.Config.SummonUnits or {}  -- เช่น {"Elf Mage", "Shadow"}
+local SUMMON_CONFIG = _G.Config.SummonUnits or {}
+-- ถ้าเป็น string ให้แปลงเป็น table (ยกเว้น "auto" จะถูก override ภายหลัง)
+if type(SUMMON_CONFIG) == "string" then
+    if SUMMON_CONFIG:lower() == "auto" then
+        SUMMON_CONFIG = {}  -- จะถูก override เป็น Secret + Mythic ภายหลัง
+    else
+        SUMMON_CONFIG = {SUMMON_CONFIG}  -- แปลง "Shadow" → {"Shadow"}
+    end
+end
 local MYTHIC_UNITS = {"Cursed Student", "Elf Mage", "Flame Emperor", "Hollow", "Lady Giant", "Puppet", "Salmon Sorcerer", "String Demon"}
 local SECRET_UNITS = {"Shadow"}
-local hasSummonConfig = SUMMON_CONFIG and #SUMMON_CONFIG > 0
+local hasSummonConfig = _G.Config.SummonUnits and (
+    (type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits ~= "") or
+    (type(_G.Config.SummonUnits) == "table" and #_G.Config.SummonUnits > 0)
+)
+
+-- Trait Reroll Config
+local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
+-- ตัวอย่าง:
+-- _G.Config.TraitReroll = {
+--     TargetUnit = "Ice Queen",                          -- ตัวที่ต้องการสุ่ม Trait
+--     TargetTrait = {"Enlightenment", "Ultimate"}        -- Trait ที่ต้องการ (หลายตัว)
+--     หรือ TargetTrait = "Enlightenment"                 -- Trait เดียว
+--     หรือ TargetTrait = nil                             -- อะไรก็ได้ที่ไม่ใช่ None
+--     หรือ TargetTrait = {}                              -- ไม่ต้องสุ่ม (ข้าม)
+-- }
+
+-- Priority List สำหรับเลือก Unit ที่จะสุ่ม Trait (ถ้า Config ตั้ง SummonUnits หลายตัว)
+local TRAIT_REROLL_PRIORITY = {
+    "Shadow",           -- Priority 1 (Secret)
+    "Puppet",           -- Priority 2 (Mythic)
+    "Cursed Student",   -- Priority 3 (Mythic)
+    "Lady Giant",       -- Priority 4 (Mythic)
+    "Elf Mage",         -- Priority 5 (Mythic)
+    "Flame Emperor",    -- Priority 6 (Mythic)
+    "Hollow",           -- Priority 7 (Mythic)
+    "Salmon Sorcerer",  -- Priority 8 (Mythic)
+    "String Demon"      -- Priority 9 (Mythic)
+}
+
+-- Secret Units ที่ไม่แสดงในหน้า Banner
+local SECRET_UNITS = {"Shadow"}
 
 local function printStep(stepName)
     print(string.format("🔄 %s", stepName))
@@ -1645,49 +1683,71 @@ if isInTargetMap() then
 
                             print(string.format("   💎 Current Gems: %d", gems))
 
-                            if gems >= 10000 then
-                                print("   ✅ Gems >= 10000 - checking banner...")
+                            if gems >= 2500 then
+                                print("   ✅ Gems >= 2500 - checking banner...")
 
-                                -- เช็ค Banner (พร้อม timeout)
-                                local bannerUnits = {}
-                                local bannerSuccess = pcall(function()
-                                    local startTime = tick()
-                                    local timeout = 5
-
-                                    while tick() - startTime < timeout do
-                                        local units = checkCurrentBanner()
-                                        if #units > 0 then
-                                            bannerUnits = units
-                                            return
+                                -- เช็คว่าเป็น Secret unit หรือไม่
+                                local isSecretUnit = false
+                                for _, configUnit in ipairs(SUMMON_CONFIG) do
+                                    for _, secretUnit in ipairs(SECRET_UNITS) do
+                                        if configUnit == secretUnit then
+                                            isSecretUnit = true
+                                            print(string.format("   ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
+                                            break
                                         end
-                                        task.wait(0.5)
                                     end
-                                end)
+                                    if isSecretUnit then break end
+                                end
 
-                                if bannerSuccess and #bannerUnits > 0 then
-                                    print(string.format("   📋 Banner units found: %s", table.concat(bannerUnits, ", ")))
+                                if isSecretUnit then
+                                    -- Secret unit: ข้าม Banner check
+                                    print(string.format("✅ [Wave Reset] Secret unit + gems >= 2500 → Rejoining..."))
+                                    task.wait(1)
 
-                                    -- เช็คว่ามีตัวที่ต้องการหรือไม่
-                                    local hasMatch = false
-                                    local matchedUnit = nil
-                                    for _, configUnit in pairs(SUMMON_CONFIG) do
-                                        for _, bannerUnit in pairs(bannerUnits) do
-                                            if configUnit == bannerUnit then
-                                                hasMatch = true
-                                                matchedUnit = configUnit
-                                                break
+                                    pcall(function()
+                                        game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
+                                    end)
+                                else
+                                    -- Mythic unit: เช็ค Banner ตามปกติ
+                                    local bannerUnits = {}
+                                    local bannerSuccess = pcall(function()
+                                        local startTime = tick()
+                                        local timeout = 5
+
+                                        while tick() - startTime < timeout do
+                                            local units = checkCurrentBanner()
+                                            if #units > 0 then
+                                                bannerUnits = units
+                                                return
                                             end
+                                            task.wait(0.5)
                                         end
-                                        if hasMatch then break end
-                                    end
+                                    end)
 
-                                    if hasMatch then
-                                        print(string.format("✅ [Wave Reset] Target unit '%s' found in banner + gems >= 10000 → Rejoining...", matchedUnit))
-                                        task.wait(1)
+                                    if bannerSuccess and #bannerUnits > 0 then
+                                        print(string.format("   📋 Banner units found: %s", table.concat(bannerUnits, ", ")))
 
-                                        pcall(function()
-                                            game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
-                                        end)
+                                        -- เช็คว่ามีตัวที่ต้องการหรือไม่
+                                        local hasMatch = false
+                                        local matchedUnit = nil
+                                        for _, configUnit in pairs(SUMMON_CONFIG) do
+                                            for _, bannerUnit in pairs(bannerUnits) do
+                                                if configUnit == bannerUnit then
+                                                    hasMatch = true
+                                                    matchedUnit = configUnit
+                                                    break
+                                                end
+                                            end
+                                            if hasMatch then break end
+                                        end
+
+                                        if hasMatch then
+                                            print(string.format("✅ [Wave Reset] Target unit '%s' found in banner + gems >= 2500 → Rejoining...", matchedUnit))
+                                            task.wait(1)
+
+                                            pcall(function()
+                                                game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
+                                            end)
 
                                         return  -- หยุดสคริปต์
                                     else
@@ -2062,35 +2122,18 @@ task.wait(1)
 -- ========================================
 printStep("Checking Inventory...")
 
-local function openInventory()
-    local GuiService = game:GetService("GuiService")
-    local VirtualInputManager = game:GetService("VirtualInputManager")
-    local button = game:GetService("Players").LocalPlayer.PlayerGui.LeftHUD.Frame.Frame.Frame:GetChildren()[5]
+-- ลบฟังก์ชัน openInventory และ closeInventory เพราะไม่จำเป็นแล้ว
+-- ใช้ Nodes.GET_DATA_VALUE:InvokeSelf("UnitData") โดยตรง
 
-    button.Selectable = true
-    GuiService.SelectedCoreObject = button
-
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
-
-    task.wait(0.1)
-    GuiService.SelectedCoreObject = nil
-end
-
-local function closeInventory()
-    local VirtualInputManager = game:GetService("VirtualInputManager")
-    for i = 1, 5 do
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-        task.wait(0.1)
-    end
-end
-
--- ฟังก์ชันเช็คว่ามี units ใน Inventory
-local function checkInventoryForUnits(targetUnits)
+-- ฟังก์ชันเช็คว่ามี units ใน Inventory (พร้อม Trait)
+local function checkInventoryForUnits(targetUnits, returnWithTrait)
     local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
     if not unitData then return {} end
+
+    -- ถ้า targetUnits เป็น string ให้แปลงเป็น table
+    if type(targetUnits) == "string" then
+        targetUnits = {targetUnits}
+    end
 
     local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
     local foundUnits = {}
@@ -2100,15 +2143,89 @@ local function checkInventoryForUnits(targetUnits)
         local unitInfo = UnitInfo[internalName]
         if unitInfo then
             local displayName = unitInfo.DisplayName or internalName
-            for _, targetUnit in pairs(targetUnits) do
+            for _, targetUnit in ipairs(targetUnits) do
                 if displayName == targetUnit then
-                    table.insert(foundUnits, displayName)
+                    if returnWithTrait then
+                        -- return พร้อม Trait
+                        table.insert(foundUnits, {
+                            name = displayName,
+                            trait = data.Trait or "None",
+                            fullKey = fullKey,
+                            unitID = data.ID
+                        })
+                    else
+                        -- return แค่ชื่อ
+                        table.insert(foundUnits, displayName)
+                    end
                     break
                 end
             end
         end
     end
     return foundUnits
+end
+
+-- ฟังก์ชันเลือกตัวที่จะสุ่ม Trait (Priority: None > Worst Trait)
+local function selectBestUnitForReroll(units)
+    if #units == 0 then return nil end
+    if #units == 1 then return units[1] end
+
+    -- Trait Priority (จากกากสุด → ดีสุด)
+    local TRAIT_PRIORITY = {
+        "Strength 1",    -- 1 (กากสุด)
+        "Speed 1",       -- 2
+        "Range 1",       -- 3
+        "Enlightenment", -- 4
+        "Strength 2",    -- 5
+        "Speed 2",       -- 6
+        "Range 2",       -- 7
+        "Limit Breaker", -- 8
+        "Precision 1",   -- 9
+        "Precision 2",   -- 10
+        "Bolt",          -- 11
+        "Optics",        -- 12
+        "Investor",      -- 13
+        "Draconic",      -- 14
+        "Forsaken",      -- 15
+        "Primordial",    -- 16
+        "Unbound"        -- 17 (ดีสุด)
+    }
+
+    -- สร้าง Trait → Priority Map
+    local traitPriorityMap = {}
+    for priority, traitName in ipairs(TRAIT_PRIORITY) do
+        traitPriorityMap[traitName] = priority
+    end
+
+    -- แยกตัวที่ Trait = None
+    local noneUnits = {}
+    local withTraitUnits = {}
+
+    for _, unit in ipairs(units) do
+        if unit.trait == "None" then
+            table.insert(noneUnits, unit)
+        else
+            table.insert(withTraitUnits, unit)
+        end
+    end
+
+    -- ถ้ามีตัวที่ Trait = None → เลือกตัวแรก
+    if #noneUnits > 0 then
+        return noneUnits[1]
+    end
+
+    -- ถ้าไม่มี None → เลือกตัวที่ Trait กากสุด (priority ต่ำสุด)
+    if #withTraitUnits > 0 then
+        table.sort(withTraitUnits, function(a, b)
+            local priorityA = traitPriorityMap[a.trait] or 999
+            local priorityB = traitPriorityMap[b.trait] or 999
+            return priorityA < priorityB  -- priority ต่ำกว่า = กากกว่า
+        end)
+        return withTraitUnits[1]
+    end
+
+    -- Fallback (ไม่น่าเกิด)
+    return units[1]
 end
 
 -- ฟังก์ชันส่ง Horst Description
@@ -2177,38 +2294,40 @@ end
 -- เช็ค Summon Config
 local shouldSummon = false
 local hasTargetUnit = false
+local autoSummonMode = false  -- ใหม่: โหมด auto summon
 
 if hasSummonConfig then
+    -- เช็คว่าเป็น "auto" mode หรือไม่
+    if type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits:lower() == "auto" then
+        autoSummonMode = true
+        -- Override SUMMON_CONFIG เป็น Mythic + Secret ทั้งหมด
+        local allTargets = {}
+        for _, unit in ipairs(SECRET_UNITS) do
+            table.insert(allTargets, unit)
+        end
+        for _, unit in ipairs(MYTHIC_UNITS) do
+            table.insert(allTargets, unit)
+        end
+        SUMMON_CONFIG = allTargets
+    end
 
     -- เช็ค Level และ Gems
     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
     local level = replica and replica.Data and replica.Data.Level or 0
     local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
+    if level >= 10 and gems >= 2500 then
+        -- มี Level และ Gems พอ → พิจารณา Summon
 
-    if level > 10 and gems >= 2500 then
         -- เช็คว่ามีตัวที่ต้องการใน Inventory แล้วหรือยัง
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
-        if #foundInInventory >= #SUMMON_CONFIG then
-            sendSummonStatus(foundInInventory, true)
-            hasTargetUnit = true
-        else
-            -- เช็ค Banner ว่ามีตัวที่ต้องการหรือไม่
-            local bannerUnits = checkCurrentBanner()
-
-            local hasMatch = false
-            for _, configUnit in pairs(SUMMON_CONFIG) do
-                for _, bannerUnit in pairs(bannerUnits) do
-                    if configUnit == bannerUnit then
-                        hasMatch = true
-                        break
-                    end
-                end
-                if hasMatch then break end
-            end
-
-            if hasMatch then
+        if autoSummonMode then
+            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
+            if #foundInInventory > 0 then
+                sendSummonStatus(foundInInventory, true)
+                hasTargetUnit = true
+            else
                 shouldSummon = true
 
                 -- ตั้ง AutoSell Legendary
@@ -2217,14 +2336,70 @@ if hasSummonConfig then
                 pcall(function()
                     Actions.ToggleAutoSell("Standard", "Legendary", false, true)
                 end)
+            end
+        else
+            -- โหมดปกติ: ต้องได้ครบทุกตัว
+            if #foundInInventory >= #SUMMON_CONFIG then
+                sendSummonStatus(foundInInventory, true)
+                hasTargetUnit = true
             else
-                if #foundInInventory > 0 then
-                    sendSummonStatus(foundInInventory, false)
+                -- เช็คว่าเป็น Secret unit หรือไม่
+                local isSecretUnit = false
+                for _, configUnit in ipairs(SUMMON_CONFIG) do
+                    for _, secretUnit in ipairs(SECRET_UNITS) do
+                        if configUnit == secretUnit then
+                            isSecretUnit = true
+                            print(string.format("ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
+                            break
+                        end
+                    end
+                    if isSecretUnit then break end
+                end
+
+                if isSecretUnit then
+                    -- Secret unit: ข้าม Banner check (มีเสมอ)
+                    shouldSummon = true
+
+                    -- ตั้ง AutoSell Legendary
+                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+                    local Actions = require(FusionPackage.Actions)
+                    pcall(function()
+                        Actions.ToggleAutoSell("Standard", "Legendary", false, true)
+                    end)
+                else
+                    -- Mythic unit: เช็ค Banner ตามปกติ
+                    local bannerUnits = checkCurrentBanner()
+
+                    local hasMatch = false
+                    for _, configUnit in pairs(SUMMON_CONFIG) do
+                        for _, bannerUnit in pairs(bannerUnits) do
+                            if configUnit == bannerUnit then
+                                hasMatch = true
+                                break
+                            end
+                        end
+                        if hasMatch then break end
+                    end
+
+                    if hasMatch then
+                        shouldSummon = true
+
+                        -- ตั้ง AutoSell Legendary
+                        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+                        local Actions = require(FusionPackage.Actions)
+                        pcall(function()
+                            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
+                        end)
+                    else
+                        if #foundInInventory > 0 then
+                            sendSummonStatus(foundInInventory, false)
+                        end
+                    end
                 end
             end
         end
     else
-        warn(string.format("⚠️ Summon check skipped: Level=%d, Gems=%d (require Level>10 and Gems>=2500)", level, gems))
+        warn(string.format("⚠️ Summon check skipped: Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
     end
 end
 
@@ -2293,15 +2468,8 @@ if not shouldSummon then
         return targetFound
     end
 
-    -- เปิด Inventory
-    openInventory()
-    task.wait(1)
-
-    -- เช็คตัวละคร
+    -- เช็คตัวละครโดยตรง (ไม่ต้องเปิด Inventory)
     hasTargetUnit = checkForTargetUnits()
-
-    -- ปิด Inventory
-    closeInventory()
 end
 
 -- ========================================
@@ -2365,37 +2533,76 @@ if shouldSummon then
         -- เช็คว่าได้ครบหรือยัง
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
-        if #foundInInventory >= #SUMMON_CONFIG then
-            sendSummonStatus(foundInInventory, true)
-            hasTargetUnit = true
-            break
-        else
-            -- แสดงตัวที่มีแล้ว
+        if autoSummonMode then
+            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
             if #foundInInventory > 0 then
-                sendSummonStatus(foundInInventory, false)
+                sendSummonStatus(foundInInventory, true)
+                hasTargetUnit = true
+                break
             end
-
-            -- เช็ค Banner ว่ายังมีตัวที่ต้องการอยู่หรือไม่
-            local bannerUnits = checkCurrentBanner()
-            local hasMatch = false
-            for _, configUnit in pairs(SUMMON_CONFIG) do
-                for _, bannerUnit in pairs(bannerUnits) do
-                    if configUnit == bannerUnit then
-                        hasMatch = true
-                        break
-                    end
-                end
-                if hasMatch then break end
-            end
-
-            if not hasMatch then
+        else
+            -- โหมดปกติ: ต้องได้ครบทุกตัว
+            if #foundInInventory >= #SUMMON_CONFIG then
+                sendSummonStatus(foundInInventory, true)
+                hasTargetUnit = true
+                break
+            else
+                -- แสดงตัวที่มีแล้ว
                 if #foundInInventory > 0 then
                     sendSummonStatus(foundInInventory, false)
                 end
-                warn("⚠️ Target units no longer in banner - stopping summon")
-                break
-            end
 
+                -- เช็คว่าเป็น Secret unit หรือไม่
+                local isSecretUnit = false
+                for _, configUnit in ipairs(SUMMON_CONFIG) do
+                    for _, secretUnit in ipairs(SECRET_UNITS) do
+                        if configUnit == secretUnit then
+                            isSecretUnit = true
+                            break
+                        end
+                    end
+                    if isSecretUnit then break end
+                end
+
+                if isSecretUnit then
+                    -- Secret unit: ข้าม Banner check (มีเสมอ)
+                    -- ทำต่อ loop
+                else
+                    -- Mythic unit: เช็ค Banner ว่ายังมีตัวที่ต้องการอยู่หรือไม่
+                    local bannerUnits = checkCurrentBanner()
+                    local hasMatch = false
+                    for _, configUnit in pairs(SUMMON_CONFIG) do
+                        for _, bannerUnit in pairs(bannerUnits) do
+                            if configUnit == bannerUnit then
+                                hasMatch = true
+                                break
+                            end
+                        end
+                    end
+                    if hasMatch then break end
+                end
+
+                if not isSecretUnit then
+                    -- ถ้าไม่ใช่ Secret unit และไม่มี match ใน Banner
+                    local bannerUnits = checkCurrentBanner()
+                    local hasMatch = false
+                    for _, configUnit in pairs(SUMMON_CONFIG) do
+                        for _, bannerUnit in pairs(bannerUnits) do
+                            if configUnit == bannerUnit then
+                                hasMatch = true
+                                break
+                            end
+                        end
+                    end
+
+                    if not hasMatch then
+                    if #foundInInventory > 0 then
+                        sendSummonStatus(foundInInventory, false)
+                    end
+                    warn("⚠️ Target units no longer in banner - stopping summon")
+                    break
+                end
+            end
         end
     end
 
@@ -2462,23 +2669,328 @@ else
 end
 
 -- ========================================
+-- 6.5 Trait Reroll System (ถ้ามี Config)
+-- ========================================
+-- เช็คว่าควรทำ Trait Reroll หรือไม่
+local shouldDoTraitReroll = false
+local traitRerollTargetUnit = nil
+
+-- Debug: แสดง Config
+print("🔍 Trait Reroll Config:")
+print(string.format("   TRAIT_REROLL_CONFIG exists: %s", tostring(TRAIT_REROLL_CONFIG ~= nil)))
+if TRAIT_REROLL_CONFIG then
+    print(string.format("   TargetUnit: %s", tostring(TRAIT_REROLL_CONFIG.TargetUnit)))
+    print(string.format("   TargetTrait: %s", tostring(TRAIT_REROLL_CONFIG.TargetTrait)))
+end
+print(string.format("   hasTargetUnit: %s", tostring(hasTargetUnit)))
+
+if TRAIT_REROLL_CONFIG and TRAIT_REROLL_CONFIG.TargetUnit then
+    -- กรณีที่ 1: มี Config และได้ตัวที่ต้องการจาก Summon
+    if hasTargetUnit then
+        shouldDoTraitReroll = true
+        traitRerollTargetUnit = TRAIT_REROLL_CONFIG.TargetUnit
+    -- กรณีที่ 2: ไม่ได้ตัวที่ต้องการ แต่มี Mythic ใน Inventory (Fallback)
+    elseif not hasTargetUnit and hasSummonConfig then
+        printStep("Checking for fallback Mythic units...")
+
+        -- เช็คว่ามี Mythic ใดๆ ที่ไม่ได้ตั้งใน SummonConfig
+        local availableMythics = checkInventoryForUnits(MYTHIC_UNITS, true)
+
+        if #availableMythics > 0 then
+            -- เรียงตาม Priority
+            table.sort(availableMythics, function(a, b)
+                local priorityA = 999
+                local priorityB = 999
+
+                for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
+                    if a.name == unitName then priorityA = i end
+                    if b.name == unitName then priorityB = i end
+                end
+
+                return priorityA < priorityB
+            end)
+
+            local fallbackUnit = availableMythics[1].name
+            print(string.format("   Found fallback Mythic: %s", fallbackUnit))
+
+            shouldDoTraitReroll = true
+            traitRerollTargetUnit = fallbackUnit
+        else
+            warn("   ⚠️ No fallback Mythic units found")
+        end
+    end
+end
+
+if shouldDoTraitReroll and traitRerollTargetUnit then
+    printStep("Checking Trait Reroll Config...")
+
+    local targetUnitName = traitRerollTargetUnit
+    local targetTrait = TRAIT_REROLL_CONFIG.TargetTrait
+
+    -- ถ้า TargetUnit เป็น "auto" → เลือกตาม Priority
+    if targetUnitName == "auto" then
+        if hasSummonConfig and hasTargetUnit then
+            -- เลือกจาก SummonConfig ที่ได้
+            local availableUnits = checkInventoryForUnits(SUMMON_CONFIG, true)
+
+            if #availableUnits > 0 then
+                -- เรียงตาม Priority
+                table.sort(availableUnits, function(a, b)
+                    local priorityA = 999
+                    local priorityB = 999
+
+                    for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
+                        if a.name == unitName then priorityA = i end
+                        if b.name == unitName then priorityB = i end
+                    end
+
+                    return priorityA < priorityB
+                end)
+
+                targetUnitName = availableUnits[1].name
+                print(string.format("   Auto-selected: %s (Priority)", targetUnitName))
+            else
+                warn("   ⚠️ No summon config units found in inventory")
+                targetUnitName = nil
+            end
+        else
+            warn("   ⚠️ Cannot use 'auto' without SummonConfig or target unit")
+            targetUnitName = nil
+        end
+    end
+
+    if targetUnitName then
+        -- เช็คว่ามีตัวที่ต้องการหรือไม่
+        local unitsWithTrait = checkInventoryForUnits({targetUnitName}, true)
+
+        if #unitsWithTrait > 0 then
+            -- เลือกตัวที่ดีที่สุดสำหรับสุ่ม Trait (None > Worst Trait)
+            local unitInfo = selectBestUnitForReroll(unitsWithTrait)
+            local currentTrait = unitInfo.trait
+
+            print(string.format("   Selected unit: %s (Trait: %s, Full Key: %s)", unitInfo.name, currentTrait, unitInfo.fullKey))
+
+        -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
+        local hasTargetTrait = false
+        local shouldSkipReroll = false  -- ใหม่: ตัวแปรบอกว่าควรข้ามการสุ่มหรือไม่
+
+        if not targetTrait then
+            -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
+            hasTargetTrait = (currentTrait ~= "None")
+        elseif type(targetTrait) == "table" then
+            -- เป็น array
+            if #targetTrait == 0 then
+                -- {} = empty table → ไม่ต้องสุ่ม Trait (ส่ง DONE ทันที)
+                shouldSkipReroll = true
+                hasTargetTrait = true  -- ถือว่ามีแล้ว (เพื่อข้ามการสุ่ม)
+            else
+                -- มีสมาชิก → เช็คว่ามีใน list หรือไม่
+                for _, trait in ipairs(targetTrait) do
+                    if currentTrait == trait then
+                        hasTargetTrait = true
+                        break
+                    end
+                end
+            end
+        else
+            -- string เดียว
+            hasTargetTrait = (currentTrait == targetTrait)
+        end
+
+        if hasTargetTrait then
+            if shouldSkipReroll then
+                -- กรณี TargetTrait = {} → ไม่ต้องสุ่ม
+                print(string.format("✅ %s | No trait reroll needed (empty config)", targetUnitName))
+            else
+                -- มี Trait ที่ต้องการแล้ว
+                print(string.format("✅ %s already has Trait: %s", targetUnitName, currentTrait))
+            end
+
+            -- ส่ง Horst Description + DONE
+            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
+                local traitText = currentTrait
+                _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, traitText))
+
+                if GEM_TARGET then
+                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                    if currentGems >= GEM_TARGET then
+                        _G.Horst_Done()
+                    end
+                else
+                    _G.Horst_Done()
+                end
+            end
+        else
+            -- ต้องสุ่ม Trait
+            printStep(string.format("Rerolling Trait for %s...", targetUnitName))
+
+            -- เช็ค Trait Reroll จำนวน
+            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+            local traitRerolls = 0
+            if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
+                traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
+            end
+
+            if traitRerolls <= 0 then
+                warn("❌ No Trait Reroll items available")
+
+                -- ส่ง Horst Description + DONE (Out of RR)
+                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
+                    _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, currentTrait))
+
+                    if GEM_TARGET then
+                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
+                        if currentGems >= GEM_TARGET then
+                            _G.Horst_Done()
+                        end
+                    else
+                        _G.Horst_Done()
+                    end
+                end
+            else
+                -- ฟังก์ชันเช็ค Trait ปัจจุบันพร้อม retry
+                local function getCurrentTrait(fullKey, maxRetries)
+                    maxRetries = maxRetries or 10
+
+                    for i = 1, maxRetries do
+                        local success, result = pcall(function()
+                            local newUnitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+                            if newUnitData and newUnitData[fullKey] then
+                                return newUnitData[fullKey].Trait or "None"
+                            end
+                            return nil
+                        end)
+
+                        if success and result then
+                            return result
+                        end
+
+                        if i < maxRetries then
+                            task.wait(0.1)
+                        end
+                    end
+
+                    return nil
+                end
+
+                -- เริ่มสุ่ม Trait
+                local attempts = 0
+                local success = false
+                local finalTrait = currentTrait
+
+                while attempts < traitRerolls do
+                    attempts = attempts + 1
+
+                    -- กำหนด Trait ที่จะส่งไป
+                    local traitToRoll = nil
+                    if type(targetTrait) == "string" then
+                        traitToRoll = targetTrait
+                    end
+
+                    -- สุ่ม Trait
+                    local rollSuccess = pcall(function()
+                        Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
+                    end)
+
+                    if not rollSuccess then
+                        task.wait(0.3)
+                        continue
+                    end
+
+                    task.wait(0.5)
+
+                    -- เช็ค Trait ใหม่
+                    local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
+
+                    if not newTrait then
+                        task.wait(0.3)
+                        continue
+                    end
+
+                    finalTrait = newTrait
+
+                    -- ตรวจสอบว่าได้ Trait ที่ต้องการหรือไม่
+                    local gotTargetTrait = false
+
+                    if not targetTrait then
+                        if newTrait ~= "None" then
+                            gotTargetTrait = true
+                        end
+                    elseif type(targetTrait) == "table" then
+                        for _, trait in ipairs(targetTrait) do
+                            if newTrait == trait then
+                                gotTargetTrait = true
+                                break
+                            end
+                        end
+                    else
+                        if newTrait == targetTrait then
+                            gotTargetTrait = true
+                        end
+                    end
+
+                    if gotTargetTrait then
+                        print(string.format("✅ %s | Trait: %s | Used: %d | Left: %d",
+                            targetUnitName, newTrait, attempts, traitRerolls - attempts))
+                        success = true
+                        break
+                    end
+
+                    task.wait(0.3)
+                end
+
+                -- แสดงผลลัพธ์
+                if success then
+                    -- สำเร็จ
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
+                        _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, finalTrait))
+
+                        if GEM_TARGET then
+                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                            local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                            if currentGems >= GEM_TARGET then
+                                _G.Horst_Done()
+                            end
+                        else
+                            _G.Horst_Done()
+                        end
+                    end
+                else
+                    -- ใช้หมด
+                    print(string.format("⚠️ %s | Used all %d rerolls without success", targetUnitName, traitRerolls))
+
+                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
+                        _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, finalTrait))
+
+                        if GEM_TARGET then
+                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                            local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                            if currentGems >= GEM_TARGET then
+                                _G.Horst_Done()
+                            end
+                        else
+                            _G.Horst_Done()
+                        end
+                    end
+                end
+            end
+        end
+        else
+            warn(string.format("❌ Unit '%s' not found in inventory", targetUnitName))
+        end
+    end  -- ปิด if targetUnitName then
+
+    task.wait(1)
+end
+
+-- ========================================
 -- 7. QuickEquip (ถ้ามีตัวที่ต้องการ)
 -- ========================================
 if hasTargetUnit then
     printStep("Quick Equip...")
 
-    -- ปิด Inventory ก่อน
-    local VirtualInputManager = game:GetService("VirtualInputManager")
-
-    -- spam คลิกมุมซ้ายบน 5 รอบ
-    for i = 1, 5 do
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-        task.wait(0.1)
-    end
-
-    -- Get UnitData และ UnitInfo
+    -- Get UnitData และ UnitInfo โดยตรง (ไม่ต้องปิด Inventory)
     local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
     local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
 
@@ -2490,8 +3002,8 @@ if hasTargetUnit then
         displayNameMap[displayName:lower()] = fullKey
     end
 
-    -- หา target unit ที่มีอยู่ (ให้เลือกตัวที่วางได้ 4 ตัวก่อน)
-    local targetUnits = {
+    -- หา target unit ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น - ไม่ใช่ Mythic/Secret)
+    local LEGENDARY_UNITS = {
         "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
         "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
         "The Hero",           -- Priority 3 (วางได้ 4 ตัว)
@@ -2502,16 +3014,11 @@ if hasTargetUnit then
 
     local foundTargetUnit = nil
 
-    -- เช็ค Ice Queen ก่อนเสมอ
-    if displayNameMap["ice queen"] then
-        foundTargetUnit = "Ice Queen"
-    else
-        -- ถ้าไม่มี Ice Queen ค้นหาตัวอื่นตามลำดับ
-        for _, targetUnit in pairs(targetUnits) do
-            if displayNameMap[targetUnit:lower()] then
-                foundTargetUnit = targetUnit
-                break
-            end
+    -- เช็คตามลำดับ Priority
+    for _, targetUnit in ipairs(LEGENDARY_UNITS) do
+        if displayNameMap[targetUnit:lower()] then
+            foundTargetUnit = targetUnit
+            break
         end
     end
 
