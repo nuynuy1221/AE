@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 1.52
+-- 2.07
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -654,12 +654,18 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
                 if GEM_TARGET and gem >= GEM_TARGET and not doneSent then
                     if _G.Horst_AccountChangeDone then
+                        -- ส่ง Description ก่อน
+                        if _G.Horst_SetDescription then
+                            _G.Horst_SetDescription(message, encoded_json)
+                        end
+
+                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
-                            _G.ScriptShouldStop = true  -- ตั้งค่า flag เพื่อหยุดสคริปต์หลัก
                             print("✅ GEM_TARGET reached - Script will stop...")
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
@@ -1907,16 +1913,16 @@ if isInToyMakerTournament() then
     closeTutorial()
     task.wait(0.5)
 
-    local countdown = 180  -- 3 นาที
+    local countdown = 160  -- 2:40 นาที
     while countdown > 0 do
-        if countdown % 30 == 0 then  -- print ทุก 30 วิ
+        if countdown % 20 == 0 then  -- print ทุก 30 วิ
             print(string.format("⏱️ Time remaining: %d seconds", countdown))
         end
         task.wait(1)
         countdown = countdown - 1
     end
 
-    print("✅ 3 minutes completed - Rejoining...")
+    print("✅ 2:40 minutes completed - Rejoining...")
     task.wait(1)
 
     pcall(function()
@@ -2194,6 +2200,7 @@ printStep("Redeeming Codes...")
 
 do
     local CODES = {
+        "HAPPYBDAYCOOP",
         "1MGROUP!",
         "100mvisits",
         "100K!",
@@ -2366,18 +2373,18 @@ if GET_TOY_MAKER then
 
                 _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
 
+                _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                 task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
-                        _G.ScriptShouldStop = true
                         print("✅ GEM_TARGET reached - Script will stop...")
                         return
                     end
                 else
                     _G.Horst_AccountChangeDone()
-                    _G.ScriptShouldStop = true
                     print("✅ Toy Maker has target trait - Script will stop...")
                     return
                 end
@@ -2407,18 +2414,18 @@ if GET_TOY_MAKER then
 
                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
 
+                    _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                     task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ GEM_TARGET reached - Script will stop...")
                             return
                         end
                     else
                         _G.Horst_AccountChangeDone()
-                        _G.ScriptShouldStop = true
                         print("✅ Toy Maker out of RR - Script will stop...")
                         return
                     end
@@ -2468,18 +2475,18 @@ if GET_TOY_MAKER then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
 
+                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ เพื่อหยุด Stats GUI Loop
+
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
-                                _G.ScriptShouldStop = true
                                 print("✅ GEM_TARGET reached - Script will stop...")
                                 return
                             end
                         else
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ Toy Maker trait reroll succeeded - Script will stop...")
                             return
                         end
@@ -2500,18 +2507,18 @@ if GET_TOY_MAKER then
 
                 _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
 
+                _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                 task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                 if GEM_TARGET then
                     if currentGems >= GEM_TARGET then
                         _G.Horst_AccountChangeDone()
-                        _G.ScriptShouldStop = true
                         print("✅ GEM_TARGET reached - Script will stop...")
                         return
                     end
                 else
                     _G.Horst_AccountChangeDone()
-                    _G.ScriptShouldStop = true
                     print("✅ Toy Maker all rerolls used - Script will stop...")
                     return
                 end
@@ -2744,10 +2751,11 @@ local function sendSummonStatus(foundUnits, isComplete)
         end)
 
         if isComplete and _G.Horst_AccountChangeDone then
+            _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
             task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
             pcall(_G.Horst_AccountChangeDone)
-            _G.ScriptShouldStop = true
             print("✅ Summon completed - Script will stop...")
         end
     end
@@ -3316,18 +3324,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, currentTrait))
 
+                    _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                     task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ GEM_TARGET reached - Script will stop...")
                             return
                         end
                     else
                         _G.Horst_AccountChangeDone()
-                        _G.ScriptShouldStop = true
                         print("✅ Trait Reroll completed - Script will stop...")
                         return
                     end
@@ -3353,18 +3361,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
+                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
-                                _G.ScriptShouldStop = true
                                 print("✅ GEM_TARGET reached - Script will stop...")
                                 return
                             end
                         else
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ Out of RR - Script will stop...")
                             return
                         end
@@ -3472,18 +3480,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s", currentGems, currentRR, targetUnitName, finalTrait))
 
+                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
-                                _G.ScriptShouldStop = true
                                 print("✅ GEM_TARGET reached - Script will stop...")
                                 return
                             end
                         else
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ Trait Reroll succeeded - Script will stop...")
                             return
                         end
@@ -3499,18 +3507,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
 
+                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+
                         task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
 
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 _G.Horst_AccountChangeDone()
-                                _G.ScriptShouldStop = true
                                 print("✅ GEM_TARGET reached - Script will stop...")
                                 return
                             end
                         else
                             _G.Horst_AccountChangeDone()
-                            _G.ScriptShouldStop = true
                             print("✅ All rerolls used - Script will stop...")
                             return
                         end
