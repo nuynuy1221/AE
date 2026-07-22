@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 1.12
+-- 1.18
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -746,7 +746,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
 
         -- Fallback: ส่งทุก 30 วิ (กรณี real-time พลาด)
         spawn(function()
-            while true do
+            while HORST_ENABLED and not _G.ScriptShouldStop do
                 task.wait(UPDATE_INTERVAL)
                 sendHorstStatus()
             end
