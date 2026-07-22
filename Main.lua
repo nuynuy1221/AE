@@ -1,7 +1,8 @@
 repeat wait() until game:IsLoaded()
--- 7.40
+-- 11.52
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
+-- เพิ่ม: Toy Maker Tournament Mode
 -- ========================================
 
 -- ========================================
@@ -98,6 +99,10 @@ local HORST_ENABLED = _G.Config.Horst == true
 local GEM_TARGET = _G.Config.GemTarget  -- nil = ไม่ส่ง DONE
 local UPDATE_INTERVAL = 30
 local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
+
+-- Toy Maker Tournament Config
+local GET_TOY_MAKER = _G.Config.GetToyMaker == true  -- false = ไม่ต้องทำอะไร
+local TARGET_TRAIT_TOY_MAKER = _G.Config.TargetTraitToyMaker or {"Unbound", "Primordial", "Forsaken", "Draconic"}
 
 -- Summon Config
 local SUMMON_CONFIG = _G.Config.SummonUnits or {}
@@ -756,19 +761,53 @@ _G.Config = _G.Config or {
 -- ========================================
 local function isInTargetMap()
     local success, result = pcall(function()
-        local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
-        local rightHUD = playerGui:FindFirstChild("RightGameHUD")
-        if not rightHUD then return false end
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
 
-        -- วน loop หา TextLabel ที่มีชื่อแมพ
-        for _, child in pairs(rightHUD:GetDescendants()) do
-            if child:IsA("TextLabel") then
-                local text = child.ContentText or child.Text
-                if text == "School Grounds - Act 1" then
+        -- Method 1: ใช้ Map Replicas (แม่นยำกว่า)
+        local allMaps = Nodes.GET_ALL_MAP_REPLICAS:InvokeSelf()
+
+        if allMaps then
+            for mapID, mapReplica in pairs(allMaps) do
+                local data = mapReplica.Data
+                local parameters = data.Parameters or {}
+
+                -- เช็คว่าเป็น SchoolGrounds Act 1 Story Mode
+                if parameters.MapName == "SchoolGrounds" and
+                   parameters.ActName == "Act 1" and
+                   parameters.Gamemode == "Story" then
                     return true
                 end
             end
         end
+
+        return false
+    end)
+    return success and result
+end
+
+-- ฟังก์ชันเช็คว่าอยู่ใน Tournament (Toy Maker) หรือไม่
+local function isInToyMakerTournament()
+    local success, result = pcall(function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
+
+        -- ใช้ Map Replicas
+        local allMaps = Nodes.GET_ALL_MAP_REPLICAS:InvokeSelf()
+
+        if allMaps then
+            for mapID, mapReplica in pairs(allMaps) do
+                local data = mapReplica.Data
+                local parameters = data.Parameters or {}
+
+                -- เช็คว่าเป็น Tournament Mode + competitive act
+                if parameters.Gamemode == "Tournament" and
+                   parameters.ActName == "competitive" then
+                    return true
+                end
+            end
+        end
+
         return false
     end)
     return success and result
@@ -1798,6 +1837,30 @@ if isInTargetMap() then
 end
 
 -- ========================================
+-- TOY MAKER TOURNAMENT MODE
+-- ========================================
+if isInToyMakerTournament() then
+    print("🏆 Detected Toy Maker Tournament - Starting 3 minute countdown...")
+
+    local countdown = 180  -- 3 นาที
+    while countdown > 0 do
+        if countdown % 30 == 0 then  -- print ทุก 30 วิ
+            print(string.format("⏱️ Time remaining: %d seconds", countdown))
+        end
+        task.wait(1)
+        countdown = countdown - 1
+    end
+
+    print("✅ 3 minutes completed - Rejoining...")
+    task.wait(1)
+
+    pcall(function()
+        game:GetService("TeleportService"):Teleport(game.PlaceId, game:GetService("Players").LocalPlayer)
+    end)
+    return
+end
+
+-- ========================================
 -- LOBBY SCRIPTS (รันเฉพาะตอนไม่ได้อยู่ในแมพ)
 -- ========================================
 
@@ -1884,6 +1947,45 @@ end
 
 print("✅ AutoSell enabled: Rare, Epic (including Shiny)")
 print("ℹ️ Legendary AutoSell will be enabled after obtaining Legendary units")
+
+task.wait(1)
+
+-- ========================================
+-- 2.5. Trait Filter Setup
+-- ========================================
+printStep("Setting Trait Filters...")
+
+do
+    local TRAIT_CONFIG = {
+        TargetTraits = {"Unbound", "Primordial", "Forsaken", "Draconic", "Investor"},
+        ClearBeforeSet = false,
+        FilterMode = false,
+    }
+
+    -- ล้าง filters (ถ้าต้องการ)
+    if TRAIT_CONFIG.ClearBeforeSet then
+        pcall(function() Nodes.CLIENT_CLEAR_TRAIT_FILTERS:Request() end)
+        task.wait(0.3)
+    end
+
+    -- ตั้ง filters
+    local success, fail = 0, 0
+    for _, trait in ipairs(TRAIT_CONFIG.TargetTraits) do
+        if pcall(function() Nodes.CLIENT_TOGGLE_TRAIT_FILTER:Request(trait, TRAIT_CONFIG.FilterMode) end) then
+            success = success + 1
+        else
+            fail = fail + 1
+        end
+        task.wait(0.1)
+    end
+
+    -- แจ้งผลลัพธ์
+    if fail == 0 then
+        print(string.format("✅ Trait Filters: %d traits %s", success, TRAIT_CONFIG.FilterMode and "enabled" or "disabled"))
+    else
+        warn(string.format("⚠️ Trait Filters: %d success, %d failed", success, fail))
+    end
+end
 
 task.wait(1)
 
@@ -2145,6 +2247,250 @@ task.wait(1)
 -- ========================================
 -- 5. เช็คตัวละครที่มีอยู่ + Summon System (Mythic/Secret)
 -- ========================================
+
+-- ========================================
+-- 5.0. TOY MAKER CHECK (ก่อน Summon)
+-- ========================================
+if GET_TOY_MAKER then
+    printStep("Checking for Toy Maker...")
+
+    local function checkToyMaker()
+        local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+        if not unitData then return nil, "None" end
+
+        local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
+
+        for fullKey, data in pairs(unitData) do
+            local internalName = fullKey:match("^(.+)#") or fullKey
+            local unitInfo = UnitInfo[internalName]
+            if unitInfo and unitInfo.DisplayName == "Toy Maker" then
+                local currentTrait = data.Trait or "None"
+                return fullKey, currentTrait
+            end
+        end
+        return nil, "None"
+    end
+
+    local toyMakerKey, currentTrait = checkToyMaker()
+
+    if toyMakerKey then
+        -- มี Toy Maker แล้ว - เช็ค Trait
+        print(string.format("✅ Found Toy Maker with Trait: %s", currentTrait))
+
+        -- เช็คว่า Trait ตรงกับที่ต้องการหรือไม่
+        local hasTargetTrait = false
+        if type(TARGET_TRAIT_TOY_MAKER) == "table" then
+            for _, targetTrait in ipairs(TARGET_TRAIT_TOY_MAKER) do
+                if currentTrait == targetTrait then
+                    hasTargetTrait = true
+                    break
+                end
+            end
+        elseif type(TARGET_TRAIT_TOY_MAKER) == "string" then
+            hasTargetTrait = (currentTrait == TARGET_TRAIT_TOY_MAKER)
+        end
+
+        if hasTargetTrait then
+            -- Trait ตรงแล้ว - ส่ง DONE
+            print(string.format("✅ Toy Maker has target trait: %s", currentTrait))
+
+            if HORST_ENABLED then
+                pcall(function()
+                    local HttpService = game:GetService("HttpService")
+                    local request = http_request or request or (syn and syn.request)
+
+                    -- ดึงจำนวน Gems
+                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local gems = 0
+                    if replica and replica.Data and replica.Data.Currencies then
+                        gems = replica.Data.Currencies.Gems or 0
+                    end
+
+                    request({
+                        Url = "https://horst.gg/api/update",
+                        Method = "POST",
+                        Headers = {["Content-Type"] = "application/json"},
+                        Body = HttpService:JSONEncode({
+                            user_id = Players.LocalPlayer.UserId,
+                            status = "DONE",
+                            description = string.format("Toy Maker (%s) | Gems: %d", currentTrait, gems)
+                        })
+                    })
+                end)
+            end
+            return  -- หยุดสคริปต์
+        else
+            -- Trait ไม่ตรง - ต้องสุ่ม
+            print(string.format("⚠️ Toy Maker trait '%s' is not target - attempting reroll...", currentTrait))
+
+            -- ดึง Trait Reroll Count
+            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+            local traitRerolls = 0
+            if replica and replica.Data and replica.Data.Currencies then
+                traitRerolls = replica.Data.Currencies.TraitRerolls or 0
+            end
+
+            if traitRerolls == 0 then
+                -- หมด Reroll แล้ว - ส่ง DONE พร้อมสถานะ
+                print(string.format("❌ Out of Trait Rerolls - Final Trait: %s", currentTrait))
+
+                if HORST_ENABLED then
+                    pcall(function()
+                        local HttpService = game:GetService("HttpService")
+                        local request = http_request or request or (syn and syn.request)
+
+                        -- ดึงจำนวน Gems
+                        local gems = 0
+                        if replica and replica.Data and replica.Data.Currencies then
+                            gems = replica.Data.Currencies.Gems or 0
+                        end
+
+                        request({
+                            Url = "https://horst.gg/api/update",
+                            Method = "POST",
+                            Headers = {["Content-Type"] = "application/json"},
+                            Body = HttpService:JSONEncode({
+                                user_id = Players.LocalPlayer.UserId,
+                                status = "DONE",
+                                description = string.format("Toy Maker (%s / Out of Reroll) | Gems: %d", currentTrait, gems)
+                            })
+                        })
+                    end)
+                end
+                return  -- หยุดสคริปต์
+            end
+
+            -- มี Reroll - เริ่มสุ่ม Trait
+            print(string.format("🎲 Starting Trait Reroll for Toy Maker... (%d rerolls available)", traitRerolls))
+
+            local rerollCount = 0
+            local maxRerolls = traitRerolls
+
+            while rerollCount < maxRerolls do
+                -- สุ่ม Trait
+                pcall(function()
+                    Nodes.ROLL_UNIT_TRAIT:FireServer(toyMakerKey, currentTrait)
+                end)
+                task.wait(0.5)
+
+                rerollCount = rerollCount + 1
+
+                -- เช็ค Trait ใหม่
+                local _, newTrait = checkToyMaker()
+                currentTrait = newTrait
+
+                -- เช็คว่าได้ Trait ที่ต้องการหรือไม่
+                local gotTarget = false
+                if type(TARGET_TRAIT_TOY_MAKER) == "table" then
+                    for _, targetTrait in ipairs(TARGET_TRAIT_TOY_MAKER) do
+                        if currentTrait == targetTrait then
+                            gotTarget = true
+                            break
+                        end
+                    end
+                elseif type(TARGET_TRAIT_TOY_MAKER) == "string" then
+                    gotTarget = (currentTrait == TARGET_TRAIT_TOY_MAKER)
+                end
+
+                if gotTarget then
+                    print(string.format("✅ Toy Maker | Trait: %s | Used: %d | Left: %d", currentTrait, rerollCount, maxRerolls - rerollCount))
+
+                    if HORST_ENABLED then
+                        pcall(function()
+                            local HttpService = game:GetService("HttpService")
+                            local request = http_request or request or (syn and syn.request)
+
+                            -- ดึงจำนวน Gems
+                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                            local gems = 0
+                            if replica and replica.Data and replica.Data.Currencies then
+                                gems = replica.Data.Currencies.Gems or 0
+                            end
+
+                            request({
+                                Url = "https://horst.gg/api/update",
+                                Method = "POST",
+                                Headers = {["Content-Type"] = "application/json"},
+                                Body = HttpService:JSONEncode({
+                                    user_id = Players.LocalPlayer.UserId,
+                                    status = "DONE",
+                                    description = string.format("Toy Maker (%s) | Gems: %d", currentTrait, gems)
+                                })
+                            })
+                        end)
+                    end
+                    return  -- หยุดสคริปต์
+                end
+
+                task.wait(0.1)
+            end
+
+            -- ใช้ Reroll หมดแล้ว
+            print(string.format("⚠️ Toy Maker | Final Trait: %s | Used: %d (all rerolls)", currentTrait, rerollCount))
+
+            if HORST_ENABLED then
+                pcall(function()
+                    local HttpService = game:GetService("HttpService")
+                    local request = http_request or request or (syn and syn.request)
+
+                    -- ดึงจำนวน Gems
+                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local gems = 0
+                    if replica and replica.Data and replica.Data.Currencies then
+                        gems = replica.Data.Currencies.Gems or 0
+                    end
+
+                    request({
+                        Url = "https://horst.gg/api/update",
+                        Method = "POST",
+                        Headers = {["Content-Type"] = "application/json"},
+                        Body = HttpService:JSONEncode({
+                            user_id = Players.LocalPlayer.UserId,
+                            status = "DONE",
+                            description = string.format("Toy Maker (%s / Out of Reroll) | Gems: %d", currentTrait, gems)
+                        })
+                    })
+                end)
+            end
+            return  -- หยุดสคริปต์
+                        Headers = {["Content-Type"] = "application/json"},
+                        Body = HttpService:JSONEncode({
+                            user_id = Players.LocalPlayer.UserId,
+                            status = "DONE",
+                            description = string.format("Toy Maker (%s / Out of Reroll)", currentTrait)
+                        })
+                    })
+                end)
+            end
+            return  -- หยุดสคริปต์
+        end
+    else
+        -- ไม่มี Toy Maker - ไป Tournament
+        print("❌ Toy Maker not found - Starting Tournament...")
+
+        task.wait(1)
+
+        -- เริ่ม Tournament
+        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+        local Actions = require(FusionPackage:WaitForChild("Actions"))
+
+        local config = {
+            MapName = "SchoolGrounds",
+            ActName = "competitive",
+            Difficulty = "Hard",
+            Gamemode = "Tournament",
+            TournamentId = "Release",
+            MaxPlayers = 1
+        }
+
+        print("🏆 Starting Tournament...")
+        Actions.PartyStartGame(config)
+
+        task.wait(5)
+        return  -- หยุดสคริปต์ - รอให้เข้าแมพ
+    end
+end
+
 printStep("Checking Inventory...")
 
 -- ลบฟังก์ชัน openInventory และ closeInventory เพราะไม่จำเป็นแล้ว
@@ -2929,8 +3275,6 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
                 end
 
-                print(string.format("🔍 [Trait Reroll] Available: %d", traitRerolls))
-
                 if traitRerolls <= 0 then
                     warn("❌ No Trait Reroll items available")
 
@@ -2978,24 +3322,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 local success = false
                 local finalTrait = currentTrait
 
-                -- เช็คว่า ROLL_UNIT_TRAIT มีอยู่หรือไม่
-                print(string.format("🔍 [Node Check] ROLL_UNIT_TRAIT exists: %s, type: %s",
-                    tostring(Nodes.ROLL_UNIT_TRAIT ~= nil),
-                    type(Nodes.ROLL_UNIT_TRAIT)))
-
-                -- เปิด Trait Reroll Menu ก่อน
-                print("🔓 [Menu] Opening TraitReroll menu...")
-                pcall(function()
-                    Nodes.TOGGLE_MENU:FireSelf("TraitReroll")
-                end)
-                task.wait(1)
-
-                print(string.format("🎲 [Reroll Loop] Starting with %d rerolls available", traitRerolls))
-
                 while attempts < traitRerolls do
                     attempts = attempts + 1
-
-                    print(string.format("🎲 [Attempt %d/%d] Rolling...", attempts, traitRerolls))
 
                     -- กำหนด Trait ที่จะส่งไป
                     local traitToRoll = nil
@@ -3003,33 +3331,25 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         traitToRoll = targetTrait
                     end
 
-                    print(string.format("   Params: fullKey=%s, traitToRoll=%s", unitInfo.fullKey, tostring(traitToRoll)))
-
-                    -- สุ่ม Trait (กลับไปใช้ Nodes + เพิ่ม delay)
+                    -- สุ่ม Trait
                     local rollSuccess, rollError = pcall(function()
                         Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
                     end)
 
                     if not rollSuccess then
-                        warn(string.format("❌ [Attempt %d] FireServer failed: %s", attempts, tostring(rollError)))
-                        task.wait(0.3)
+                        task.wait(0.1)
                         continue
                     end
 
-                    print(string.format("✅ [Attempt %d] FireServer success, waiting for result...", attempts))
-
-                    task.wait(2)  -- เพิ่ม delay จาก 0.5 เป็น 2 วินาที
+                    task.wait(0.5)
 
                     -- เช็ค Trait ใหม่
                     local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
 
                     if not newTrait then
-                        warn(string.format("❌ [Attempt %d] Failed to get new trait", attempts))
-                        task.wait(0.3)
+                        task.wait(0.1)
                         continue
                     end
-
-                    print(string.format("🔍 [Attempt %d] Old Trait: %s → New Trait: %s", attempts, currentTrait, newTrait))
 
                     finalTrait = newTrait
 
@@ -3054,17 +3374,18 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
 
                     if gotTargetTrait then
-                        print(string.format("✅ %s | Trait: %s | Used: %d | Left: %d",
-                            targetUnitName, newTrait, attempts, traitRerolls - attempts))
                         success = true
                         break
                     end
 
-                    task.wait(0.3)
+                    task.wait(0.1)
                 end
 
                 -- แสดงผลลัพธ์
                 if success then
+                    print(string.format("✅ %s | Trait: %s | Used: %d | Left: %d",
+                        targetUnitName, finalTrait, attempts, traitRerolls - attempts))
+
                     -- สำเร็จ
                     if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
                         _G.Horst_SetDescription(string.format("%s | Trait: %s", targetUnitName, finalTrait))
@@ -3081,7 +3402,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
                 else
                     -- ใช้หมด
-                    print(string.format("⚠️ %s | Used all %d rerolls without success", targetUnitName, traitRerolls))
+                    print(string.format("⚠️ %s | Final Trait: %s | Used: %d (all rerolls)", targetUnitName, finalTrait, traitRerolls))
 
                     if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_Done then
                         _G.Horst_SetDescription(string.format("%s | Trait: %s (Out of RR)", targetUnitName, finalTrait))
