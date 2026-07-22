@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 7.15
+-- 7.30
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2929,6 +2929,8 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
                 end
 
+                print(string.format("🔍 [Trait Reroll] Available: %d", traitRerolls))
+
                 if traitRerolls <= 0 then
                     warn("❌ No Trait Reroll items available")
 
@@ -2976,8 +2978,12 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 local success = false
                 local finalTrait = currentTrait
 
+                print(string.format("🎲 [Reroll Loop] Starting with %d rerolls available", traitRerolls))
+
                 while attempts < traitRerolls do
                     attempts = attempts + 1
+
+                    print(string.format("🎲 [Attempt %d/%d] Rolling...", attempts, traitRerolls))
 
                     -- กำหนด Trait ที่จะส่งไป
                     local traitToRoll = nil
@@ -2986,14 +2992,17 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
 
                     -- สุ่ม Trait
-                    local rollSuccess = pcall(function()
+                    local rollSuccess, rollError = pcall(function()
                         Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
                     end)
 
                     if not rollSuccess then
+                        warn(string.format("❌ [Attempt %d] FireServer failed: %s", attempts, tostring(rollError)))
                         task.wait(0.3)
                         continue
                     end
+
+                    print(string.format("✅ [Attempt %d] FireServer success, waiting for result...", attempts))
 
                     task.wait(0.5)
 
