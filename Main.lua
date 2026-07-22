@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.24
+-- 4.31
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -100,10 +100,14 @@ local UPDATE_INTERVAL = 30
 local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
 
 -- Summon Config
-local SUMMON_CONFIG = _G.Config.SummonUnits or {}  -- เช่น {"Elf Mage", "Shadow"}
+local SUMMON_CONFIG = _G.Config.SummonUnits or {}
+-- ถ้าเป็น string ("auto") ให้แปลงเป็น table ชั่วคราว
+if type(SUMMON_CONFIG) == "string" then
+    SUMMON_CONFIG = {}  -- จะถูก override ภายหลัง
+end
 local MYTHIC_UNITS = {"Cursed Student", "Elf Mage", "Flame Emperor", "Hollow", "Lady Giant", "Puppet", "Salmon Sorcerer", "String Demon"}
 local SECRET_UNITS = {"Shadow"}
-local hasSummonConfig = SUMMON_CONFIG and #SUMMON_CONFIG > 0
+local hasSummonConfig = _G.Config.SummonUnits and (_G.Config.SummonUnits == "auto" or #_G.Config.SummonUnits > 0)
 
 -- Trait Reroll Config
 local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
