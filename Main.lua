@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.39
+-- 4.53
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -2893,76 +2893,92 @@ if hasSummonConfig then
     local level = replica and replica.Data and replica.Data.Level or 0
     local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-    if level >= 10 and gems >= 2500 then
-        -- มี Level และ Gems พอ → พิจารณา Summon
+    -- 1. เช็ค Inventory ก่อนเสมอ (ไม่ว่า Gems จะพอหรือไม่)
+    local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
-        -- เช็คว่ามีตัวที่ต้องการใน Inventory แล้วหรือยัง
-        local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
+    if autoSummonMode then
+        -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
+        if #foundInInventory > 0 then
+            sendSummonStatus(foundInInventory, true)
+            hasTargetUnit = true
+            print("✅ Found target unit in inventory - skipping summon")
+        end
+    else
+        -- โหมดปกติ: ต้องได้ครบทุกตัว
+        if #foundInInventory >= #SUMMON_CONFIG then
+            sendSummonStatus(foundInInventory, true)
+            hasTargetUnit = true
+            print("✅ Found all target units in inventory - skipping summon")
+        end
+    end
 
-        if autoSummonMode then
-            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
-            if #foundInInventory > 0 then
-                sendSummonStatus(foundInInventory, true)
-                hasTargetUnit = true
-            else
+    -- 2. ถ้ายังไม่มีตัว → พิจารณาว่าจะสุ่มหรือไม่
+    if not hasTargetUnit then
+        if level >= 10 and gems >= 2500 then
+            -- มี Level และ Gems พอ → ไปสุ่ม
+            -- เช็คว่าเป็น Secret unit หรือไม่
+            local isSecretUnit = false
+            for _, configUnit in ipairs(SUMMON_CONFIG) do
+                for _, secretUnit in ipairs(SECRET_UNITS) do
+                    if configUnit == secretUnit then
+                        isSecretUnit = true
+                        print(string.format("ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
+                        break
+                    end
+                end
+                if isSecretUnit then break end
+            end
+
+            if isSecretUnit then
+                -- Secret unit: ข้าม Banner check (มีเสมอ)
                 shouldSummon = true
 
-                -- ตั้ง AutoSell Legendary
-                local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                local Actions = require(FusionPackage.Actions)
-                pcall(function()
-                    Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-                end)
-            end
-        else
-            -- โหมดปกติ: ต้องได้ครบทุกตัว
-            if #foundInInventory >= #SUMMON_CONFIG then
-                sendSummonStatus(foundInInventory, true)
-                hasTargetUnit = true
+                if autoSummonMode then
+                    -- ตั้ง AutoSell Legendary
+                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+                    local Actions = require(FusionPackage.Actions)
+                    pcall(function()
+                        Actions.ToggleAutoSell("Standard", "Legendary", false, true)
+                    end)
+                end
             else
-                -- เช็คว่าเป็น Secret unit หรือไม่
-                local isSecretUnit = false
-                for _, configUnit in ipairs(SUMMON_CONFIG) do
-                    for _, secretUnit in ipairs(SECRET_UNITS) do
-                        if configUnit == secretUnit then
-                            isSecretUnit = true
-                            print(string.format("ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
+                -- Mythic unit: เช็ค Banner ตามปกติ
+                local bannerUnits = checkCurrentBanner()
+
+                local hasMatch = false
+                for _, configUnit in pairs(SUMMON_CONFIG) do
+                    for _, bannerUnit in pairs(bannerUnits) do
+                        if configUnit == bannerUnit then
+                            hasMatch = true
                             break
                         end
                     end
-                    if isSecretUnit then break end
+                    if hasMatch then break end
                 end
 
-                if isSecretUnit then
-                    -- Secret unit: ข้าม Banner check (มีเสมอ)
+                if hasMatch then
                     shouldSummon = true
-                else
-                    -- Mythic unit: เช็ค Banner ตามปกติ
-                    local bannerUnits = checkCurrentBanner()
 
-                    local hasMatch = false
-                    for _, configUnit in pairs(SUMMON_CONFIG) do
-                        for _, bannerUnit in pairs(bannerUnits) do
-                            if configUnit == bannerUnit then
-                                hasMatch = true
-                                break
-                            end
-                        end
-                        if hasMatch then break end
+                    if autoSummonMode then
+                        -- ตั้ง AutoSell Legendary
+                        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+                        local Actions = require(FusionPackage.Actions)
+                        pcall(function()
+                            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
+                        end)
                     end
-
-                    if hasMatch then
-                        shouldSummon = true
-                    else
-                        if #foundInInventory > 0 then
-                            sendSummonStatus(foundInInventory, false)
-                        end
+                else
+                    if #foundInInventory > 0 then
+                        sendSummonStatus(foundInInventory, false)
                     end
                 end
             end
+        else
+            -- ไม่มีตัว + Gems ไม่พอ → ต้องฟาร์ม Gems ก่อน
+            warn(string.format("⚠️ Target unit not found in inventory. Need to farm more gems. Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
+            print("ℹ️ Script will proceed to farming to collect gems...")
+            -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
         end
-    else
-        warn(string.format("⚠️ Summon check skipped: Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
     end
 end
 
