@@ -1,5 +1,5 @@
 repeat wait() until game:IsLoaded()
--- 4.25
+-- 4.39
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- เพิ่ม: Toy Maker Tournament Mode
@@ -3106,19 +3106,48 @@ if shouldSummon then
     task.wait(1)
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- 50 ต่อรอบ (x10 summon)
-    local DELAY = 2
+    local AMOUNT_PER_SUMMON = 50  -- 50 gems ต่อรอบ (x10 summon)
+    local GEMS_PER_ROUND = 2500   -- 1 รอบ = 50 ครั้ง = 2500 gems
     local summonCount = 0
     local MAX_SUMMONS = 100
 
     while summonCount < MAX_SUMMONS do
+        -- เช็คว่าได้ตัวที่ต้องการก่อนสุ่ม (ทุกรอบ)
+        local foundBeforeSummon = checkInventoryForUnits(SUMMON_CONFIG)
+
+        if autoSummonMode then
+            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
+            if #foundBeforeSummon > 0 then
+                sendSummonStatus(foundBeforeSummon, true)
+                hasTargetUnit = true
+                print("✅ Found target unit before summon - skipping summon")
+                break
+            end
+        else
+            -- โหมดปกติ: ต้องได้ครบทุกตัว
+            if #foundBeforeSummon >= #SUMMON_CONFIG then
+                sendSummonStatus(foundBeforeSummon, true)
+                hasTargetUnit = true
+                print("✅ Found all target units before summon - skipping summon")
+                break
+            end
+        end
+
         -- เช็คเงินก่อนสุ่ม
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-        if gems < 2500 then
-            warn(string.format("⚠️ Not enough gems for summon: %d (require 2500)", gems))
+        -- คำนวณจำนวนครั้งที่สุ่มได้ (ถ้าเหลือน้อยกว่า 2500)
+        local maxSummons = math.floor(gems / AMOUNT_PER_SUMMON)
+
+        if maxSummons <= 0 then
+            warn(string.format("⚠️ Not enough gems for summon: %d (require %d)", gems, AMOUNT_PER_SUMMON))
             break
+        end
+
+        -- แสดงจำนวนรอบที่จะสุ่ม
+        if gems < GEMS_PER_ROUND then
+            print(string.format("ℹ️ Gems: %d (< 2500) - Can summon %d more times", gems, maxSummons))
         end
 
         summonCount = summonCount + 1
@@ -3127,35 +3156,17 @@ if shouldSummon then
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
         end)
 
-        task.wait(DELAY)
-
-        -- เช็คเงินหลัง summon
-        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-        local gemsAfter = replicaAfter and replicaAfter.Data and replicaAfter.Data.ItemData and replicaAfter.Data.ItemData.Gem and replicaAfter.Data.ItemData.Gem.Amount or 0
-
-        if gemsAfter < 2500 then
-            warn(string.format("⚠️ Gems depleted after summon: %d (stopping)", gemsAfter))
-
-            -- ปิด popup
-            for j = 1, 5 do
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                task.wait(0.05)
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-                task.wait(0.1)
-            end
-
-            break
-        end
+        task.wait(0.3)
 
         -- ปิด popup
         for j = 1, 5 do
             VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-            task.wait(0.05)
+            task.wait(0.01)
             VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-            task.wait(0.1)
+            task.wait(0.02)
         end
 
-        task.wait(2)
+        task.wait(0.2)
 
         -- เช็คว่าได้ครบหรือยัง
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
