@@ -1,8 +1,13 @@
 repeat wait() until game:IsLoaded()
+-- เช็คว่าอยู่ในแมพ Murder Mystery 2 หรือไม่
+if game.PlaceId ~= 84515722934860 then
+    return
+end
+
+print("Version 1.2.9")
 -- 5.28
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
--- เพิ่ม: Toy Maker Tournament Mode
 -- ========================================
 
 -- ========================================
@@ -100,10 +105,6 @@ local GEM_TARGET = _G.Config.GemTarget  -- nil = ไม่ส่ง DONE
 local UPDATE_INTERVAL = 30
 local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
 
--- Toy Maker Tournament Config
-local GET_TOY_MAKER = _G.Config.GetToyMaker == true  -- false = ไม่ต้องทำอะไร
-local TARGET_TRAIT_TOY_MAKER = _G.Config.TargetTraitToyMaker or {"Unbound", "Primordial", "Forsaken", "Draconic"}
-
 -- Secret Unit Config
 local CHANGE_ACC_SECRETS = _G.Config.Change_Acc_Secrets == true  -- true = ส่ง DONE หลัง Trait Reroll ของ Secret, false = ข้ามไปฟาร์มตามปกติ
 
@@ -147,6 +148,18 @@ local TRAIT_REROLL_PRIORITY = {
     "Salmon Sorcerer",  -- Priority 8 (Mythic)
     "String Demon"      -- Priority 9 (Mythic)
 }
+
+-- ========================================
+-- Description Mode Selection
+-- ========================================
+local DESCRIPTION_MODE = nil
+if GEM_TARGET and not hasSummonConfig then
+    DESCRIPTION_MODE = "GEM"
+    print("📊 Description Mode: GEM (Stats only)")
+elseif hasSummonConfig then
+    DESCRIPTION_MODE = "SUMMON"
+    print("📊 Description Mode: SUMMON (Unit tracking)")
+end
 
 local function printStep(stepName)
     print(string.format("🔄 %s", stepName))
@@ -663,12 +676,12 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                             _G.Horst_SetDescription(message, encoded_json)
                         end
 
-                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
-                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
                             print("✅ GEM_TARGET reached (no summon config) - Script will stop...")
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
@@ -705,37 +718,14 @@ local statsGuiSuccess, statsGuiError = pcall(function()
             end
         end)
 
-        -- ส่งรอบแรกทันที (แต่ไม่เช็ค GEM_TARGET ถ้ามี SummonUnits Config)
-        -- ใช้ flag ชั่วคราวเพื่อข้าม GEM_TARGET check ในรอบแรก
-        local skipFirstGemCheck = hasSummonConfig
-        if skipFirstGemCheck then
-            -- ถ้ามี SummonUnits Config ให้ส่งแค่ Description ไม่ตรวจสอบ GEM_TARGET
-            local success = pcall(function()
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                if replica and replica.Data and replica.Data.ItemData then
-                    local data = replica.Data
-                    local itemData = data.ItemData
-                    local level = data.Level or 0
-                    local gem = itemData.Gem and itemData.Gem.Amount or 0
-                    local gold = itemData.Gold and itemData.Gold.Amount or 0
-                    local trait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
-
-                    local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
-                        level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
-
-                    if _G.Horst_SetDescription then
-                        _G.Horst_SetDescription(message, "")
-                    end
-                end
-            end)
-        else
-            -- ถ้าไม่มี SummonUnits Config ให้ทำงานปกติ (รวมเช็ค GEM_TARGET)
+        -- ส่งรอบแรกทันที (เฉพาะ GEM mode)
+        if DESCRIPTION_MODE == "GEM" then
             sendHorstStatus()
         end
 
         -- Real-time update (เช็คทุก 1 วินาที แทน 0.3 วิ - ประหยัดสเปค)
         spawn(function()
-            while HORST_ENABLED and not _G.ScriptShouldStop do
+            while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
                 task.wait(1)  -- เช็คทุก 1 วินาที (ประหยัดสเปค)
 
                 local success, err = pcall(function()
@@ -782,7 +772,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
 
         -- Fallback: ส่งทุก 30 วิ (กรณี real-time พลาด)
         spawn(function()
-            while HORST_ENABLED and not _G.ScriptShouldStop do
+            while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
                 task.wait(UPDATE_INTERVAL)
                 sendHorstStatus()
             end
@@ -820,32 +810,6 @@ local function isInTargetMap()
                 if parameters.MapName == "SchoolGrounds" and
                    parameters.ActName == "Act 1" and
                    parameters.Gamemode == "Story" then
-                    return true
-                end
-            end
-        end
-
-        return false
-    end)
-    return success and result
-end
-
--- ฟังก์ชันเช็คว่าอยู่ใน Tournament (Toy Maker) หรือไม่
-local function isInToyMakerTournament()
-    local success, result = pcall(function()
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-
-        -- ใช้ Map Replicas
-        local allMaps = Nodes.GET_ALL_MAP_REPLICAS:InvokeSelf()
-
-        if allMaps then
-            for mapID, mapReplica in pairs(allMaps) do
-                local data = mapReplica.Data
-                local parameters = data.Parameters or {}
-
-                -- เช็คว่าเป็น Tournament Mode (ทุก Act)
-                if parameters.Gamemode == "Tournament" then
                     return true
                 end
             end
@@ -970,9 +934,6 @@ local function applyPerformanceOptimizations()
                 obj.Enabled = false
             end
         end)
-        if not success then
-            print(string.format("⚠️ [Performance] Failed to modify %s (%s): %s", obj.Name, obj.ClassName, tostring(err)))
-        end
     end
 
     for _, e in pairs(Lighting:GetChildren()) do
@@ -1012,60 +973,51 @@ end
 -- ========================================
 print("🔍 Checking current map...")
 
--- เช็ค flag ก่อนทำงานต่อ
-if _G.ScriptShouldStop then
-    print("⛔ Script stopped by DONE signal")
-    return
-end
-
 -- ตอนนี้อยู่ในแมพหรือไม่
 if isInTargetMap() then
     print("✅ In Story Mode (School Grounds - Act 1)")
     spawn(function()
         -- ปิด Tutorial popup (ถ้ามี)
         local function closeTutorial()
-        local success = pcall(function()
-            local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
-            local prompt = playerGui:FindFirstChild("Prompt")
-            if not prompt then return end
+            local success = pcall(function()
+                local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
+                local prompt = playerGui:FindFirstChild("Prompt")
+                if not prompt then return end
 
-            local tutorialLabel = prompt.Frame.Frame.Folder.Frame.Frame.Frame.TextLabel
-            if tutorialLabel then
-                local text = tutorialLabel.ContentText or tutorialLabel.Text
-                if text == "Tutorial" then
-                    local closeButton = prompt.Frame.Frame.Folder.Frame:FindFirstChild("PrimaryButton")
-                    if closeButton then
-                        local GuiService = game:GetService("GuiService")
-                        local VirtualInputManager = game:GetService("VirtualInputManager")
+                local tutorialLabel = prompt.Frame.Frame.Folder.Frame.Frame.Frame.TextLabel
+                if tutorialLabel then
+                    local text = tutorialLabel.ContentText or tutorialLabel.Text
+                    if text == "Tutorial" then
+                        local closeButton = prompt.Frame.Frame.Folder.Frame:FindFirstChild("PrimaryButton")
+                        if closeButton then
+                            local GuiService = game:GetService("GuiService")
+                            local VirtualInputManager = game:GetService("VirtualInputManager")
 
-                        GuiService.SelectedCoreObject = nil
-                        task.wait(0.1)
+                            GuiService.SelectedCoreObject = nil
+                            task.wait(0.1)
 
-                        closeButton.Selectable = true
-                        GuiService.SelectedCoreObject = closeButton
-                        task.wait(0.1)
+                            closeButton.Selectable = true
+                            GuiService.SelectedCoreObject = closeButton
+                            task.wait(0.1)
 
-                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-                        task.wait(0.05)
-                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+                            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                            task.wait(0.05)
+                            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
 
-                        task.wait(0.2)
-                        GuiService.SelectedCoreObject = nil
+                            task.wait(0.2)
+                            GuiService.SelectedCoreObject = nil
 
-                        return
+                            return
+                        end
                     end
                 end
-            end
-        end)
-        if not success then
+            end)
         end
-    end
 
-    closeTutorial()
-    task.wait(0.5)
+        closeTutorial()
+        task.wait(0.5)
 
-    -- ใช้ฟังก์ชัน Performance Optimization
-    applyPerformanceOptimizations()
+        applyPerformanceOptimizations()
 
 
     -- ====================================
@@ -1122,8 +1074,8 @@ if isInTargetMap() then
             return wave2
         end
 
-        warn("⚠️ Wave detection failed - both Replica and GUI methods failed, returning 0")
-        return 0
+        warn("❌ Wave detection failed - both Replica and GUI methods failed")
+        return nil  -- ⚠️ return nil แทน 0 เพื่อไม่ให้ trigger false wave reset
     end
 
     local function resetFarmingState()
@@ -1266,8 +1218,6 @@ if isInTargetMap() then
         end
 
         print("🔍 [placeAndUpgrade] Getting Player Replica...")
-
-        print("🔍 [placeAndUpgrade] Getting Player Replica...")
         local playerReplica = nil
         for i = 1, 5 do
             playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
@@ -1343,17 +1293,25 @@ if isInTargetMap() then
             local attempts = 0
             while attempts < 60 do
                 local money = getCurrentMoney()
+                local shouldContinue = false
 
-                -- ถ้า cost = 999999 (detect ไม่ได้) → บังคับวางเลย
-                local shouldPlace = false
+                -- ถ้า cost = 999999 (detect ไม่ได้) → retry getUnitCost() ก่อน
                 if cost == 999999 then
-                    warn(string.format("⚠️ [PlaceUnit] Cannot detect cost for slot %s - forcing placement", slot))
-                    shouldPlace = true
-                elseif money >= cost then
-                    shouldPlace = true
+                    warn(string.format("⚠️ [PlaceUnit] Cannot detect cost for slot %s - retrying detection", slot))
+                    local newCost, costErr = getUnitCost(slot)
+                    if newCost and newCost ~= 999999 then
+                        cost = newCost
+                        print(string.format("✅ [PlaceUnit] Cost detected: %d", cost))
+                    else
+                        warn(string.format("⚠️ [PlaceUnit] Still cannot detect cost - waiting before retry"))
+                        attempts = attempts + 1
+                        task.wait(1)
+                        shouldContinue = true
+                    end
                 end
 
-                if shouldPlace then
+                -- เช็คเงินตามปกติ
+                if not shouldContinue and money >= cost then
 
                     local success, err = pcall(function()
                         playerReplica:FireServer("PlaceGameUnit", slot, adjustedCFrame)
@@ -1382,7 +1340,7 @@ if isInTargetMap() then
                         attempts = attempts + 1
                         task.wait(1)
                     end
-                else
+                elseif not shouldContinue then
                     if attempts % 10 == 0 then
                         print(string.format("⏳ [PlaceUnit] Waiting for money: Slot=%s, Need=%d, Have=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
                     end
@@ -1745,7 +1703,15 @@ if isInTargetMap() then
             print(string.format("✅ [Wave Reset] Sold %d units (Failed: %d)", soldCount, failCount))
             task.wait(1)
 
-            return soldCount > 0 or failCount == 0
+            -- Return logic:
+            -- - true: ถ้าขายสำเร็จอย่างน้อย 1 ตัว หรือไม่มี unit เลย (soldCount=0 และ failCount=0)
+            -- - false: ถ้ามี unit แต่ขายไม่สำเร็จเลย (soldCount=0 และ failCount>0)
+            if failCount > 0 and soldCount == 0 then
+                warn("⚠️ [sellAllUnits] All sell attempts failed")
+                return false
+            else
+                return true  -- สำเร็จ หรือไม่มี unit
+            end
         end
 
         local isRunningPhase = false
@@ -1763,6 +1729,13 @@ if isInTargetMap() then
             end
 
             local currentWave = getCurrentWave()
+
+            -- ⚠️ ถ้า getCurrentWave() fail (return nil) ให้ข้ามรอบนี้
+            if currentWave == nil then
+                warn("⚠️ [Wave Monitor] getCurrentWave() returned nil - skipping this check")
+                continue
+            end
+
             local currentTime = tick()
 
             if (currentWave == 0 or currentWave == 1) and (currentTime - lastWaveResetTime) >= WAVE_RESET_COOLDOWN then
@@ -1892,74 +1865,6 @@ if isInTargetMap() then
 end
 
 -- ========================================
--- TOY MAKER TOURNAMENT MODE
--- ========================================
-if isInToyMakerTournament() then
-    print("🏆 Detected Toy Maker Tournament - Starting 3 minute countdown...")
-
-    -- ปิด Tutorial popup (ถ้ามี)
-    local function closeTutorial()
-        local success = pcall(function()
-            local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
-            local prompt = playerGui:FindFirstChild("Prompt")
-            if not prompt then return end
-
-            local tutorialLabel = prompt.Frame.Frame.Folder.Frame.Frame.Frame.TextLabel
-            if tutorialLabel then
-                local text = tutorialLabel.ContentText or tutorialLabel.Text
-                if text == "Tutorial" then
-                    local closeButton = prompt.Frame.Frame.Folder.Frame:FindFirstChild("PrimaryButton")
-                    if closeButton then
-                        local GuiService = game:GetService("GuiService")
-                        local VirtualInputManager = game:GetService("VirtualInputManager")
-
-                        GuiService.SelectedCoreObject = nil
-                        task.wait(0.1)
-
-                        closeButton.Selectable = true
-                        GuiService.SelectedCoreObject = closeButton
-                        task.wait(0.1)
-
-                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-                        task.wait(0.05)
-                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
-
-                        task.wait(0.2)
-                        GuiService.SelectedCoreObject = nil
-
-                        print("✅ Tutorial closed")
-                        return
-                    end
-                end
-            end
-        end)
-        if not success then
-            print("⚠️ Tutorial popup not found or already closed")
-        end
-    end
-
-    closeTutorial()
-    task.wait(0.5)
-
-    local countdown = 160  -- 2:40 นาที
-    while countdown > 0 do
-        if countdown % 20 == 0 then  -- print ทุก 30 วิ
-            print(string.format("⏱️ Time remaining: %d seconds", countdown))
-        end
-        task.wait(1)
-        countdown = countdown - 1
-    end
-
-    print("✅ 2:40 minutes completed - Rejoining...")
-    task.wait(1)
-
-    pcall(function()
-        game:GetService("TeleportService"):Teleport(game.PlaceId, game:GetService("Players").LocalPlayer)
-    end)
-    return
-end
-
--- ========================================
 -- LOBBY SCRIPTS (รันเฉพาะตอนไม่ได้อยู่ในแมพ)
 -- ========================================
 
@@ -2043,9 +1948,6 @@ for _, rarity in ipairs({"Rare", "Epic"}) do
     end)
     task.wait(0.3)
 end
-
-print("✅ AutoSell enabled: Rare, Epic (including Shiny)")
-print("ℹ️ Legendary AutoSell will be enabled after obtaining Legendary units")
 
 task.wait(1)
 
@@ -2208,8 +2110,6 @@ end
 
 task.wait(2)  -- รอให้ claim เสร็จ
 
-print("   ✅ Calendar rewards claimed!")
-
 -- ปิด popup รวม
 local VirtualInputManager = game:GetService("VirtualInputManager")
 for i = 1, 10 do
@@ -2228,40 +2128,36 @@ printStep("Redeeming Codes...")
 
 do
     local CODES = {
-        "HAPPYBDAYCOOP",
-        "1MGROUP!",
-        "100mvisits",
-        "100K!",
-        "30KLIKES!",
-        "EXPEDITIONS",
-        "AE#1",
-        "wfade",
-        "RELEASE",
+        "250kCCU",
+        "300kCCU",
+        "200mvisits",
+        "VillainInvasion",
+        "releasetournamentsorry",
+        "sorryforlongmaintenance",
     }
 
     local successCount = 0
     local failCount = 0
 
-    -- Redeem ทุกโค้ดพร้อมกัน
+    -- Redeem ทีละโค้ด (เพิ่มเวลาระหว่างโค้ด)
     for i, code in ipairs(CODES) do
-        spawn(function()
-            local success, result = pcall(function()
-                local request = Nodes.CLAIM_CODE:Request(code)
-                request:Timeout(5)
-                return request:Wait()
-            end)
-
-            if success and result and result.Success then
-                successCount = successCount + 1
-            else
-                failCount = failCount + 1
-            end
+        local success, result = pcall(function()
+            local request = Nodes.CLAIM_CODE:Request(code)
+            request:Timeout(5)
+            return request:Wait()
         end)
-        task.wait(0.05)  -- หน่วงเล็กน้อย
+
+        if success and result and result.Success then
+            successCount = successCount + 1
+        else
+            failCount = failCount + 1
+        end
+
+        task.wait(1.1)  -- รอ 5 วิต่อโค้ด
     end
 
-    -- รอให้ redeem เสร็จ
-    task.wait(6)
+    -- รอเพิ่มอีกนิด
+    task.wait(1)
 
 
     -- ปิด popup (ถ้ามี)
@@ -2346,318 +2242,6 @@ task.wait(1)
 -- ========================================
 -- 5. เช็คตัวละครที่มีอยู่ + Summon System (Mythic/Secret)
 -- ========================================
-
--- ========================================
--- 5.0. TOY MAKER CHECK (ก่อน Summon)
--- ========================================
-if GET_TOY_MAKER then
-    printStep("Checking for Toy Maker...")
-
-    local function checkToyMaker()
-        local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-        if not unitData then return nil, "None" end
-
-        local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
-
-        for fullKey, data in pairs(unitData) do
-            local internalName = fullKey:match("^(.+)#") or fullKey
-            local unitInfo = UnitInfo[internalName]
-            if unitInfo and unitInfo.DisplayName == "Toy Maker" then
-                local currentTrait = data.Trait or "None"
-                return fullKey, currentTrait
-            end
-        end
-        return nil, "None"
-    end
-
-    local toyMakerKey, currentTrait = checkToyMaker()
-
-    if toyMakerKey then
-        -- มี Toy Maker แล้ว - เช็ค Trait
-        print(string.format("✅ Found Toy Maker with Trait: %s", currentTrait))
-
-        -- เช็คว่า Trait ตรงกับที่ต้องการหรือไม่
-        local hasTargetTrait = false
-        if type(TARGET_TRAIT_TOY_MAKER) == "table" then
-            for _, targetTrait in ipairs(TARGET_TRAIT_TOY_MAKER) do
-                if currentTrait == targetTrait then
-                    hasTargetTrait = true
-                    break
-                end
-            end
-        elseif type(TARGET_TRAIT_TOY_MAKER) == "string" then
-            hasTargetTrait = (currentTrait == TARGET_TRAIT_TOY_MAKER)
-        end
-
-        if hasTargetTrait then
-            -- Trait ตรงแล้ว - ส่ง DONE
-            print(string.format("✅ Toy Maker has target trait: %s", currentTrait))
-
-            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
-
-                _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
-
-                if GEM_TARGET then
-                    if currentGems >= GEM_TARGET then
-                        _G.Horst_AccountChangeDone()
-                        print("✅ GEM_TARGET reached - Script will stop...")
-
-                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                        while true do
-                            pcall(function()
-                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
-                            end)
-                            task.wait(5)
-                        end
-                    end
-                else
-                    _G.Horst_AccountChangeDone()
-                    print("✅ Toy Maker has target trait - Script will stop...")
-
-                    -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                    while true do
-                        pcall(function()
-                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
-                        end)
-                        task.wait(5)
-                    end
-                end
-            end
-            return  -- หยุดสคริปต์
-        else
-            -- Trait ไม่ตรง - ต้องสุ่ม
-            print(string.format("⚠️ Toy Maker trait '%s' is not target - attempting reroll...", currentTrait))
-
-            -- ดึง Trait Reroll Count (ใช้วิธีเดียวกับ Trait Reroll System)
-            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            local traitRerolls = 0
-            if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
-                traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
-            end
-
-            print(string.format("📊 Trait Rerolls available: %d", traitRerolls))
-
-            if traitRerolls == 0 then
-                -- หมด Reroll แล้ว - ส่ง DONE พร้อมสถานะ
-                print(string.format("❌ Out of Trait Rerolls - Final Trait: %s", currentTrait))
-
-                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                    local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
-
-                    _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                    task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
-
-                    if GEM_TARGET then
-                        if currentGems >= GEM_TARGET then
-                            _G.Horst_AccountChangeDone()
-                            print("✅ GEM_TARGET reached - Script will stop...")
-
-                            -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-                    else
-                        _G.Horst_AccountChangeDone()
-                        print("✅ Toy Maker out of RR - Script will stop...")
-
-                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                        while true do
-                            pcall(function()
-                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
-                            end)
-                            task.wait(5)
-                        end
-                    end
-                end
-                return  -- หยุดสคริปต์
-            end
-
-            -- มี Reroll - เริ่มสุ่ม Trait
-            print(string.format("🎲 Starting Trait Reroll for Toy Maker... (%d rerolls available)", traitRerolls))
-
-            local rerollCount = 0
-            local maxRerolls = traitRerolls
-
-            while rerollCount < maxRerolls do
-                -- สุ่ม Trait
-                pcall(function()
-                    Nodes.ROLL_UNIT_TRAIT:FireServer(toyMakerKey, currentTrait)
-                end)
-                task.wait(0.5)
-
-                rerollCount = rerollCount + 1
-
-                -- เช็ค Trait ใหม่
-                local _, newTrait = checkToyMaker()
-                currentTrait = newTrait
-
-                -- เช็คว่าได้ Trait ที่ต้องการหรือไม่
-                local gotTarget = false
-                if type(TARGET_TRAIT_TOY_MAKER) == "table" then
-                    for _, targetTrait in ipairs(TARGET_TRAIT_TOY_MAKER) do
-                        if currentTrait == targetTrait then
-                            gotTarget = true
-                            break
-                        end
-                    end
-                elseif type(TARGET_TRAIT_TOY_MAKER) == "string" then
-                    gotTarget = (currentTrait == TARGET_TRAIT_TOY_MAKER)
-                end
-
-                if gotTarget then
-                    print(string.format("✅ Toy Maker | Trait: %s | Used: %d | Left: %d", currentTrait, rerollCount, maxRerolls - rerollCount))
-
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                        local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", currentGems, currentRR, currentTrait))
-
-                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ เพื่อหยุด Stats GUI Loop
-
-                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
-
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                _G.Horst_AccountChangeDone()
-                                print("✅ GEM_TARGET reached - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    task.wait(5)
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
-                                    end)
-                                end
-                            end
-                        else
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Toy Maker trait reroll succeeded - Script will stop...")
-
-                            -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ✅ %s", gems, rr, currentTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-                    end
-                    return  -- หยุดสคริปต์
-                end
-
-                task.wait(0.1)
-            end
-
-            -- ใช้ Reroll หมดแล้ว
-            print(string.format("⚠️ Toy Maker | Final Trait: %s | Used: %d (all rerolls)", currentTrait, rerollCount))
-
-            if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", currentGems, currentRR, currentTrait))
-
-                _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
-
-                if GEM_TARGET then
-                    if currentGems >= GEM_TARGET then
-                        _G.Horst_AccountChangeDone()
-                        print("✅ GEM_TARGET reached - Script will stop...")
-
-                        -- Loop ส่ง Description ทันทีและทุก 5 วิหลัง DONE
-                        while true do
-                            pcall(function()
-                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
-                            end)
-                            task.wait(5)
-                        end
-                    end
-                else
-                    _G.Horst_AccountChangeDone()
-                    print("✅ Toy Maker all rerolls used - Script will stop...")
-
-                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                    while true do
-                        task.wait(5)
-                        pcall(function()
-                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • Toy Maker • Trait: ❌ %s (Out of RR)", gems, rr, currentTrait))
-                        end)
-                    end
-                end
-            end
-            return  -- หยุดสคริปต์
-        end
-    else
-        -- ไม่มี Toy Maker - ไป Tournament
-        print("❌ Toy Maker not found - Starting Tournament...")
-
-        task.wait(1)
-
-        -- เริ่ม Tournament
-        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-        local Actions = require(FusionPackage:WaitForChild("Actions"))
-
-        local config = {
-            MapName = "SchoolGrounds",
-            ActName = "competitive",
-            Difficulty = "Hard",
-            Gamemode = "Tournament",
-            TournamentId = "Release",
-            MaxPlayers = 1
-        }
-
-        print("🏆 Starting Tournament...")
-        Actions.PartyStartGame(config)
-
-        task.wait(5)
-        return  -- หยุดสคริปต์ - รอให้เข้าแมพ
-    end
-end
 
 printStep("Checking Inventory...")
 
@@ -2858,19 +2442,31 @@ local function sendSummonStatus(foundUnits, isComplete)
         end)
 
         if isComplete and _G.Horst_AccountChangeDone then
-            _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
+            task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-            task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+            local ok = pcall(_G.Horst_AccountChangeDone)
+            if ok then
+                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                print("✅ Summon completed - Script will stop...")
 
-            pcall(_G.Horst_AccountChangeDone)
-            print("✅ Summon completed - Script will stop...")
+                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                while true do
+                    pcall(function()
+                        -- ส่ง message เดิมซ้ำ (foundUnits ไม่เปลี่ยนแล้ว)
+                        _G.Horst_SetDescription(message, "")
+                    end)
+                    task.wait(5)
+                end
+            else
+                warn("❌ Failed to send DONE (Summon)")
+            end
         end
     end
 end
 
 -- เช็ค Summon Config
 local shouldSummon = false
-local hasTargetUnit = false
+local hasTargetUnitConfig = false  -- เปลี่ยนชื่อจาก hasTargetUnit
 local autoSummonMode = false  -- ใหม่: โหมด auto summon
 
 if hasSummonConfig then
@@ -2900,20 +2496,20 @@ if hasSummonConfig then
         -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
         if #foundInInventory > 0 then
             sendSummonStatus(foundInInventory, true)
-            hasTargetUnit = true
+            hasTargetUnitConfig = true
             print("✅ Found target unit in inventory - skipping summon")
         end
     else
         -- โหมดปกติ: ต้องได้ครบทุกตัว
         if #foundInInventory >= #SUMMON_CONFIG then
             sendSummonStatus(foundInInventory, true)
-            hasTargetUnit = true
+            hasTargetUnitConfig = true
             print("✅ Found all target units in inventory - skipping summon")
         end
     end
 
     -- 2. ถ้ายังไม่มีตัว → พิจารณาว่าจะสุ่มหรือไม่
-    if not hasTargetUnit then
+    if not hasTargetUnitConfig then
         if level >= 10 and gems >= 2500 then
             -- มี Level และ Gems พอ → ไปสุ่ม
             -- เช็คว่าเป็น Secret unit หรือไม่
@@ -2932,15 +2528,6 @@ if hasSummonConfig then
             if isSecretUnit then
                 -- Secret unit: ข้าม Banner check (มีเสมอ)
                 shouldSummon = true
-
-                if autoSummonMode then
-                    -- ตั้ง AutoSell Legendary
-                    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                    local Actions = require(FusionPackage.Actions)
-                    pcall(function()
-                        Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-                    end)
-                end
             else
                 -- Mythic unit: เช็ค Banner ตามปกติ
                 local bannerUnits = checkCurrentBanner()
@@ -2958,15 +2545,6 @@ if hasSummonConfig then
 
                 if hasMatch then
                     shouldSummon = true
-
-                    if autoSummonMode then
-                        -- ตั้ง AutoSell Legendary
-                        local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-                        local Actions = require(FusionPackage.Actions)
-                        pcall(function()
-                            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-                        end)
-                    end
                 else
                     if #foundInInventory > 0 then
                         sendSummonStatus(foundInInventory, false)
@@ -2999,25 +2577,27 @@ if hasSummonConfig then
                 if #mythicFallback > 0 then
                     print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
                     sendSummonStatus(mythicFallback, false)
-                    hasTargetUnit = true
-                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) แต่มี hasTargetUnit = true (ไป Trait Reroll)
+                    hasTargetUnitConfig = true
+                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) แต่มี hasTargetUnitConfig = true (ไป Trait Reroll)
                 else
                     print("⚠️ No Mythic fallback found - will proceed to farming")
-                    -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
+                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
                 end
             else
                 print("ℹ️ Script will proceed to farming to collect gems...")
-                -- ไม่ตั้ง shouldSummon = true (จะข้ามไป Legendary Summon Loop และเข้าเกมฟาร์ม)
+                -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
             end
         end
     end
 end
 
 -- เช็คตัว Legendary (ถ้าไม่มี Summon Config หรือข้ามมาแล้ว)
--- แต่ไม่ override hasTargetUnit ถ้ามีค่าอยู่แล้ว (เช่น จาก Mythic Fallback)
-if not shouldSummon and not hasTargetUnit then
+-- แต่ไม่ override hasTargetUnitConfig ถ้ามีค่าอยู่แล้ว (เช่น จาก Mythic Fallback)
+local hasTargetUnitLegendary = false
 
-    local function checkForTargetUnits()
+if not shouldSummon and not hasTargetUnitConfig then
+
+    local function checkForLegendaryUnits()
         local targetUnits = {
             "The Hero",
             "Scissor",
@@ -3065,22 +2645,17 @@ if not shouldSummon and not hasTargetUnit then
             end
         end
 
-        if not targetFound then
-            -- แสดงตัวที่เจอทั้งหมด (เพื่อ debug)
-            local count = 0
-            for unitName, _ in pairs(foundUnits) do
-                count = count + 1
-                if count >= 10 then
-                    break
-                end
-            end
-        end
-
         return targetFound
     end
 
     -- เช็คตัวละครโดยตรง (ไม่ต้องเปิด Inventory)
-    hasTargetUnit = checkForTargetUnits()
+    hasTargetUnitLegendary = checkForLegendaryUnits()
+
+    if hasTargetUnitLegendary then
+        print("✅ Found Legendary unit in inventory")
+    else
+        print("ℹ️ No Legendary units found - will farm with Carrot to collect gems")
+    end
 end
 
 -- ========================================
@@ -3147,19 +2722,15 @@ if shouldSummon then
         task.wait(0.3)
 
         print("✅ Legendary AutoSell enabled before summon (including Shiny)")
-    else
-        print("ℹ️ No Legendary units found - Legendary AutoSell remains disabled")
     end
 
     task.wait(1)
 
     local BANNER_ID = "Standard"
     local AMOUNT_PER_SUMMON = 50  -- 50 gems ต่อรอบ (x10 summon)
-    local GEMS_PER_ROUND = 2500   -- 1 รอบ = 50 ครั้ง = 2500 gems
     local summonCount = 0
-    local MAX_SUMMONS = 100
 
-    while summonCount < MAX_SUMMONS do
+    while true do
         -- เช็คว่าได้ตัวที่ต้องการก่อนสุ่ม (ทุกรอบ)
         local foundBeforeSummon = checkInventoryForUnits(SUMMON_CONFIG)
 
@@ -3167,38 +2738,31 @@ if shouldSummon then
             -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
             if #foundBeforeSummon > 0 then
                 sendSummonStatus(foundBeforeSummon, true)
-                hasTargetUnit = true
-                print("✅ Found target unit before summon - skipping summon")
+                hasTargetUnitConfig = true
+                print("✅ Found target unit - stopping summon")
                 break
             end
         else
             -- โหมดปกติ: ต้องได้ครบทุกตัว
             if #foundBeforeSummon >= #SUMMON_CONFIG then
                 sendSummonStatus(foundBeforeSummon, true)
-                hasTargetUnit = true
-                print("✅ Found all target units before summon - skipping summon")
+                hasTargetUnitConfig = true
+                print("✅ Found all target units - stopping summon")
                 break
             end
         end
 
-        -- เช็คเงินก่อนสุ่ม
+        -- เช็ค Gems ก่อนสุ่ม
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-        -- คำนวณจำนวนครั้งที่สุ่มได้ (ถ้าเหลือน้อยกว่า 2500)
-        local maxSummons = math.floor(gems / AMOUNT_PER_SUMMON)
-
-        if maxSummons <= 0 then
+        if gems < AMOUNT_PER_SUMMON then
             warn(string.format("⚠️ Not enough gems for summon: %d (require %d)", gems, AMOUNT_PER_SUMMON))
             break
         end
 
-        -- แสดงจำนวนรอบที่จะสุ่ม
-        if gems < GEMS_PER_ROUND then
-            print(string.format("ℹ️ Gems: %d (< 2500) - Can summon %d more times", gems, maxSummons))
-        end
-
         summonCount = summonCount + 1
+        print(string.format("🎲 Summon #%d | Gems: %d", summonCount, gems))
 
         pcall(function()
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
@@ -3216,21 +2780,23 @@ if shouldSummon then
 
         task.wait(0.2)
 
-        -- เช็คว่าได้ครบหรือยัง
+        -- เช็คว่าได้ตัวที่ต้องการหรือยังหลังสุ่ม
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
         if autoSummonMode then
             -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
             if #foundInInventory > 0 then
                 sendSummonStatus(foundInInventory, true)
-                hasTargetUnit = true
+                hasTargetUnitConfig = true
+                print(string.format("✅ Found target unit after summon #%d - stopping", summonCount))
                 break
             end
         else
             -- โหมดปกติ: ต้องได้ครบทุกตัว
             if #foundInInventory >= #SUMMON_CONFIG then
                 sendSummonStatus(foundInInventory, true)
-                hasTargetUnit = true
+                hasTargetUnitConfig = true
+                print(string.format("✅ Found all target units after summon #%d - stopping", summonCount))
                 break
             else
                 -- แสดงตัวที่มีแล้ว
@@ -3279,15 +2845,7 @@ if shouldSummon then
         end
     end
 
-    if summonCount >= MAX_SUMMONS then
-        local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
-        if #foundInInventory > 0 then
-            sendSummonStatus(foundInInventory, false)
-        end
-        warn(string.format("⚠️ Reached max summons (%d)", MAX_SUMMONS))
-    end
-
-elseif not hasTargetUnit then
+elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     printStep("Auto Summon (Legendary)...")
 
     local BANNER_ID = "Standard"
@@ -3308,7 +2866,7 @@ elseif not hasTargetUnit then
         return #checkInventoryForUnits(targetUnits) > 0
     end
 
-    while not hasTargetUnit and summonCount < MAX_SUMMONS do
+    while not hasTargetUnitLegendary and summonCount < MAX_SUMMONS do
         summonCount = summonCount + 1
 
         pcall(function()
@@ -3328,14 +2886,14 @@ elseif not hasTargetUnit then
         task.wait(2)
 
         -- เช็คว่าได้ target unit หรือยัง
-        hasTargetUnit = checkForTargetUnits()
+        hasTargetUnitLegendary = checkForTargetUnits()
 
-        if hasTargetUnit then
+        if hasTargetUnitLegendary then
             warn("✅ Target Legendary unit found!")
         end
     end
 
-    if not hasTargetUnit then
+    if not hasTargetUnitLegendary then
         warn(string.format("⚠️ Reached max summons (%d) without finding target unit", MAX_SUMMONS))
     end
 else
@@ -3348,49 +2906,51 @@ end
 local shouldDoTraitReroll = false
 local traitRerollTargetUnit = nil
 
--- Debug: แสดง Config
-print("🔍 Trait Reroll Config:")
-print(string.format("   TRAIT_REROLL_CONFIG exists: %s", tostring(TRAIT_REROLL_CONFIG ~= nil)))
-if TRAIT_REROLL_CONFIG then
-    print(string.format("   TargetUnit: %s", tostring(TRAIT_REROLL_CONFIG.TargetUnit)))
-    print(string.format("   TargetTrait: %s", tostring(TRAIT_REROLL_CONFIG.TargetTrait)))
-end
-print(string.format("   hasTargetUnit: %s", tostring(hasTargetUnit)))
-
 if TRAIT_REROLL_CONFIG and TRAIT_REROLL_CONFIG.TargetUnit then
-    -- กรณีที่ 1: มี Config และได้ตัวที่ต้องการจาก Summon
-    if hasTargetUnit then
-        shouldDoTraitReroll = true
-        traitRerollTargetUnit = TRAIT_REROLL_CONFIG.TargetUnit
-    -- กรณีที่ 2: ไม่ได้ตัวที่ต้องการ แต่มี Mythic ใน Inventory (Fallback)
-    elseif not hasTargetUnit and hasSummonConfig then
-        printStep("Checking for fallback Mythic units...")
+    -- Normalize TargetUnit: ถ้าเป็น table → เอาตัวแรก, ถ้าเป็น string → ใช้ตรงๆ
+    local normalizedTargetUnit = TRAIT_REROLL_CONFIG.TargetUnit
+    if type(normalizedTargetUnit) == "table" then
+        normalizedTargetUnit = normalizedTargetUnit[1]  -- เอาตัวแรก
+    end
 
-        -- เช็คว่ามี Mythic ใดๆ ที่ไม่ได้ตั้งใน SummonConfig
-        local availableMythics = checkInventoryForUnits(MYTHIC_UNITS, true)
-
-        if #availableMythics > 0 then
-            -- เรียงตาม Priority
-            table.sort(availableMythics, function(a, b)
-                local priorityA = 999
-                local priorityB = 999
-
-                for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
-                    if a.name == unitName then priorityA = i end
-                    if b.name == unitName then priorityB = i end
-                end
-
-                return priorityA < priorityB
-            end)
-
-            local fallbackUnit = availableMythics[1].name
-            print(string.format("   Found fallback Mythic: %s", fallbackUnit))
-
+    -- กรณีที่ 1: TargetUnit = "auto" → ใช้ Fallback logic
+    if normalizedTargetUnit == "auto" then
+        if hasTargetUnitConfig then
             shouldDoTraitReroll = true
-            traitRerollTargetUnit = fallbackUnit
-        else
-            warn("   ⚠️ No fallback Mythic units found")
+            traitRerollTargetUnit = "auto"  -- ส่ง "auto" ต่อไป
+        elseif not hasTargetUnitConfig and hasSummonConfig then
+            -- Fallback: เลือก Mythic ใน Inventory
+            printStep("Checking for fallback Mythic units (auto mode)...")
+
+            local availableMythics = checkInventoryForUnits(MYTHIC_UNITS, true)
+
+            if #availableMythics > 0 then
+                -- เรียงตาม Priority
+                table.sort(availableMythics, function(a, b)
+                    local priorityA = 999
+                    local priorityB = 999
+
+                    for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
+                        if a.name == unitName then priorityA = i end
+                        if b.name == unitName then priorityB = i end
+                    end
+
+                    return priorityA < priorityB
+                end)
+
+                local fallbackUnit = availableMythics[1].name
+                print(string.format("   Found fallback Mythic: %s", fallbackUnit))
+
+                shouldDoTraitReroll = true
+                traitRerollTargetUnit = fallbackUnit
+            else
+                warn("   ⚠️ No fallback Mythic units found")
+            end
         end
+    -- กรณีที่ 2: ระบุชื่อ unit เฉพาะ (เช่น "Shadow")
+    else
+        shouldDoTraitReroll = true
+        traitRerollTargetUnit = normalizedTargetUnit  -- ใช้ชื่อที่ระบุ
     end
 end
 
@@ -3417,7 +2977,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
     -- ถ้า TargetUnit เป็น "auto" → เลือกตาม Priority
     if targetUnitName == "auto" then
-        if hasSummonConfig and hasTargetUnit then
+        if hasSummonConfig and hasTargetUnitConfig then
             -- เลือกจาก SummonConfig ที่ได้
             local availableUnits = checkInventoryForUnits(SUMMON_CONFIG, true)
 
@@ -3490,36 +3050,26 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
             -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
             local hasTargetTrait = false
 
-            print(string.format("🔍 [Trait Check] Current Trait: %s, Target: %s (type: %s)",
-                currentTrait, tostring(targetTrait), type(targetTrait)))
-
             if not targetTrait then
                 -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
                 hasTargetTrait = (currentTrait ~= "None")
-                print(string.format("   Mode: Random (any except None), hasTargetTrait: %s", tostring(hasTargetTrait)))
             elseif type(targetTrait) == "table" then
                 if #targetTrait == 0 then
                     -- {} = empty table → ไม่ต้องสุ่ม Trait
                     hasTargetTrait = true
-                    print("   Mode: Empty table → Skip reroll")
                 else
                     -- เช็คว่ามีใน list หรือไม่
-                    print(string.format("   Mode: Table with %d traits: %s", #targetTrait, table.concat(targetTrait, ", ")))
                     for _, trait in ipairs(targetTrait) do
                         if currentTrait == trait then
                             hasTargetTrait = true
                             break
                         end
                     end
-                    print(string.format("   Match found: %s", tostring(hasTargetTrait)))
                 end
             else
                 -- string เดียว
                 hasTargetTrait = (currentTrait == targetTrait)
-                print(string.format("   Mode: Single string, match: %s", tostring(hasTargetTrait)))
             end
-
-            print(string.format("🔍 [Final Decision] hasTargetTrait: %s", tostring(hasTargetTrait)))
 
             if hasTargetTrait then
                 -- มี Trait ที่ต้องการแล้ว → ข้ามการสุ่ม
@@ -3533,31 +3083,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, currentTrait))
 
-                    _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                    task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+                    task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                     -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
                     if isSecretSummon then
-                        _G.Horst_AccountChangeDone()
-                        print("✅ Secret unit Trait completed - Script will stop...")
-
-                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                        while true do
-                            pcall(function()
-                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
-                            end)
-                            task.wait(5)
-                        end
-                    end
-
-                    if GEM_TARGET then
-                        if currentGems >= GEM_TARGET then
-                            _G.Horst_AccountChangeDone()
-                            print("✅ GEM_TARGET reached - Script will stop...")
+                        local ok = pcall(_G.Horst_AccountChangeDone)
+                        if ok then
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                            print("✅ Secret unit Trait completed - Script will stop...")
 
                             -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                             while true do
@@ -3570,19 +3103,43 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                                 task.wait(5)
                             end
                         end
-                    else
-                        _G.Horst_AccountChangeDone()
-                        print("✅ Trait Reroll completed - Script will stop...")
+                    end
 
-                        -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                        while true do
-                            pcall(function()
-                                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
-                            end)
-                            task.wait(5)
+                    if GEM_TARGET then
+                        if currentGems >= GEM_TARGET then
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ GEM_TARGET reached - Script will stop...")
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
+                                    end)
+                                    task.wait(5)
+                                end
+                            end
+                        end
+                    else
+                        local ok = pcall(_G.Horst_AccountChangeDone)
+                        if ok then
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                            print("✅ Trait Reroll completed - Script will stop...")
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
+                                end)
+                                task.wait(5)
+                            end
                         end
                     end
                 end
@@ -3607,31 +3164,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
-                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                         -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
                         if isSecretSummon then
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Secret unit (Out of RR) - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                _G.Horst_AccountChangeDone()
-                                print("✅ GEM_TARGET reached - Script will stop...")
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit (Out of RR) - Script will stop...")
 
                                 -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
@@ -3644,19 +3184,43 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                                     task.wait(5)
                                 end
                             end
-                        else
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Out of RR - Script will stop...")
+                        end
 
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                end)
-                                task.wait(5)
+                        if GEM_TARGET then
+                            if currentGems >= GEM_TARGET then
+                                local ok = pcall(_G.Horst_AccountChangeDone)
+                                if ok then
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
+
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                    while true do
+                                        pcall(function()
+                                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                        end)
+                                        task.wait(5)
+                                    end
+                                end
+                            end
+                        else
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Out of RR - Script will stop...")
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         end
                     end
@@ -3704,8 +3268,6 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         break
                     end
 
-                    attempts = attempts + 1
-
                     -- กำหนด Trait ที่จะส่งไป
                     local traitToRoll = nil
                     if type(targetTrait) == "string" then
@@ -3721,6 +3283,9 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         task.wait(0.1)
                         continue
                     end
+
+                    -- นับ attempts เฉพาะเมื่อ FireServer สำเร็จ
+                    attempts = attempts + 1
 
                     task.wait(0.5)
 
@@ -3775,31 +3340,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, finalTrait))
 
-                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                         -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
                         if isSecretSummon then
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Secret unit Trait succeeded - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                _G.Horst_AccountChangeDone()
-                                print("✅ GEM_TARGET reached - Script will stop...")
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit Trait succeeded - Script will stop...")
 
                                 -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
@@ -3812,19 +3360,43 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                                     task.wait(5)
                                 end
                             end
-                        else
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Trait Reroll succeeded - Script will stop...")
+                        end
 
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
-                                end)
-                                task.wait(5)
+                        if GEM_TARGET then
+                            if currentGems >= GEM_TARGET then
+                                local ok = pcall(_G.Horst_AccountChangeDone)
+                                if ok then
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
+
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                    while true do
+                                        pcall(function()
+                                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                            local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                            local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
+                                        end)
+                                        task.wait(5)
+                                    end
+                                end
+                            end
+                        else
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Trait Reroll succeeded - Script will stop...")
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         end
                     end
@@ -3839,31 +3411,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
 
-                        _G.ScriptShouldStop = true  -- ตั้งค่า flag ก่อนรอ
-
-                        task.wait(5)  -- รอ 5 วิก่อนส่ง DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                         -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
                         if isSecretSummon then
-                            _G.Horst_AccountChangeDone()
-                            print("✅ Secret unit (all rerolls used) - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                _G.Horst_AccountChangeDone()
-                                print("✅ GEM_TARGET reached - Script will stop...")
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit (all rerolls used) - Script will stop...")
 
                                 -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
@@ -3876,19 +3431,43 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                                     task.wait(5)
                                 end
                             end
-                        else
-                            _G.Horst_AccountChangeDone()
-                            print("✅ All rerolls used - Script will stop...")
+                        end
 
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                    local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                        if GEM_TARGET then
+                            if currentGems >= GEM_TARGET then
+                                local ok = pcall(_G.Horst_AccountChangeDone)
+                                if ok then
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
+
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                    while true do
+                                        pcall(function()
+                                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                            local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                            local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                        end)
+                                        task.wait(5)
+                                    end
+                                end
+                            end
+                        else
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ All rerolls used - Script will stop...")
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
+                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
                                     _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
                                 end)
                                 task.wait(5)
+                                end
                             end
                         end
                     end
@@ -3896,102 +3475,99 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 end  -- ปิด else ของ if traitRerolls <= 0
             end  -- ปิด if hasTargetTrait
         else
-            warn(string.format("❌ Unit '%s' not found in inventory", targetUnitName))
+            warn(string.format("⚠️ Unit '%s' not found in inventory - skipping Trait Reroll", targetUnitName))
         end  -- ปิด if #unitsWithTrait > 0
+    else
+        warn("⚠️ No target unit specified - skipping Trait Reroll")
     end  -- ปิด if targetUnitName then
 
     task.wait(1)
 end  -- ปิด if shouldDoTraitReroll and traitRerollTargetUnit
 
 -- ========================================
--- 7. QuickEquip (ถ้ามีตัวที่ต้องการ)
+-- 7. QuickEquip (เฉพาะ Carrot + Legendary เท่านั้น)
 -- ========================================
-if hasTargetUnit then
-    printStep("Quick Equip...")
+-- เข้าเกมเสมอ แต่ equip Legendary เฉพาะตอนที่มี
+printStep("Quick Equip...")
 
-    -- Get UnitData และ UnitInfo โดยตรง (ไม่ต้องปิด Inventory)
-    local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-    local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
+-- Get UnitData และ UnitInfo โดยตรง (ไม่ต้องปิด Inventory)
+local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
 
-    -- สร้าง displayNameMap (เลือก Shiny ก่อน)
-    local displayNameMap = {}
-    for fullKey, data in pairs(unitData) do
-        local internalName = fullKey:match("^(.+)#") or fullKey
-        local displayName = UnitInfo[internalName] and UnitInfo[internalName].DisplayName or internalName
-        local lowerName = displayName:lower()
-        local isShiny = data.Shiny or false
+-- สร้าง displayNameMap (เลือก Shiny ก่อน)
+local displayNameMap = {}
+for fullKey, data in pairs(unitData) do
+    local internalName = fullKey:match("^(.+)#") or fullKey
+    local displayName = UnitInfo[internalName] and UnitInfo[internalName].DisplayName or internalName
+    local lowerName = displayName:lower()
+    local isShiny = data.Shiny or false
 
-        -- เลือก Shiny ก่อน หรือถ้ายังไม่มีก็เอาตัวปกติ
-        if not displayNameMap[lowerName] or isShiny then
-            displayNameMap[lowerName] = fullKey
-            if isShiny then
-                print(string.format("   ✨ Found SHINY %s: %s", displayName, fullKey))
-            end
-        end
+    -- เลือก Shiny ก่อน หรือถ้ายังไม่มีก็เอาตัวปกติ
+    if not displayNameMap[lowerName] or isShiny then
+        displayNameMap[lowerName] = fullKey
     end
-
-    -- หา target unit ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น - ไม่ว่าจะมี Config หรือไม่)
-    local LEGENDARY_UNITS = {
-        "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
-        "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
-        "The Hero",           -- Priority 3 (วางได้ 4 ตัว)
-        "Greed",              -- Priority 4 (วางได้ 3 ตัว)
-        "Scissor",            -- Priority 5 (วางได้ 3 ตัว)
-        "Water Princess"      -- Priority 6 (วางได้ 3 ตัว)
-    }
-
-    local foundTargetUnit = nil
-
-    -- เช็คตามลำดับ Priority
-    for _, targetUnit in ipairs(LEGENDARY_UNITS) do
-        if displayNameMap[targetUnit:lower()] then
-            foundTargetUnit = targetUnit
-            break
-        end
-    end
-
-    -- Unequip All ก่อน
-    Nodes.UNIT_UNEQUIP_ALL:FireServer("Unit")
-    task.wait(0.5)
-
-    -- Equip Carrot ช่อง 1
-    local carrotFullKey = displayNameMap["carrot"]
-    if carrotFullKey then
-        Nodes.UNIT_EQUIP:FireServer(carrotFullKey, "1")
-        task.wait(0.3)
-    else
-        warn("❌ Carrot not found in inventory")
-    end
-
-    -- Equip target unit ช่อง 2
-    if foundTargetUnit then
-        local targetFullKey = displayNameMap[foundTargetUnit:lower()]
-        if targetFullKey then
-            Nodes.UNIT_EQUIP:FireServer(targetFullKey, "2")
-            task.wait(0.3)
-        end
-    else
-        warn("❌ No target unit to equip in slot 2")
-    end
-
-    task.wait(1)
-
-    -- ========================================
-    -- 8. auto_start_game.lua
-    -- ========================================
-    printStep("Starting Game...")
-
-    local CONFIG = {
-        MapName = "SchoolGrounds",
-        ActName = "Act 1",
-        Difficulty = "Hard",
-        Gamemode = "Story"
-    }
-
-    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-    local Actions = require(FusionPackage.Actions)
-    Actions.PartyStartGame(CONFIG)
-
-else
-    warn("⚠️ Skipping equip and game start - no target unit found")
 end
+
+-- หา Legendary ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น)
+local LEGENDARY_UNITS = {
+    "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
+    "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
+    "The Hero",           -- Priority 3 (วางได้ 4 ตัว)
+    "Greed",              -- Priority 4 (วางได้ 3 ตัว)
+    "Scissor",            -- Priority 5 (วางได้ 3 ตัว)
+    "Water Princess"      -- Priority 6 (วางได้ 3 ตัว)
+}
+
+local foundLegendaryUnit = nil
+
+-- เช็คตามลำดับ Priority
+for _, targetUnit in ipairs(LEGENDARY_UNITS) do
+    if displayNameMap[targetUnit:lower()] then
+        foundLegendaryUnit = targetUnit
+        break
+    end
+end
+
+-- Unequip All ก่อน
+Nodes.UNIT_UNEQUIP_ALL:FireServer("Unit")
+task.wait(0.5)
+
+-- Equip Carrot ช่อง 1 (เสมอ)
+local carrotFullKey = displayNameMap["carrot"]
+if carrotFullKey then
+    Nodes.UNIT_EQUIP:FireServer(carrotFullKey, "1")
+    task.wait(0.3)
+    print("✅ Equipped Carrot in slot 1")
+else
+    warn("❌ Carrot not found in inventory")
+end
+
+-- Equip Legendary ช่อง 2 (ถ้ามี)
+if foundLegendaryUnit then
+    local legendaryFullKey = displayNameMap[foundLegendaryUnit:lower()]
+    if legendaryFullKey then
+        Nodes.UNIT_EQUIP:FireServer(legendaryFullKey, "2")
+        task.wait(0.3)
+        print(string.format("✅ Equipped %s in slot 2", foundLegendaryUnit))
+    end
+else
+    print("ℹ️ No Legendary unit found - will farm with Carrot only in slot 1")
+end
+
+task.wait(1)
+
+-- ========================================
+-- 8. auto_start_game.lua
+-- ========================================
+printStep("Starting Game...")
+
+local CONFIG = {
+    MapName = "SchoolGrounds",
+    ActName = "Act 1",
+    Difficulty = "Hard",
+    Gamemode = "Story"
+}
+
+local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
+local Actions = require(FusionPackage.Actions)
+Actions.PartyStartGame(CONFIG)
