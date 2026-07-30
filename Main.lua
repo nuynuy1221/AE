@@ -5,7 +5,7 @@ if game.PlaceId ~= 84515722934860 then
 end
 
 print("Version 1.2.9")
-print("11.18")
+print("11.35")
 -- ========================================
 -- Main Script - à¸£à¸§à¸¡à¸—à¸¸à¸à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸•à¸²à¸¡à¸¥à¸³à¸”à¸±à¸š
 -- ========================================
@@ -3144,67 +3144,28 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
-                        task.wait(15)  -- à¸£à¸­ 15 à¸§à¸´à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ DONE
+                        task.wait(15)
 
-                        -- à¸–à¹‰à¸² Config à¹€à¸›à¹‡à¸™ Secret unit â†’ à¸šà¸±à¸‡à¸„à¸±à¸šà¸ªà¹ˆà¸‡ DONE
                         local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… Secret unit (Out of RR) - Script will stop...")
+                        if ok then
+                            _G.ScriptShouldStop = true
+                            print("✅ Out of RR - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
-                                while true do
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
-
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                local ok = pcall(_G.Horst_AccountChangeDone)
-                                if ok then
-                                    _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                    print("âœ… GEM_TARGET reached - Script will stop...")
-
-                                    -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
-                                    while true do
-                                        pcall(function()
-                                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                        end)
-                                        task.wait(5)
-                                    end
-                                end
-                            end
-                        else
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… Out of RR - Script will stop...")
-
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
-                                while true do
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                    end)
-                                    task.wait(5)
-                                end
+                            while true do
+                                pcall(function()
+                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                end)
+                                task.wait(5)
                             end
                         end
                     end
+                    return
+                end
                 else
                 -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„ Trait à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™à¸žà¸£à¹‰à¸­à¸¡ retry
                 local function getCurrentTrait(fullKey, maxRetries)
