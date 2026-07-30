@@ -5,7 +5,7 @@ if game.PlaceId ~= 84515722934860 then
 end
 
 print("Version 1.2.9")
-print("10.22")
+print("11.04")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -683,6 +683,36 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                             doneSent = true
                             _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
                             print("✅ GEM_TARGET reached (no summon config) - Script will stop...")
+
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                            while true do
+                                pcall(function()
+                                    local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                    if replicaLoop and replicaLoop.Data and replicaLoop.Data.ItemData then
+                                        local dataLoop = replicaLoop.Data
+                                        local itemDataLoop = dataLoop.ItemData
+                                        local levelLoop = dataLoop.Level or 0
+                                        local gemLoop = itemDataLoop.Gem and type(itemDataLoop.Gem) == "table" and itemDataLoop.Gem.Amount or 0
+                                        local goldLoop = itemDataLoop.Gold and type(itemDataLoop.Gold) == "table" and itemDataLoop.Gold.Amount or 0
+                                        local traitLoop = itemDataLoop.TraitReroll and type(itemDataLoop.TraitReroll) == "table" and itemDataLoop.TraitReroll.Amount or 0
+
+                                        local HttpService = game:GetService("HttpService")
+                                        local json_data = {
+                                            Level = levelLoop,
+                                            Gem = gemLoop,
+                                            Gold = goldLoop,
+                                            Trait = traitLoop
+                                        }
+                                        local encoded_json = HttpService:JSONEncode(json_data)
+
+                                        local messageLoop = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
+                                            levelLoop, formatNumber(gemLoop), formatNumber(goldLoop), formatNumber(traitLoop))
+
+                                        _G.Horst_SetDescription(messageLoop, encoded_json)
+                                    end
+                                end)
+                                task.wait(5)
+                            end
                         else
                             warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
                         end
@@ -786,9 +816,7 @@ end
 task.wait(1)
 
 -- Config (สามารถแก้ไขได้จาก loadstring)
-_G.Config = _G.Config or {
-    Disable3DRendering = false
-}
+_G.Config = _G.Config or {}
 
 -- ========================================
 -- ฟังก์ชันเช็คแมพ - ต้องเช็คหลัง Stats GUI โหลดเสร็จ
@@ -825,16 +853,16 @@ end
 -- ฟังก์ชัน RemoveLobbyMesh (ใช้ร่วมกันระหว่าง In-Game และ Lobby)
 -- ========================================
 local function applyPerformanceOptimizations()
-    local Config = _G.Config
-
     local g = game
     local w = g.Workspace
     local l = g.Lighting
     local t = w.Terrain
 
-    if Config.Disable3DRendering then
+    -- ใช้เฉพาะ TOGGLE_RENDER3D (เอา Config.Disable3DRendering ออก)
+    if TOGGLE_RENDER3D then
         local RunService = game:GetService("RunService")
         RunService:Set3dRenderingEnabled(false)
+        print("🔧 3D Rendering disabled (TOGGLE_RENDER3D)")
     end
 
     t.WaterWaveSize = 0
@@ -2388,78 +2416,44 @@ end  -- ปิด selectBestUnitForReroll function
 local function sendSummonStatus(foundUnits, isComplete)
     if not HORST_ENABLED or not _G.Horst_SetDescription then return end
 
-    local secretUnits = {}
-    local mythicUnits = {}
-    local otherUnits = {}
+    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+    local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
+    local rr = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-    -- เก็บรายชื่อ units ที่ต้องการ (ถ้ามี config)
-    local configUnitSet = {}
-    if hasSummonConfig then
-        for _, unit in ipairs(SUMMON_CONFIG) do
-            configUnitSet[unit] = true
-        end
-    end
-
+    -- สร้าง unit list
+    local unitNames = {}
     for _, unit in ipairs(foundUnits) do
-        local isSecret = false
-        for _, secret in ipairs(SECRET_UNITS) do
-            if unit == secret then
-                table.insert(secretUnits, unit)
-                isSecret = true
-                break
+        table.insert(unitNames, unit)
+    end
+    local unitText = table.concat(unitNames, ", ")
+
+    -- สร้าง message ในรูปแบบเดียวกับ GEM mode
+    local message = string.format("💎 Gems: %d • RR: %d • %s", gems, rr, unitText)
+
+    pcall(function()
+        _G.Horst_SetDescription(message, "")
+    end)
+
+    if isComplete and _G.Horst_AccountChangeDone then
+        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
+
+        local ok = pcall(_G.Horst_AccountChangeDone)
+        if ok then
+            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+            print("✅ Summon completed - Script will stop...")
+
+            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+            while true do
+                pcall(function()
+                    local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local gemsLoop = replicaLoop and replicaLoop.Data.ItemData.Gem.Amount or 0
+                    local rrLoop = replicaLoop and replicaLoop.Data.ItemData.TraitReroll and replicaLoop.Data.ItemData.TraitReroll.Amount or 0
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s", gemsLoop, rrLoop, unitText), "")
+                end)
+                task.wait(5)
             end
-        end
-        if not isSecret then
-            for _, mythic in ipairs(MYTHIC_UNITS) do
-                if unit == mythic then
-                    -- ถ้ามี Config และตัวนี้ไม่ได้อยู่ใน Config → ใส่ Other
-                    if hasSummonConfig and not configUnitSet[unit] then
-                        table.insert(otherUnits, unit)
-                    else
-                        table.insert(mythicUnits, unit)
-                    end
-                    break
-                end
-            end
-        end
-    end
-
-    local descParts = {}
-    if #secretUnits > 0 then
-        table.insert(descParts, "Secret: " .. table.concat(secretUnits, ", "))
-    end
-    if #mythicUnits > 0 then
-        table.insert(descParts, "Mythic: " .. table.concat(mythicUnits, ", "))
-    end
-    if #otherUnits > 0 then
-        table.insert(descParts, "Other: " .. table.concat(otherUnits, ", "))
-    end
-
-    if #descParts > 0 then
-        local message = table.concat(descParts, " • ")
-        pcall(function()
-            _G.Horst_SetDescription(message, "")
-        end)
-
-        if isComplete and _G.Horst_AccountChangeDone then
-            task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
-
-            local ok = pcall(_G.Horst_AccountChangeDone)
-            if ok then
-                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                print("✅ Summon completed - Script will stop...")
-
-                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                while true do
-                    pcall(function()
-                        -- ส่ง message เดิมซ้ำ (foundUnits ไม่เปลี่ยนแล้ว)
-                        _G.Horst_SetDescription(message, "")
-                    end)
-                    task.wait(5)
-                end
-            else
-                warn("❌ Failed to send DONE (Summon)")
-            end
+        else
+            warn("❌ Failed to send DONE (Summon)")
         end
     end
 end
