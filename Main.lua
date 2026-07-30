@@ -5,7 +5,7 @@ if game.PlaceId ~= 84515722934860 then
 end
 
 print("Version 1.2.9")
-print("12.05")
+print("12.18")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -649,21 +649,12 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 local trait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
 
                 -- สร้าง Status Message
-                local HttpService = game:GetService("HttpService")
-                local json_data = {
-                    Level = level,
-                    Gem = gem,
-                    Gold = gold,
-                    Trait = trait
-                }
-                local encoded_json = HttpService:JSONEncode(json_data)
-
                 local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
                     level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
 
                 -- ส่ง Status Update
                 if _G.Horst_SetDescription then
-                    _G.Horst_SetDescription(message, encoded_json)
+                    _G.Horst_SetDescription(message)
                     horstErrorCount = 0  -- Reset error count เมื่อส่งสำเร็จ
                 end
 
@@ -673,7 +664,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                     if _G.Horst_AccountChangeDone then
                         -- ส่ง Description ก่อน
                         if _G.Horst_SetDescription then
-                            _G.Horst_SetDescription(message, encoded_json)
+                            _G.Horst_SetDescription(message)
                         end
 
                         task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
@@ -708,7 +699,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                                         local messageLoop = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
                                             levelLoop, formatNumber(gemLoop), formatNumber(goldLoop), formatNumber(traitLoop))
 
-                                        _G.Horst_SetDescription(messageLoop, encoded_json)
+                                        _G.Horst_SetDescription(messageLoop)
                                     end
                                 end)
                                 task.wait(5)
@@ -2431,31 +2422,11 @@ local function sendSummonStatus(foundUnits, isComplete)
     local message = string.format("💎 Gems: %d • RR: %d • %s", gems, rr, unitText)
 
     pcall(function()
-        _G.Horst_SetDescription(message, "")
+        _G.Horst_SetDescription(message)
     end)
 
-    if isComplete and _G.Horst_AccountChangeDone then
-        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
-
-        local ok = pcall(_G.Horst_AccountChangeDone)
-        if ok then
-            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-            print("✅ Summon completed - Script will stop...")
-
-            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-            while true do
-                pcall(function()
-                    local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local gemsLoop = replicaLoop and replicaLoop.Data.ItemData.Gem.Amount or 0
-                    local rrLoop = replicaLoop and replicaLoop.Data.ItemData.TraitReroll and replicaLoop.Data.ItemData.TraitReroll.Amount or 0
-                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s", gemsLoop, rrLoop, unitText), "")
-                end)
-                task.wait(5)
-            end
-        else
-            warn("❌ Failed to send DONE (Summon)")
-        end
-    end
+    -- ไม่ส่ง DONE ที่นี่ - ให้ Trait Reroll system รับผิดชอบส่ง DONE
+    -- เพราะต้องสุ่ม Trait ก่อน
 end
 
 -- เช็ค Summon Config
@@ -3091,26 +3062,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                    -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
-                    if isSecretSummon then
-                        local ok = pcall(_G.Horst_AccountChangeDone)
-                        if ok then
-                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                            print("✅ Secret unit Trait completed - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-                    end
-
+                    -- ส่ง DONE เสมอเมื่อมี Trait ที่ต้องการแล้ว (ไม่ว่า Config จะเป็นอะไร)
                     if GEM_TARGET then
                         if currentGems >= GEM_TARGET then
                             local ok = pcall(_G.Horst_AccountChangeDone)
@@ -3172,26 +3124,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
-                        if isSecretSummon then
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ Secret unit (Out of RR) - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
-
+                        -- ส่ง DONE เสมอเมื่อหมด Trait Reroll (ไม่ว่า Config จะเป็นอะไร)
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 local ok = pcall(_G.Horst_AccountChangeDone)
@@ -3348,26 +3281,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
-                        if isSecretSummon then
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ Secret unit Trait succeeded - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
-
+                        -- ส่ง DONE เสมอ (ไม่ว่า Config จะเป็นอะไร)
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 local ok = pcall(_G.Horst_AccountChangeDone)
@@ -3419,26 +3333,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                         task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
-                        if isSecretSummon then
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ Secret unit (all rerolls used) - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
-
+                        -- ส่ง DONE เสมอ (ไม่ว่า Config จะเป็นอะไร)
                         if GEM_TARGET then
                             if currentGems >= GEM_TARGET then
                                 local ok = pcall(_G.Horst_AccountChangeDone)
