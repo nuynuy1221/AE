@@ -5,54 +5,54 @@ if game.PlaceId ~= 84515722934860 then
 end
 
 print("Version 1.2.9")
-print("11.35")
+print("12.05")
 -- ========================================
--- Main Script - à¸£à¸§à¸¡à¸—à¸¸à¸à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸•à¸²à¸¡à¸¥à¸³à¸”à¸±à¸š
+-- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
 
 -- ========================================
--- 0. Check PlayerGui (à¸•à¹‰à¸­à¸‡à¹‚à¸«à¸¥à¸”à¸à¹ˆà¸­à¸™à¸—à¸¸à¸à¸­à¸¢à¹ˆà¸²à¸‡)
+-- 0. Check PlayerGui (ต้องโหลดก่อนทุกอย่าง)
 -- ========================================
 do
     local Players = game:GetService("Players")
 
-    local MINIMUM_GUI_COUNT = 50  -- à¸ˆà¸³à¸™à¸§à¸™ GUI à¸‚à¸±à¹‰à¸™à¸•à¹ˆà¸³à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸¡à¸µ
-    local MAX_WAIT_TIME = 30  -- à¸£à¸­à¸ªà¸¹à¸‡à¸ªà¸¸à¸” 30 à¸§à¸´à¸™à¸²à¸—à¸µ
-    local CHECK_INTERVAL = 1  -- à¹€à¸Šà¹‡à¸„à¸—à¸¸à¸ 1 à¸§à¸´à¸™à¸²à¸—à¸µ
+    local MINIMUM_GUI_COUNT = 50  -- จำนวน GUI ขั้นต่ำที่ต้องมี
+    local MAX_WAIT_TIME = 30  -- รอสูงสุด 30 วินาที
+    local CHECK_INTERVAL = 1  -- เช็คทุก 1 วินาที
 
     local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 10)
 
     if not playerGui then
-        warn("âŒ PlayerGui not found - Kicking...")
+        warn("❌ PlayerGui not found - Kicking...")
         Players.LocalPlayer:Kick("PlayerGui failed to load. Please rejoin.")
         return
     end
 
-    -- à¸£à¸­à¸ˆà¸™à¸à¸§à¹ˆà¸² GUI à¸ˆà¸°à¹‚à¸«à¸¥à¸”à¸„à¸£à¸š à¸«à¸£à¸·à¸­à¸„à¸£à¸šà¹€à¸§à¸¥à¸² 30 à¸§à¸´
+    -- รอจนกว่า GUI จะโหลดครบ หรือครบเวลา 30 วิ
     local elapsedTime = 0
 
     while elapsedTime < MAX_WAIT_TIME do
         local guiCount = #playerGui:GetChildren()
 
         if guiCount >= MINIMUM_GUI_COUNT then
-            break  -- à¹‚à¸«à¸¥à¸”à¸ªà¸³à¹€à¸£à¹‡à¸ˆ à¹ƒà¸«à¹‰à¸£à¸±à¸™à¸ªà¸„à¸£à¸´à¸›à¸•à¹ˆà¸­à¹„à¸”à¹‰
+            break  -- โหลดสำเร็จ ให้รันสคริปต่อได้
         end
 
         task.wait(CHECK_INTERVAL)
         elapsedTime = elapsedTime + CHECK_INTERVAL
     end
 
-    -- à¸–à¹‰à¸²à¸„à¸£à¸š 30 à¸§à¸´à¹à¸¥à¹‰à¸§à¸¢à¸±à¸‡à¹‚à¸«à¸¥à¸”à¹„à¸¡à¹ˆà¸„à¸£à¸š
+    -- ถ้าครบ 30 วิแล้วยังโหลดไม่ครบ
     local finalCount = #playerGui:GetChildren()
     if finalCount < MINIMUM_GUI_COUNT then
-        warn(string.format("âŒ PlayerGui incomplete after %ds (%d/%d) - Kicking...", MAX_WAIT_TIME, finalCount, MINIMUM_GUI_COUNT))
+        warn(string.format("❌ PlayerGui incomplete after %ds (%d/%d) - Kicking...", MAX_WAIT_TIME, finalCount, MINIMUM_GUI_COUNT))
         Players.LocalPlayer:Kick(string.format("PlayerGui failed to load properly (%d/%d). Please rejoin.", finalCount, MINIMUM_GUI_COUNT))
         return
     end
 end
 
 -- ========================================
--- Anti-AFK (à¹‚à¸«à¸¥à¸”à¸à¹ˆà¸­à¸™à¸­à¸±à¸™à¹à¸£à¸)
+-- Anti-AFK (โหลดก่อนอันแรก)
 -- ========================================
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
@@ -69,26 +69,26 @@ spawn(function()
     local camera = workspace.CurrentCamera
 
     while true do
-        -- à¸£à¸­ random 30-60 à¸§à¸´à¸™à¸²à¸—à¸µ
+        -- รอ random 30-60 วินาที
         task.wait(math.random(30, 60))
 
         pcall(function()
             local screenSize = camera.ViewportSize
 
-            -- à¸ªà¸¸à¹ˆà¸¡à¸¡à¸¸à¸¡à¸ˆà¸­
+            -- สุ่มมุมจอ
             local edges = {
-                {x = 10, y = 10},                              -- à¸¡à¸¸à¸¡à¸‹à¹‰à¸²à¸¢à¸šà¸™
-                {x = screenSize.X - 10, y = 10},              -- à¸¡à¸¸à¸¡à¸‚à¸§à¸²à¸šà¸™
-                {x = 10, y = screenSize.Y - 10},              -- à¸¡à¸¸à¸¡à¸‹à¹‰à¸²à¸¢à¸¥à¹ˆà¸²à¸‡
-                {x = screenSize.X - 10, y = screenSize.Y - 10}, -- à¸¡à¸¸à¸¡à¸‚à¸§à¸²à¸¥à¹ˆà¸²à¸‡
-                {x = screenSize.X / 2, y = 10},               -- à¸à¸¥à¸²à¸‡à¸šà¸™
-                {x = screenSize.X / 2, y = screenSize.Y - 10}, -- à¸à¸¥à¸²à¸‡à¸¥à¹ˆà¸²à¸‡
+                {x = 10, y = 10},                              -- มุมซ้ายบน
+                {x = screenSize.X - 10, y = 10},              -- มุมขวาบน
+                {x = 10, y = screenSize.Y - 10},              -- มุมซ้ายล่าง
+                {x = screenSize.X - 10, y = screenSize.Y - 10}, -- มุมขวาล่าง
+                {x = screenSize.X / 2, y = 10},               -- กลางบน
+                {x = screenSize.X / 2, y = screenSize.Y - 10}, -- กลางล่าง
             }
 
-            -- à¸ªà¸¸à¹ˆà¸¡à¹€à¸¥à¸·à¸­à¸à¸¡à¸¸à¸¡
+            -- สุ่มเลือกมุม
             local edge = edges[math.random(1, #edges)]
 
-            -- à¸„à¸¥à¸´à¸
+            -- คลิก
             VirtualInputManager:SendMouseButtonEvent(edge.x, edge.y, 0, true, game, 0)
             task.wait(0.05)
             VirtualInputManager:SendMouseButtonEvent(edge.x, edge.y, 0, false, game, 0)
@@ -97,25 +97,25 @@ spawn(function()
 end)
 
 -- ========================================
--- CONFIG (à¸£à¸­à¸‡à¸£à¸±à¸š External Config)
+-- CONFIG (รองรับ External Config)
 -- ========================================
 _G.Config = _G.Config or {}
 local HORST_ENABLED = _G.Config.Horst == true
-local GEM_TARGET = _G.Config.GemTarget  -- nil = à¹„à¸¡à¹ˆà¸ªà¹ˆà¸‡ DONE
+local GEM_TARGET = _G.Config.GemTarget  -- nil = ไม่ส่ง DONE
 local UPDATE_INTERVAL = 30
-local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- à¸œà¸¹à¸ Render3D à¸à¸±à¸š GUI toggle
+local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
 
 -- Secret Unit Config
-local CHANGE_ACC_SECRETS = _G.Config.Change_Acc_Secrets == true  -- true = à¸ªà¹ˆà¸‡ DONE à¸«à¸¥à¸±à¸‡ Trait Reroll à¸‚à¸­à¸‡ Secret, false = à¸‚à¹‰à¸²à¸¡à¹„à¸›à¸Ÿà¸²à¸£à¹Œà¸¡à¸•à¸²à¸¡à¸›à¸à¸•à¸´
+local CHANGE_ACC_SECRETS = _G.Config.Change_Acc_Secrets == true  -- true = ส่ง DONE หลัง Trait Reroll ของ Secret, false = ข้ามไปฟาร์มตามปกติ
 
 -- Summon Config
 local SUMMON_CONFIG = _G.Config.SummonUnits or {}
--- à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ string à¹ƒà¸«à¹‰à¹à¸›à¸¥à¸‡à¹€à¸›à¹‡à¸™ table (à¸¢à¸à¹€à¸§à¹‰à¸™ "auto" à¸ˆà¸°à¸–à¸¹à¸ override à¸ à¸²à¸¢à¸«à¸¥à¸±à¸‡)
+-- ถ้าเป็น string ให้แปลงเป็น table (ยกเว้น "auto" จะถูก override ภายหลัง)
 if type(SUMMON_CONFIG) == "string" then
     if SUMMON_CONFIG:lower() == "auto" then
-        SUMMON_CONFIG = {}  -- à¸ˆà¸°à¸–à¸¹à¸ override à¹€à¸›à¹‡à¸™ Secret + Mythic à¸ à¸²à¸¢à¸«à¸¥à¸±à¸‡
+        SUMMON_CONFIG = {}  -- จะถูก override เป็น Secret + Mythic ภายหลัง
     else
-        SUMMON_CONFIG = {SUMMON_CONFIG}  -- à¹à¸›à¸¥à¸‡ "Shadow" â†’ {"Shadow"}
+        SUMMON_CONFIG = {SUMMON_CONFIG}  -- แปลง "Shadow" → {"Shadow"}
     end
 end
 local MYTHIC_UNITS = {"Cursed Student", "Elf Mage", "Flame Emperor", "Hollow", "Lady Giant", "Puppet", "Salmon Sorcerer", "String Demon"}
@@ -127,16 +127,16 @@ local hasSummonConfig = _G.Config.SummonUnits and (
 
 -- Trait Reroll Config
 local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
--- à¸•à¸±à¸§à¸­à¸¢à¹ˆà¸²à¸‡:
+-- ตัวอย่าง:
 -- _G.Config.TraitReroll = {
---     TargetUnit = "Ice Queen",                          -- à¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸ªà¸¸à¹ˆà¸¡ Trait
---     TargetTrait = {"Enlightenment", "Ultimate"}        -- Trait à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£ (à¸«à¸¥à¸²à¸¢à¸•à¸±à¸§)
---     à¸«à¸£à¸·à¸­ TargetTrait = "Enlightenment"                 -- Trait à¹€à¸”à¸µà¸¢à¸§
---     à¸«à¸£à¸·à¸­ TargetTrait = nil                             -- à¸­à¸°à¹„à¸£à¸à¹‡à¹„à¸”à¹‰à¸—à¸µà¹ˆà¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ None
---     à¸«à¸£à¸·à¸­ TargetTrait = {}                              -- à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¸ªà¸¸à¹ˆà¸¡ (à¸‚à¹‰à¸²à¸¡)
+--     TargetUnit = "Ice Queen",                          -- ตัวที่ต้องการสุ่ม Trait
+--     TargetTrait = {"Enlightenment", "Ultimate"}        -- Trait ที่ต้องการ (หลายตัว)
+--     หรือ TargetTrait = "Enlightenment"                 -- Trait เดียว
+--     หรือ TargetTrait = nil                             -- อะไรก็ได้ที่ไม่ใช่ None
+--     หรือ TargetTrait = {}                              -- ไม่ต้องสุ่ม (ข้าม)
 -- }
 
--- Priority List à¸ªà¸³à¸«à¸£à¸±à¸šà¹€à¸¥à¸·à¸­à¸ Unit à¸—à¸µà¹ˆà¸ˆà¸°à¸ªà¸¸à¹ˆà¸¡ Trait (à¸–à¹‰à¸² Config à¸•à¸±à¹‰à¸‡ SummonUnits à¸«à¸¥à¸²à¸¢à¸•à¸±à¸§)
+-- Priority List สำหรับเลือก Unit ที่จะสุ่ม Trait (ถ้า Config ตั้ง SummonUnits หลายตัว)
 local TRAIT_REROLL_PRIORITY = {
     "Shadow",           -- Priority 1 (Secret)
     "Puppet",           -- Priority 2 (Mythic)
@@ -155,17 +155,17 @@ local TRAIT_REROLL_PRIORITY = {
 local DESCRIPTION_MODE = nil
 if GEM_TARGET and not hasSummonConfig then
     DESCRIPTION_MODE = "GEM"
-    print("ðŸ“Š Description Mode: GEM (Stats only)")
+    print("📊 Description Mode: GEM (Stats only)")
 elseif hasSummonConfig then
     DESCRIPTION_MODE = "SUMMON"
-    print("ðŸ“Š Description Mode: SUMMON (Unit tracking)")
+    print("📊 Description Mode: SUMMON (Unit tracking)")
 end
 
 local function printStep(stepName)
-    print(string.format("ðŸ”„ %s", stepName))
+    print(string.format("🔄 %s", stepName))
 end
 
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„ Banner à¸“ à¸•à¸­à¸™à¸™à¸µà¹‰ (Global scope)
+-- ฟังก์ชันเช็ค Banner ณ ตอนนี้ (Global scope)
 local function checkCurrentBanner()
     local success, result = pcall(function()
         local Players = game:GetService("Players")
@@ -210,7 +210,7 @@ local function checkCurrentBanner()
 end
 
 -- ========================================
--- -1. Load Horst API (à¸–à¹‰à¸² Config à¹€à¸›à¸´à¸”)
+-- -1. Load Horst API (ถ้า Config เปิด)
 -- ========================================
 if HORST_ENABLED then
     printStep("Loading Horst API...")
@@ -223,21 +223,21 @@ if HORST_ENABLED then
         else
         end
     else
-        warn("   âŒ Failed to load Horst API:", err)
+        warn("   ❌ Failed to load Horst API:", err)
         HORST_ENABLED = false
     end
     task.wait(1)
 end
 
 -- ========================================
--- 0. StatsGUI (à¹‚à¸«à¸¥à¸”à¸à¹ˆà¸­à¸™à¸­à¸±à¸™à¹à¸£à¸)
+-- 0. StatsGUI (โหลดก่อนอันแรก)
 -- ========================================
 printStep("Loading Stats GUI...")
 
 -- ========================================
--- Global Flag à¸ªà¸³à¸«à¸£à¸±à¸šà¸«à¸¢à¸¸à¸”à¸ªà¸„à¸£à¸´à¸›à¸•à¹Œ
+-- Global Flag สำหรับหยุดสคริปต์
 -- ========================================
-_G.ScriptShouldStop = false  -- à¹ƒà¸Šà¹‰ _G à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¹€à¸‚à¹‰à¸²à¸–à¸¶à¸‡à¹„à¸”à¹‰à¸—à¸¸à¸à¸—à¸µà¹ˆ
+_G.ScriptShouldStop = false  -- ใช้ _G เพื่อให้เข้าถึงได้ทุกที่
 
 local statsGuiSuccess, statsGuiError = pcall(function()
     local Players = game:GetService("Players")
@@ -248,7 +248,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
     local playerGui = player:WaitForChild("PlayerGui")
     local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
 
-    -- à¸ªà¸£à¹‰à¸²à¸‡ ScreenGui
+    -- สร้าง ScreenGui
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "StatsDisplay"
     screenGui.ResetOnSpawn = false
@@ -257,7 +257,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
     screenGui.IgnoreGuiInset = true
     screenGui.Parent = playerGui
 
-    -- Frame à¸«à¸¥à¸±à¸
+    -- Frame หลัก
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
     mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
@@ -348,7 +348,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         statStroke.Thickness = 3
         statStroke.Parent = statBox
 
-        -- Container à¸ªà¸³à¸«à¸£à¸±à¸š name à¹à¸¥à¸° value
+        -- Container สำหรับ name และ value
         local contentFrame = Instance.new("Frame")
         contentFrame.Size = UDim2.new(1, 0, 1, 0)
         contentFrame.BackgroundTransparency = 1
@@ -361,7 +361,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         contentPadding.PaddingBottom = UDim.new(0.1, 0)
         contentPadding.Parent = contentFrame
 
-        -- Name (à¸‹à¹‰à¸²à¸¢)
+        -- Name (ซ้าย)
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
         nameLabel.Position = UDim2.new(0, 0, 0, 0)
@@ -374,7 +374,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         nameLabel.TextXAlignment = Enum.TextXAlignment.Left
         nameLabel.Parent = contentFrame
 
-        -- Colon (à¸à¸¥à¸²à¸‡)
+        -- Colon (กลาง)
         local colonLabel = Instance.new("TextLabel")
         colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
         colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
@@ -386,7 +386,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         colonLabel.TextScaled = true
         colonLabel.Parent = contentFrame
 
-        -- Value (à¸‚à¸§à¸²)
+        -- Value (ขวา)
         local valueLabel = Instance.new("TextLabel")
         valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
         valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
@@ -437,7 +437,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
     sugarPadding.PaddingBottom = UDim.new(0.15, 0)
     sugarPadding.Parent = sugarLabel
 
-    -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹ƒà¸ªà¹ˆà¸¥à¸¹à¸à¸™à¹‰à¸³
+    -- ฟังก์ชันใส่ลูกน้ำ
     local function formatNumber(num)
         local formatted = tostring(num)
         local k
@@ -450,7 +450,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         return formatted
     end
 
-    -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸”à¸¶à¸‡à¸„à¹ˆà¸² Stats
+    -- ฟังก์ชันดึงค่า Stats
     local function updateStats()
         local success, err = pcall(function()
             local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -491,11 +491,11 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         end
     end
 
-    -- Update à¹à¸šà¸š Real-time (à¸•à¸£à¸§à¸ˆà¸ˆà¸±à¸šà¸à¸²à¸£à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¹à¸›à¸¥à¸‡ + Error Handling)
+    -- Update แบบ Real-time (ตรวจจับการเปลี่ยนแปลง + Error Handling)
     task.wait(2)
     updateStats()
 
-    -- à¹€à¸à¹‡à¸šà¸„à¹ˆà¸²à¹€à¸à¹ˆà¸²à¹€à¸žà¸·à¹ˆà¸­à¹€à¸›à¸£à¸µà¸¢à¸šà¹€à¸—à¸µà¸¢à¸š
+    -- เก็บค่าเก่าเพื่อเปรียบเทียบ
     local lastGem = 0
     local lastGold = 0
     local lastTrait = 0
@@ -503,7 +503,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
     local maxErrors = 5
     local checkCounter = 0
 
-    -- Initialize à¸„à¹ˆà¸²à¹€à¸£à¸´à¹ˆà¸¡à¸•à¹‰à¸™
+    -- Initialize ค่าเริ่มต้น
     local success = pcall(function()
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         if replica then
@@ -517,10 +517,10 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         end
     end)
 
-    -- à¹€à¸Šà¹‡à¸„à¸—à¸¸à¸ 0.5 à¸§à¸´à¸™à¸²à¸—à¸µà¹à¸—à¸™à¸—à¸¸à¸à¹€à¸Ÿà¸£à¸¡ (à¸¥à¸” CPU usage)
+    -- เช็คทุก 0.5 วินาทีแทนทุกเฟรม (ลด CPU usage)
     spawn(function()
         while true do
-            task.wait(0.5)  -- à¹€à¸Šà¹‡à¸„à¸—à¸¸à¸ 0.5 à¸§à¸´à¸™à¸²à¸—à¸µ (à¸›à¸£à¸°à¸«à¸¢à¸±à¸”à¸ªà¹€à¸›à¸„)
+            task.wait(0.5)  -- เช็คทุก 0.5 วินาที (ประหยัดสเปค)
 
             local success, err = pcall(function()
                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -538,14 +538,14 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                     error("ItemData not found")
                 end
 
-                -- à¸”à¸¶à¸‡à¸„à¹ˆà¸²à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™
+                -- ดึงค่าปัจจุบัน
                 local currentGem = itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount or 0
                 local currentGold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
                 local currentTrait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
 
-                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸„à¹ˆà¸²à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                -- เช็คว่าค่าเปลี่ยนหรือไม่
                 if currentGem ~= lastGem or currentGold ~= lastGold or currentTrait ~= lastTrait then
-                    -- à¸­à¸±à¸žà¹€à¸”à¸—à¸—à¸±à¸™à¸—à¸µ
+                    -- อัพเดททันที
                     if currentGem ~= lastGem then
                         statsLabels.Gem.Text = formatNumber(currentGem)
                         lastGem = currentGem
@@ -561,32 +561,32 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                         lastTrait = currentTrait
                     end
 
-                    -- Reset error count à¹€à¸¡à¸·à¹ˆà¸­à¸­à¸±à¸žà¹€à¸”à¸—à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
+                    -- Reset error count เมื่ออัพเดทสำเร็จ
                     errorCount = 0
                 end
             end)
 
-            -- Error Handling - à¸¥à¸­à¸‡ retry
+            -- Error Handling - ลอง retry
             if not success then
                 errorCount = errorCount + 1
 
                 if errorCount <= maxErrors then
-                    warn(string.format("âš ï¸ StatsGUI error (%d/%d): %s - Retrying...", errorCount, maxErrors, tostring(err)))
+                    warn(string.format("⚠️ StatsGUI error (%d/%d): %s - Retrying...", errorCount, maxErrors, tostring(err)))
 
-                    -- à¸žà¸¢à¸²à¸¢à¸²à¸¡ force update
+                    -- พยายาม force update
                     task.spawn(function()
                         task.wait(0.5)
                         pcall(updateStats)
                     end)
                 elseif errorCount == maxErrors + 1 then
-                    warn(string.format("âŒ StatsGUI failed after %d attempts - Will keep trying silently", maxErrors))
+                    warn(string.format("❌ StatsGUI failed after %d attempts - Will keep trying silently", maxErrors))
                 end
             end
         end
     end)
 
     -- ========================================
-    -- Toggle GUI with N key (+ Render3D à¸–à¹‰à¸²à¹€à¸›à¸´à¸” Config)
+    -- Toggle GUI with N key (+ Render3D ถ้าเปิด Config)
     -- ========================================
     local UserInputService = game:GetService("UserInputService")
     local isGuiVisible = true
@@ -613,7 +613,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
     end
 
     -- ========================================
-    -- Horst Status Reporter (Real-time + Error Handling + à¸ªà¹ˆà¸‡à¸—à¸¸à¸ 30 à¸§à¸´)
+    -- Horst Status Reporter (Real-time + Error Handling + ส่งทุก 30 วิ)
     -- ========================================
     if HORST_ENABLED then
         local doneSent = false
@@ -624,7 +624,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
         local horstErrorCount = 0
         local maxHorstErrors = 5
 
-        -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸ªà¹ˆà¸‡ Status (à¸žà¸£à¹‰à¸­à¸¡ Error Handling)
+        -- ฟังก์ชันส่ง Status (พร้อม Error Handling)
         local function sendHorstStatus()
             local success, err = pcall(function()
                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -642,13 +642,13 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                     error("ItemData not found")
                 end
 
-                -- à¸”à¸¶à¸‡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥ Stats
+                -- ดึงข้อมูล Stats
                 local level = data.Level or 0
                 local gem = itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount or 0
                 local gold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
                 local trait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
 
-                -- à¸ªà¸£à¹‰à¸²à¸‡ Status Message
+                -- สร้าง Status Message
                 local HttpService = game:GetService("HttpService")
                 local json_data = {
                     Level = level,
@@ -658,33 +658,33 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 }
                 local encoded_json = HttpService:JSONEncode(json_data)
 
-                local message = string.format("â­ Level : %d â€¢ ðŸ’Ž Gems : %s â€¢ ðŸª™ Gold : %s â€¢ ðŸŽ² RR : %s",
+                local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
                     level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
 
-                -- à¸ªà¹ˆà¸‡ Status Update
+                -- ส่ง Status Update
                 if _G.Horst_SetDescription then
                     _G.Horst_SetDescription(message, encoded_json)
-                    horstErrorCount = 0  -- Reset error count à¹€à¸¡à¸·à¹ˆà¸­à¸ªà¹ˆà¸‡à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
+                    horstErrorCount = 0  -- Reset error count เมื่อส่งสำเร็จ
                 end
 
-                -- à¹€à¸Šà¹‡à¸„à¹€à¸›à¹‰à¸²à¸«à¸¡à¸²à¸¢ Gem (à¸–à¹‰à¸²à¸¡à¸µ GEM_TARGET)
-                -- âš ï¸ à¸‚à¹‰à¸²à¸¡à¸à¸²à¸£à¹€à¸Šà¹‡à¸„à¸–à¹‰à¸²à¸¡à¸µ SummonUnits Config (à¸•à¹‰à¸­à¸‡à¹ƒà¸«à¹‰à¹„à¸›à¸ªà¸¸à¹ˆà¸¡à¸à¹ˆà¸­à¸™)
+                -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
+                -- ⚠️ ข้ามการเช็คถ้ามี SummonUnits Config (ต้องให้ไปสุ่มก่อน)
                 if GEM_TARGET and gem >= GEM_TARGET and not doneSent and not hasSummonConfig then
                     if _G.Horst_AccountChangeDone then
-                        -- à¸ªà¹ˆà¸‡ Description à¸à¹ˆà¸­à¸™
+                        -- ส่ง Description ก่อน
                         if _G.Horst_SetDescription then
                             _G.Horst_SetDescription(message, encoded_json)
                         end
 
-                        task.wait(15)  -- à¸£à¸­ 15 à¸§à¸´à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
                         local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
                         if ok then
                             doneSent = true
-                            _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                            print("âœ… GEM_TARGET reached (no summon config) - Script will stop...")
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                            print("✅ GEM_TARGET reached (no summon config) - Script will stop...")
 
-                            -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                             while true do
                                 pcall(function()
                                     local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -705,7 +705,7 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                                         }
                                         local encoded_json = HttpService:JSONEncode(json_data)
 
-                                        local messageLoop = string.format("â­ Level : %d â€¢ ðŸ’Ž Gems : %s â€¢ ðŸª™ Gold : %s â€¢ ðŸŽ² RR : %s",
+                                        local messageLoop = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
                                             levelLoop, formatNumber(gemLoop), formatNumber(goldLoop), formatNumber(traitLoop))
 
                                         _G.Horst_SetDescription(messageLoop, encoded_json)
@@ -714,10 +714,10 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                                 task.wait(5)
                             end
                         else
-                            warn(string.format("âŒ Failed to send DONE: %s", tostring(doneErr)))
+                            warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
                         end
                     else
-                        warn("âŒ Horst_AccountChangeDone function not found")
+                        warn("❌ Horst_AccountChangeDone function not found")
                     end
                 end
             end)
@@ -725,14 +725,14 @@ local statsGuiSuccess, statsGuiError = pcall(function()
             if not success then
                 horstErrorCount = horstErrorCount + 1
                 if horstErrorCount <= maxHorstErrors then
-                    warn(string.format("âš ï¸ Horst error (%d/%d): %s - Retrying...", horstErrorCount, maxHorstErrors, tostring(err)))
+                    warn(string.format("⚠️ Horst error (%d/%d): %s - Retrying...", horstErrorCount, maxHorstErrors, tostring(err)))
                 elseif horstErrorCount == maxHorstErrors + 1 then
-                    warn(string.format("âŒ Horst failed after %d attempts - Will keep trying silently", maxHorstErrors))
+                    warn(string.format("❌ Horst failed after %d attempts - Will keep trying silently", maxHorstErrors))
                 end
             end
         end
 
-        -- Initialize à¸„à¹ˆà¸²à¹€à¸£à¸´à¹ˆà¸¡à¸•à¹‰à¸™
+        -- Initialize ค่าเริ่มต้น
         task.wait(1)
         local initSuccess = pcall(function()
             local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -748,15 +748,15 @@ local statsGuiSuccess, statsGuiError = pcall(function()
             end
         end)
 
-        -- à¸ªà¹ˆà¸‡à¸£à¸­à¸šà¹à¸£à¸à¸—à¸±à¸™à¸—à¸µ (à¹€à¸‰à¸žà¸²à¸° GEM mode)
+        -- ส่งรอบแรกทันที (เฉพาะ GEM mode)
         if DESCRIPTION_MODE == "GEM" then
             sendHorstStatus()
         end
 
-        -- Real-time update (à¹€à¸Šà¹‡à¸„à¸—à¸¸à¸ 1 à¸§à¸´à¸™à¸²à¸—à¸µ à¹à¸—à¸™ 0.3 à¸§à¸´ - à¸›à¸£à¸°à¸«à¸¢à¸±à¸”à¸ªà¹€à¸›à¸„)
+        -- Real-time update (เช็คทุก 1 วินาที แทน 0.3 วิ - ประหยัดสเปค)
         spawn(function()
             while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
-                task.wait(1)  -- à¹€à¸Šà¹‡à¸„à¸—à¸¸à¸ 1 à¸§à¸´à¸™à¸²à¸—à¸µ (à¸›à¸£à¸°à¸«à¸¢à¸±à¸”à¸ªà¹€à¸›à¸„)
+                task.wait(1)  -- เช็คทุก 1 วินาที (ประหยัดสเปค)
 
                 local success, err = pcall(function()
                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -779,14 +779,14 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                     local currentGold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
                     local currentTrait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
 
-                    -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸„à¹ˆà¸²à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                    -- เช็คว่าค่าเปลี่ยนหรือไม่
                     if currentLevel ~= lastHorstLevel or currentGem ~= lastHorstGem or
                        currentGold ~= lastHorstGold or currentTrait ~= lastHorstTrait then
 
-                        -- à¸ªà¹ˆà¸‡ update à¸—à¸±à¸™à¸—à¸µ
+                        -- ส่ง update ทันที
                         sendHorstStatus()
 
-                        -- à¸šà¸±à¸™à¸—à¸¶à¸à¸„à¹ˆà¸²à¹ƒà¸«à¸¡à¹ˆ
+                        -- บันทึกค่าใหม่
                         lastHorstLevel = currentLevel
                         lastHorstGem = currentGem
                         lastHorstGold = currentGold
@@ -795,12 +795,12 @@ local statsGuiSuccess, statsGuiError = pcall(function()
                 end)
 
                 if not success then
-                    -- Silent retry - à¹„à¸¡à¹ˆ warn à¹€à¸žà¸£à¸²à¸°à¸ˆà¸°à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆà¹ƒà¸™ 1 à¸§à¸´
+                    -- Silent retry - ไม่ warn เพราะจะลองใหม่ใน 1 วิ
                 end
             end
         end)
 
-        -- Fallback: à¸ªà¹ˆà¸‡à¸—à¸¸à¸ 30 à¸§à¸´ (à¸à¸£à¸“à¸µ real-time à¸žà¸¥à¸²à¸”)
+        -- Fallback: ส่งทุก 30 วิ (กรณี real-time พลาด)
         spawn(function()
             while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
                 task.wait(UPDATE_INTERVAL)
@@ -811,22 +811,22 @@ local statsGuiSuccess, statsGuiError = pcall(function()
 end)
 
 if not statsGuiSuccess then
-    warn("âŒ StatsGUI failed to load:", statsGuiError)
+    warn("❌ StatsGUI failed to load:", statsGuiError)
 end
 task.wait(1)
 
--- Config (à¸ªà¸²à¸¡à¸²à¸£à¸–à¹à¸à¹‰à¹„à¸‚à¹„à¸”à¹‰à¸ˆà¸²à¸ loadstring)
+-- Config (สามารถแก้ไขได้จาก loadstring)
 _G.Config = _G.Config or {}
 
 -- ========================================
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„à¹à¸¡à¸ž - à¸•à¹‰à¸­à¸‡à¹€à¸Šà¹‡à¸„à¸«à¸¥à¸±à¸‡ Stats GUI à¹‚à¸«à¸¥à¸”à¹€à¸ªà¸£à¹‡à¸ˆ
+-- ฟังก์ชันเช็คแมพ - ต้องเช็คหลัง Stats GUI โหลดเสร็จ
 -- ========================================
 local function isInTargetMap()
     local success, result = pcall(function()
         local ReplicatedStorage = game:GetService("ReplicatedStorage")
         local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
 
-        -- Method 1: à¹ƒà¸Šà¹‰ Map Replicas (à¹à¸¡à¹ˆà¸™à¸¢à¸³à¸à¸§à¹ˆà¸²)
+        -- Method 1: ใช้ Map Replicas (แม่นยำกว่า)
         local allMaps = Nodes.GET_ALL_MAP_REPLICAS:InvokeSelf()
 
         if allMaps then
@@ -834,7 +834,7 @@ local function isInTargetMap()
                 local data = mapReplica.Data
                 local parameters = data.Parameters or {}
 
-                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹€à¸›à¹‡à¸™ SchoolGrounds Act 1 Story Mode
+                -- เช็คว่าเป็น SchoolGrounds Act 1 Story Mode
                 if parameters.MapName == "SchoolGrounds" and
                    parameters.ActName == "Act 1" and
                    parameters.Gamemode == "Story" then
@@ -848,9 +848,9 @@ local function isInTargetMap()
     return success and result
 end
 
--- à¹€à¸Šà¹‡à¸„à¹à¸¥à¸°à¸£à¸­ Wave à¸£à¸µà¹€à¸‹à¹‡à¸•
+-- เช็คและรอ Wave รีเซ็ต
 -- ========================================
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™ RemoveLobbyMesh (à¹ƒà¸Šà¹‰à¸£à¹ˆà¸§à¸¡à¸à¸±à¸™à¸£à¸°à¸«à¸§à¹ˆà¸²à¸‡ In-Game à¹à¸¥à¸° Lobby)
+-- ฟังก์ชัน RemoveLobbyMesh (ใช้ร่วมกันระหว่าง In-Game และ Lobby)
 -- ========================================
 local function applyPerformanceOptimizations()
     local g = game
@@ -858,11 +858,11 @@ local function applyPerformanceOptimizations()
     local l = g.Lighting
     local t = w.Terrain
 
-    -- à¹ƒà¸Šà¹‰à¹€à¸‰à¸žà¸²à¸° TOGGLE_RENDER3D (à¹€à¸­à¸² Config.Disable3DRendering à¸­à¸­à¸)
+    -- ใช้เฉพาะ TOGGLE_RENDER3D (เอา Config.Disable3DRendering ออก)
     if TOGGLE_RENDER3D then
         local RunService = game:GetService("RunService")
         RunService:Set3dRenderingEnabled(false)
-        print("ðŸ”§ 3D Rendering disabled (TOGGLE_RENDER3D)")
+        print("🔧 3D Rendering disabled (TOGGLE_RENDER3D)")
     end
 
     t.WaterWaveSize = 0
@@ -884,17 +884,17 @@ local function applyPerformanceOptimizations()
 
     settings().Rendering.QualityLevel = "Level01"
 
-    -- à¹€à¸Šà¹‡à¸„ Map à¸à¹ˆà¸­à¸™ (à¹€à¸žà¸£à¸²à¸°à¹€à¸¡à¸·à¹ˆà¸­à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¹€à¸à¸¡à¹ƒà¸«à¹‰à¸¥à¸š Map à¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ Lobby)
+    -- เช็ค Map ก่อน (เพราะเมื่ออยู่ในเกมให้ลบ Map ไม่ใช่ Lobby)
     local lobbyFolder = workspace:FindFirstChild("Lobby")
     local mapFolder = workspace:FindFirstChild("Map")
 
     if mapFolder then
-        -- à¸¥à¸š children à¸‚à¸­à¸‡ Map (à¹€à¸à¸¡à¸ˆà¸°à¸ªà¸£à¹‰à¸²à¸‡ folder à¹ƒà¸«à¸¡à¹ˆà¸–à¹‰à¸²à¸¥à¸šà¸—à¸±à¹‰à¸‡à¸à¹‰à¸­à¸™)
+        -- ลบ children ของ Map (เกมจะสร้าง folder ใหม่ถ้าลบทั้งก้อน)
         for _, obj in pairs(mapFolder:GetChildren()) do
             obj:Destroy()
         end
 
-        -- à¸ªà¸£à¹‰à¸²à¸‡à¸žà¸·à¹‰à¸™à¸¥à¹ˆà¸­à¸‡à¸«à¸™à¹„à¸§à¹‰à¸—à¸µà¹ˆà¹€à¸—à¹‰à¸²à¸œà¸¹à¹‰à¹€à¸¥à¹ˆà¸™
+        -- สร้างพื้นล่องหนไว้ที่เท้าผู้เล่น
         local player = game:GetService("Players").LocalPlayer
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             local rootPart = player.Character.HumanoidRootPart
@@ -913,7 +913,7 @@ local function applyPerformanceOptimizations()
             obj:Destroy()
         end
 
-        -- à¸ªà¸£à¹‰à¸²à¸‡à¸žà¸·à¹‰à¸™à¸¥à¹ˆà¸­à¸‡à¸«à¸™à¸ªà¸³à¸«à¸£à¸±à¸š Lobby
+        -- สร้างพื้นล่องหนสำหรับ Lobby
         local player = game:GetService("Players").LocalPlayer
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             local pos = player.Character.HumanoidRootPart.Position
@@ -997,15 +997,15 @@ local function applyPerformanceOptimizations()
 end
 
 -- ========================================
--- à¹€à¸Šà¹‡à¸„à¹à¸¡à¸žà¸«à¸¥à¸±à¸‡à¹‚à¸«à¸¥à¸” Stats GUI à¹€à¸ªà¸£à¹‡à¸ˆà¹à¸¥à¹‰à¸§
+-- เช็คแมพหลังโหลด Stats GUI เสร็จแล้ว
 -- ========================================
-print("ðŸ” Checking current map...")
+print("🔍 Checking current map...")
 
--- à¸•à¸­à¸™à¸™à¸µà¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¹à¸¡à¸žà¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+-- ตอนนี้อยู่ในแมพหรือไม่
 if isInTargetMap() then
-    print("âœ… In Story Mode (School Grounds - Act 1)")
+    print("✅ In Story Mode (School Grounds - Act 1)")
     spawn(function()
-        -- à¸›à¸´à¸” Tutorial popup (à¸–à¹‰à¸²à¸¡à¸µ)
+        -- ปิด Tutorial popup (ถ้ามี)
         local function closeTutorial()
             local success = pcall(function()
                 local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
@@ -1049,7 +1049,7 @@ if isInTargetMap() then
 
 
     -- ====================================
-    -- à¸£à¸°à¸šà¸šà¸§à¸²à¸‡ + à¸­à¸±à¸žà¹€à¸à¸£à¸” (à¹€à¸«à¸¡à¸·à¸­à¸™ Path B)
+    -- ระบบวาง + อัพเกรด (เหมือน Path B)
     -- ====================================
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1057,12 +1057,12 @@ if isInTargetMap() then
     local Shared = ReplicatedStorage:WaitForChild("Shared")
     local ReplicaClient = require(Shared:WaitForChild("ReplicaClient"))
 
-    -- à¸•à¸±à¸§à¹à¸›à¸£à¸ªà¸³à¸«à¸£à¸±à¸šà¹€à¸à¹‡à¸š Connection à¹à¸¥à¸° State
+    -- ตัวแปรสำหรับเก็บ Connection และ State
     local currentConnection = nil
     local allPlacedIDs = {}
 
     local function getCurrentWave()
-        -- Method 1: à¸­à¹ˆà¸²à¸™à¸ˆà¸²à¸ Game Replica (à¸–à¸¹à¸à¸•à¹‰à¸­à¸‡ - à¸¢à¸·à¸™à¸¢à¸±à¸™à¸ˆà¸²à¸ CheckWave.lua)
+        -- Method 1: อ่านจาก Game Replica (ถูกต้อง - ยืนยันจาก CheckWave.lua)
         local success1, wave1 = pcall(function()
             local gameReplica = Nodes.GET_GAME_REPLICA:InvokeSelf()
             if gameReplica and gameReplica.Data and gameReplica.Data.Wave then
@@ -1075,7 +1075,7 @@ if isInTargetMap() then
             return wave1
         end
 
-        -- Method 2: Fallback - à¸­à¹ˆà¸²à¸™à¸ˆà¸²à¸ GUI (à¸žà¸£à¹‰à¸­à¸¡ timeout)
+        -- Method 2: Fallback - อ่านจาก GUI (พร้อม timeout)
         local success2, wave2 = pcall(function()
             local startTime = tick()
             local timeout = 3
@@ -1098,41 +1098,41 @@ if isInTargetMap() then
         end)
 
         if success2 and wave2 then
-            warn("âš ï¸ Wave detection fallback to GUI (Game Replica failed)")
+            warn("⚠️ Wave detection fallback to GUI (Game Replica failed)")
             return wave2
         end
 
-        warn("âŒ Wave detection failed - both Replica and GUI methods failed")
-        return nil  -- âš ï¸ return nil à¹à¸—à¸™ 0 à¹€à¸žà¸·à¹ˆà¸­à¹„à¸¡à¹ˆà¹ƒà¸«à¹‰ trigger false wave reset
+        warn("❌ Wave detection failed - both Replica and GUI methods failed")
+        return nil  -- ⚠️ return nil แทน 0 เพื่อไม่ให้ trigger false wave reset
     end
 
     local function resetFarmingState()
-        print("ðŸ”„ [resetFarmingState] Resetting state...")
-        -- Disconnect connection à¹€à¸à¹ˆà¸² (à¸–à¹‰à¸²à¸¡à¸µ)
+        print("🔄 [resetFarmingState] Resetting state...")
+        -- Disconnect connection เก่า (ถ้ามี)
         if currentConnection then
             pcall(function()
                 currentConnection:Disconnect()
-                print("   âœ… [resetFarmingState] Disconnected old connection")
+                print("   ✅ [resetFarmingState] Disconnected old connection")
             end)
             currentConnection = nil
         end
 
-        -- à¸¥à¹‰à¸²à¸‡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥ Unit à¹€à¸à¹ˆà¸²
+        -- ล้างข้อมูล Unit เก่า
         local oldCount = #allPlacedIDs
         allPlacedIDs = {}
-        print(string.format("   ðŸ—‘ï¸ [resetFarmingState] Cleared %d old unit IDs", oldCount))
+        print(string.format("   🗑️ [resetFarmingState] Cleared %d old unit IDs", oldCount))
     end
 
     local function placeAndUpgrade()
-        print("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
-        print("ðŸŽ® [placeAndUpgrade] Starting new phase")
-        print("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
+        print("═══════════════════════════════════════")
+        print("🎮 [placeAndUpgrade] Starting new phase")
+        print("═══════════════════════════════════════")
 
         local DELAY_AFTER_PLACE = 1
         local AUTO_UPGRADE_PRIORITY = 1
 
         local function getCurrentMoney()
-            -- Method 1: à¸­à¹ˆà¸²à¸™à¸ˆà¸²à¸ Replica (à¹€à¸Šà¸·à¹ˆà¸­à¸–à¸·à¸­à¹„à¸”à¹‰à¸à¸§à¹ˆà¸²)
+            -- Method 1: อ่านจาก Replica (เชื่อถือได้กว่า)
             local success, money = pcall(function()
                 local replica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
                 if replica and replica.Data and replica.Data.Yen then
@@ -1144,10 +1144,10 @@ if isInTargetMap() then
             if success and money then
                 return money
             else
-                warn("âš ï¸ [getCurrentMoney] Replica method failed, using GUI fallback")
+                warn("⚠️ [getCurrentMoney] Replica method failed, using GUI fallback")
             end
 
-            -- Method 2: Fallback à¸­à¹ˆà¸²à¸™à¸ˆà¸²à¸ GUI
+            -- Method 2: Fallback อ่านจาก GUI
             local success2, money2 = pcall(function()
                 local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
                 if not bottomHUD then return 0 end
@@ -1158,7 +1158,7 @@ if isInTargetMap() then
             end)
 
             if not success2 or not money2 or money2 == 0 then
-                warn("âŒ [getCurrentMoney] Both Replica and GUI methods failed")
+                warn("❌ [getCurrentMoney] Both Replica and GUI methods failed")
             end
             return success2 and money2 or 0
         end
@@ -1166,17 +1166,17 @@ if isInTargetMap() then
         local function getUnitCost(slot)
             local targetSlot = tonumber(slot)
             if not targetSlot then
-                warn(string.format("âŒ [getUnitCost] Invalid slot: %s", tostring(slot)))
+                warn(string.format("❌ [getUnitCost] Invalid slot: %s", tostring(slot)))
                 return 999999
             end
 
             local attempts = 0
-            while attempts < 10 do  -- à¸ªà¸¹à¸‡à¸ªà¸¸à¸” 10 à¸„à¸£à¸±à¹‰à¸‡ (5 à¸§à¸´à¸™à¸²à¸—à¸µ)
+            while attempts < 10 do  -- สูงสุด 10 ครั้ง (5 วินาที)
                 local success, result, errorMsg = pcall(function()
                     local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
                     if not bottomHUD then return nil, "BottomHUD not found" end
 
-                    -- à¹ƒà¸Šà¹‰ pcall à¸ªà¸³à¸«à¸£à¸±à¸š GetChildren à¹€à¸žà¸·à¹ˆà¸­à¸„à¸§à¸²à¸¡à¸›à¸¥à¸­à¸”à¸ à¸±à¸¢
+                    -- ใช้ pcall สำหรับ GetChildren เพื่อความปลอดภัย
                     local success1, children2 = pcall(function()
                         return bottomHUD:GetChildren()[2]
                     end)
@@ -1191,7 +1191,7 @@ if isInTargetMap() then
 
                     for _, child in ipairs(hotbarContainer:GetChildren()) do
                         if child:IsA("TextButton") and child.LayoutOrder == targetSlot then
-                            -- à¹ƒà¸Šà¹‰ FindFirstChild à¹à¸—à¸™ direct access
+                            -- ใช้ FindFirstChild แทน direct access
                             local frame = child:FindFirstChild("Frame")
                             if not frame then return nil, "No Frame in button" end
 
@@ -1226,14 +1226,14 @@ if isInTargetMap() then
                 if success and result then
                     return result
                 elseif success and not result then
-                    -- pcall à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¹à¸•à¹ˆà¹„à¸¡à¹ˆà¹€à¸ˆà¸­à¸£à¸²à¸„à¸²
+                    -- pcall สำเร็จแต่ไม่เจอราคา
                     if attempts == 0 then
-                        warn(string.format("âš ï¸ [getUnitCost] Slot %s error: %s (attempt %d/10)", slot, tostring(errorMsg), attempts + 1))
+                        warn(string.format("⚠️ [getUnitCost] Slot %s error: %s (attempt %d/10)", slot, tostring(errorMsg), attempts + 1))
                     end
                 else
-                    -- pcall à¸¥à¹‰à¸¡à¹€à¸«à¸¥à¸§
+                    -- pcall ล้มเหลว
                     if attempts == 0 then
-                        warn(string.format("âš ï¸ [getUnitCost] Slot %s pcall failed: %s (attempt %d/10)", slot, tostring(result), attempts + 1))
+                        warn(string.format("⚠️ [getUnitCost] Slot %s pcall failed: %s (attempt %d/10)", slot, tostring(result), attempts + 1))
                     end
                 end
 
@@ -1241,33 +1241,33 @@ if isInTargetMap() then
                 task.wait(0.5)
             end
 
-            warn(string.format("âš ï¸ [getUnitCost] Failed to detect cost for slot %s after 10 attempts", slot))
+            warn(string.format("⚠️ [getUnitCost] Failed to detect cost for slot %s after 10 attempts", slot))
             return 999999
         end
 
-        print("ðŸ” [placeAndUpgrade] Getting Player Replica...")
+        print("🔍 [placeAndUpgrade] Getting Player Replica...")
         local playerReplica = nil
         for i = 1, 5 do
             playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
             if playerReplica then
-                print(string.format("âœ… [placeAndUpgrade] Player Replica found (attempt %d/5)", i))
+                print(string.format("✅ [placeAndUpgrade] Player Replica found (attempt %d/5)", i))
                 break
             end
-            warn(string.format("âš ï¸ [placeAndUpgrade] PlayerReplica not found - retry %d/5", i))
+            warn(string.format("⚠️ [placeAndUpgrade] PlayerReplica not found - retry %d/5", i))
             task.wait(1)
         end
 
         if not playerReplica then
-            warn("âŒ [placeAndUpgrade] à¹„à¸¡à¹ˆà¸žà¸š Player Replica - aborting phase")
+            warn("❌ [placeAndUpgrade] ไม่พบ Player Replica - aborting phase")
             return false
         end
 
-        -- à¸£à¸µà¹€à¸‹à¹‡à¸• state à¸à¹ˆà¸­à¸™à¹€à¸£à¸´à¹ˆà¸¡ Phase à¹ƒà¸«à¸¡à¹ˆ
-        print("ðŸ”„ [placeAndUpgrade] Resetting farming state...")
+        -- รีเซ็ต state ก่อนเริ่ม Phase ใหม่
+        print("🔄 [placeAndUpgrade] Resetting farming state...")
         resetFarmingState()
 
-        -- à¸”à¸¶à¸‡ units à¸—à¸µà¹ˆà¸¡à¸µà¸­à¸¢à¸¹à¹ˆà¹à¸¥à¹‰à¸§à¸à¹ˆà¸­à¸™à¸ªà¸£à¹‰à¸²à¸‡ connection
-        print("ðŸ“‹ [placeAndUpgrade] Loading existing units...")
+        -- ดึง units ที่มีอยู่แล้วก่อนสร้าง connection
+        print("📋 [placeAndUpgrade] Loading existing units...")
         pcall(function()
             local dependenciesModule = ReplicatedStorage:FindFirstChild("Dependencies")
             if dependenciesModule then
@@ -1281,64 +1281,64 @@ if isInTargetMap() then
                             existingCount = existingCount + 1
                         end
                     end
-                    print(string.format("   ðŸ“Š [placeAndUpgrade] Loaded %d existing units", existingCount))
+                    print(string.format("   📊 [placeAndUpgrade] Loaded %d existing units", existingCount))
                 end
             end
         end)
 
-        -- à¸ªà¸£à¹‰à¸²à¸‡ Connection à¹ƒà¸«à¸¡à¹ˆ
-        print("ðŸ”— [placeAndUpgrade] Creating unit tracker connection...")
+        -- สร้าง Connection ใหม่
+        print("🔗 [placeAndUpgrade] Creating unit tracker connection...")
         currentConnection = ReplicaClient.OnNew("GameUnit", function(replica)
             local unitID = replica.Data.ID
             if unitID and not table.find(allPlacedIDs, unitID) then
                 table.insert(allPlacedIDs, unitID)
-                print(string.format("   ðŸ†• [UnitTracker] New unit detected: %s", tostring(unitID)))
+                print(string.format("   🆕 [UnitTracker] New unit detected: %s", tostring(unitID)))
             end
         end)
 
-        -- à¸£à¸­à¹ƒà¸«à¹‰ connection à¸žà¸£à¹‰à¸­à¸¡ (à¹à¸à¹‰ race condition)
-        print("â³ [placeAndUpgrade] Waiting for connection to be ready...")
+        -- รอให้ connection พร้อม (แก้ race condition)
+        print("⏳ [placeAndUpgrade] Waiting for connection to be ready...")
         task.wait(2)
 
         local function placeUnit(slot, cframe)
-            -- Validate slot à¸¡à¸µ unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+            -- Validate slot มี unit หรือไม่
             local cost = getUnitCost(slot)
 
             if cost == 0 then
-                warn(string.format("âŒ [PlaceUnit] Slot %s is empty or unavailable - skipping", slot))
+                warn(string.format("❌ [PlaceUnit] Slot %s is empty or unavailable - skipping", slot))
                 return false
             end
 
             local startCount = #allPlacedIDs
 
-            -- à¹€à¸žà¸´à¹ˆà¸¡ random offset 0.5 studs
+            -- เพิ่ม random offset 0.5 studs
             local randomX = (math.random() - 0.5) * 0.5
             local randomZ = (math.random() - 0.5) * 0.5
             local adjustedCFrame = cframe * CFrame.new(randomX, 0, randomZ)
 
-            print(string.format("ðŸ”„ [PlaceUnit] Attempting to place Slot %s (Cost: %d, Money: %d)", slot, cost, getCurrentMoney()))
+            print(string.format("🔄 [PlaceUnit] Attempting to place Slot %s (Cost: %d, Money: %d)", slot, cost, getCurrentMoney()))
 
             local attempts = 0
             while attempts < 60 do
                 local money = getCurrentMoney()
                 local shouldContinue = false
 
-                -- à¸–à¹‰à¸² cost = 999999 (detect à¹„à¸¡à¹ˆà¹„à¸”à¹‰) â†’ retry getUnitCost() à¸à¹ˆà¸­à¸™
+                -- ถ้า cost = 999999 (detect ไม่ได้) → retry getUnitCost() ก่อน
                 if cost == 999999 then
-                    warn(string.format("âš ï¸ [PlaceUnit] Cannot detect cost for slot %s - retrying detection", slot))
+                    warn(string.format("⚠️ [PlaceUnit] Cannot detect cost for slot %s - retrying detection", slot))
                     local newCost, costErr = getUnitCost(slot)
                     if newCost and newCost ~= 999999 then
                         cost = newCost
-                        print(string.format("âœ… [PlaceUnit] Cost detected: %d", cost))
+                        print(string.format("✅ [PlaceUnit] Cost detected: %d", cost))
                     else
-                        warn(string.format("âš ï¸ [PlaceUnit] Still cannot detect cost - waiting before retry"))
+                        warn(string.format("⚠️ [PlaceUnit] Still cannot detect cost - waiting before retry"))
                         attempts = attempts + 1
                         task.wait(1)
                         shouldContinue = true
                     end
                 end
 
-                -- à¹€à¸Šà¹‡à¸„à¹€à¸‡à¸´à¸™à¸•à¸²à¸¡à¸›à¸à¸•à¸´
+                -- เช็คเงินตามปกติ
                 if not shouldContinue and money >= cost then
 
                     local success, err = pcall(function()
@@ -1356,34 +1356,34 @@ if isInTargetMap() then
 
                         if #allPlacedIDs > startCount then
                             local newUnitID = allPlacedIDs[#allPlacedIDs]
-                            print(string.format("   âœ… [PlaceUnit] Successfully placed Slot %s (Unit ID: %s)", slot, tostring(newUnitID)))
+                            print(string.format("   ✅ [PlaceUnit] Successfully placed Slot %s (Unit ID: %s)", slot, tostring(newUnitID)))
                             return true
                         else
-                            warn(string.format("âš ï¸ [PlaceUnit] Place retry: Slot=%s, Cost=%d, Money=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
+                            warn(string.format("⚠️ [PlaceUnit] Place retry: Slot=%s, Cost=%d, Money=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
                             attempts = attempts + 1
                             task.wait(1)
                         end
                     else
-                        warn(string.format("âŒ [PlaceUnit] FireServer failed: Slot=%s, Attempt=%d/60, Error=%s", slot, attempts + 1, tostring(err)))
+                        warn(string.format("❌ [PlaceUnit] FireServer failed: Slot=%s, Attempt=%d/60, Error=%s", slot, attempts + 1, tostring(err)))
                         attempts = attempts + 1
                         task.wait(1)
                     end
                 elseif not shouldContinue then
                     if attempts % 10 == 0 then
-                        print(string.format("â³ [PlaceUnit] Waiting for money: Slot=%s, Need=%d, Have=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
+                        print(string.format("⏳ [PlaceUnit] Waiting for money: Slot=%s, Need=%d, Have=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
                     end
                     task.wait(1)
                     attempts = attempts + 1
                 end
             end
 
-            warn(string.format("âŒ [PlaceUnit] Place timeout after 60 attempts: Slot=%s, Cost=%d", slot, cost))
+            warn(string.format("❌ [PlaceUnit] Place timeout after 60 attempts: Slot=%s, Cost=%d", slot, cost))
             return false
         end
 
-        print("ðŸ”„ [Phase] Starting placement sequence...")
+        print("🔄 [Phase] Starting placement sequence...")
 
-        -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„à¸Šà¸·à¹ˆà¸­ Unit à¸ˆà¸²à¸ HotbarData (Replica)
+        -- ฟังก์ชันเช็คชื่อ Unit จาก HotbarData (Replica)
         local function getUnitNameFromSlot(slot)
             local success, unitName = pcall(function()
                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -1391,14 +1391,14 @@ if isInTargetMap() then
                     return nil
                 end
 
-                -- à¸­à¹ˆà¸²à¸™ fullKey à¸ˆà¸²à¸ HotbarData
+                -- อ่าน fullKey จาก HotbarData
                 local fullKey = replica.Data.HotbarData[slot] or replica.Data.HotbarData[tostring(slot)]
                 if not fullKey then return nil end
 
-                -- à¹à¸¢à¸ internal name (format: "UnitName#uuid")
+                -- แยก internal name (format: "UnitName#uuid")
                 local internalName = fullKey:match("^(.+)#") or fullKey
 
-                -- à¹à¸›à¸¥à¸‡à¹€à¸›à¹‡à¸™ Display Name
+                -- แปลงเป็น Display Name
                 local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
                 local unitInfo = UnitInfo[internalName]
 
@@ -1415,136 +1415,136 @@ if isInTargetMap() then
             return nil
         end
 
-        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸² unit à¸—à¸µà¹ˆ equip à¸­à¸¢à¸¹à¹ˆà¹€à¸›à¹‡à¸™à¸•à¸±à¸§à¸—à¸µà¹ˆà¸§à¸²à¸‡à¹„à¸”à¹‰à¹à¸„à¹ˆ 3 à¸•à¸±à¸§à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+        -- เช็คว่า unit ที่ equip อยู่เป็นตัวที่วางได้แค่ 3 ตัวหรือไม่
         local PLACEMENT_LIMITED_UNITS = {"Greed", "Scissor", "Water Princess"}
-        local equippedUnitName = getUnitNameFromSlot("2")  -- slot 2 à¸„à¸·à¸­ unit à¸«à¸¥à¸±à¸
+        local equippedUnitName = getUnitNameFromSlot("2")  -- slot 2 คือ unit หลัก
         local isPlacementLimited = false
 
         if equippedUnitName then
-            print(string.format("ðŸ” [Phase] Equipped unit in slot 2: %s", equippedUnitName))
+            print(string.format("🔍 [Phase] Equipped unit in slot 2: %s", equippedUnitName))
             for _, limitedUnit in ipairs(PLACEMENT_LIMITED_UNITS) do
                 if equippedUnitName == limitedUnit then
                     isPlacementLimited = true
-                    print(string.format("âš ï¸ [Phase] Unit '%s' is placement-limited (max 3 units) - will skip Unit 4", equippedUnitName))
+                    print(string.format("⚠️ [Phase] Unit '%s' is placement-limited (max 3 units) - will skip Unit 4", equippedUnitName))
                     break
                 end
             end
         else
-            warn("âš ï¸ [Phase] Could not detect equipped unit name - will place all 4 units")
+            warn("⚠️ [Phase] Could not detect equipped unit name - will place all 4 units")
         end
 
-        -- Phase 1-2: à¸§à¸²à¸‡ 4 à¸•à¸±à¸§ (à¸«à¸£à¸·à¸­ 3 à¸•à¸±à¸§à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ limited unit)
+        -- Phase 1-2: วาง 4 ตัว (หรือ 3 ตัวถ้าเป็น limited unit)
         local unit1ID = nil
         local startCount = #allPlacedIDs
-        print("ðŸ“ [Phase 1] Placing Unit 1...")
+        print("📍 [Phase 1] Placing Unit 1...")
         local success1 = placeUnit("2", CFrame.new(3077.4265136719, 1798.7340087891, 3330.8972167969))
         if success1 and #allPlacedIDs > startCount then
             unit1ID = allPlacedIDs[#allPlacedIDs]
-            print(string.format("âœ… [Phase 1] Unit 1 placed (ID: %s)", tostring(unit1ID)))
+            print(string.format("✅ [Phase 1] Unit 1 placed (ID: %s)", tostring(unit1ID)))
         else
-            warn("âŒ [Phase 1] Failed to place Unit 1 - aborting phase")
+            warn("❌ [Phase 1] Failed to place Unit 1 - aborting phase")
             return false
         end
 
         local upgradeUnits = {}
 
         startCount = #allPlacedIDs
-        print("ðŸ“ [Phase 1] Placing Unit 2...")
+        print("📍 [Phase 1] Placing Unit 2...")
         local success2 = placeUnit("2", CFrame.new(3092.5168457031, 1798.9315185547, 3367.4926757812))
         if success2 and #allPlacedIDs > startCount then
             table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("âœ… [Phase 1] Unit 2 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
+            print(string.format("✅ [Phase 1] Unit 2 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
         else
-            warn("âŒ [Phase 1] Failed to place Unit 2 - aborting phase")
+            warn("❌ [Phase 1] Failed to place Unit 2 - aborting phase")
             return false
         end
 
         startCount = #allPlacedIDs
-        print("ðŸ“ [Phase 2] Placing Unit 3...")
+        print("📍 [Phase 2] Placing Unit 3...")
         local success3 = placeUnit("2", CFrame.new(3092.3759765625, 1798.9315185547, 3370.3395996094))
         if success3 and #allPlacedIDs > startCount then
             table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("âœ… [Phase 2] Unit 3 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
+            print(string.format("✅ [Phase 2] Unit 3 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
         else
-            warn("âŒ [Phase 2] Failed to place Unit 3 - aborting phase")
+            warn("❌ [Phase 2] Failed to place Unit 3 - aborting phase")
             return false
         end
 
-        -- Phase 2 Unit 4: à¸‚à¹‰à¸²à¸¡à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ placement-limited unit
+        -- Phase 2 Unit 4: ข้ามถ้าเป็น placement-limited unit
         if isPlacementLimited then
-            print("â­ï¸ [Phase 2] Skipping Unit 4 (placement-limited unit equipped)")
+            print("⏭️ [Phase 2] Skipping Unit 4 (placement-limited unit equipped)")
         else
             startCount = #allPlacedIDs
-            print("ðŸ“ [Phase 2] Placing Unit 4...")
+            print("📍 [Phase 2] Placing Unit 4...")
             local success4 = placeUnit("2", CFrame.new(3092.3918457031, 1798.9315185547, 3373.3002929688))
             if success4 and #allPlacedIDs > startCount then
                 table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-                print(string.format("âœ… [Phase 2] Unit 4 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
+                print(string.format("✅ [Phase 2] Unit 4 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
             else
-                warn("âŒ [Phase 2] Failed to place Unit 4 - aborting phase")
+                warn("❌ [Phase 2] Failed to place Unit 4 - aborting phase")
                 return false
             end
         end
 
-        -- Phase 3: à¸£à¸­ 30 à¸§à¸´
-        print("â³ [Phase 3] Waiting 30 seconds...")
+        -- Phase 3: รอ 30 วิ
+        print("⏳ [Phase 3] Waiting 30 seconds...")
         task.wait(30)
 
-        -- Phase 4: à¸‚à¸²à¸¢ Unit 1 + à¸§à¸²à¸‡ Unit 5
-        print("ðŸ’° [Phase 4] Selling Unit 1...")
+        -- Phase 4: ขาย Unit 1 + วาง Unit 5
+        print("💰 [Phase 4] Selling Unit 1...")
         if unit1ID then
             local success, err = pcall(function()
                 playerReplica:FireServer("SellGameUnit", unit1ID)
             end)
             if success then
-                print(string.format("   âœ… [Phase 4] Sold Unit 1 (ID: %s)", tostring(unit1ID)))
+                print(string.format("   ✅ [Phase 4] Sold Unit 1 (ID: %s)", tostring(unit1ID)))
             else
-                warn(string.format("   âš ï¸ [Phase 4] Failed to sell Unit 1 (ID=%s): %s", tostring(unit1ID), tostring(err)))
+                warn(string.format("   ⚠️ [Phase 4] Failed to sell Unit 1 (ID=%s): %s", tostring(unit1ID), tostring(err)))
             end
             task.wait(0.5)
         else
-            warn("âš ï¸ [Phase 4] unit1ID is nil - cannot sell Unit 1")
+            warn("⚠️ [Phase 4] unit1ID is nil - cannot sell Unit 1")
         end
 
         startCount = #allPlacedIDs
-        print("ðŸ“ [Phase 4] Placing Unit 5...")
+        print("📍 [Phase 4] Placing Unit 5...")
         local success5 = placeUnit("2", CFrame.new(3095.4975585938, 1798.7340087891, 3365.9299316406))
         if success5 and #allPlacedIDs > startCount then
             table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("âœ… [Phase 4] Unit 5 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
+            print(string.format("✅ [Phase 4] Unit 5 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
         else
-            warn("âš ï¸ [Phase 4] Failed to place Unit 5 - continuing with existing units...")
+            warn("⚠️ [Phase 4] Failed to place Unit 5 - continuing with existing units...")
         end
 
-        -- Phase 5: à¸£à¸­ 2 à¸§à¸´
-        print("â³ [Phase 5] Waiting 2 seconds...")
+        -- Phase 5: รอ 2 วิ
+        print("⏳ [Phase 5] Waiting 2 seconds...")
         task.wait(2)
 
-        -- Disconnect connection à¹ƒà¸«à¸¡à¹ˆà¸—à¸µà¹ˆà¸ªà¸£à¹‰à¸²à¸‡à¹ƒà¸™ Phase à¸™à¸µà¹‰
+        -- Disconnect connection ใหม่ที่สร้างใน Phase นี้
         if currentConnection then
             currentConnection:Disconnect()
             currentConnection = nil
         end
 
-        -- Phase 6: à¸•à¸±à¹‰à¸‡ AutoUpgrade Priority
-        print(string.format("ðŸ”§ [Phase 6] Setting AutoUpgrade priority for %d units...", #upgradeUnits))
+        -- Phase 6: ตั้ง AutoUpgrade Priority
+        print(string.format("🔧 [Phase 6] Setting AutoUpgrade priority for %d units...", #upgradeUnits))
         for i, unitID in ipairs(upgradeUnits) do
             local success, err = pcall(function()
                 playerReplica:FireServer("ChangeGameUnitAutoUpgradePriority", unitID, AUTO_UPGRADE_PRIORITY)
             end)
             if success then
-                print(string.format("   âœ… [Phase 6] Priority set for unit %d/%d (ID: %s)", i, #upgradeUnits, tostring(unitID)))
+                print(string.format("   ✅ [Phase 6] Priority set for unit %d/%d (ID: %s)", i, #upgradeUnits, tostring(unitID)))
             else
-                warn(string.format("   âš ï¸ [Phase 6] Failed to set priority for unit %s: %s", tostring(unitID), tostring(err)))
+                warn(string.format("   ⚠️ [Phase 6] Failed to set priority for unit %s: %s", tostring(unitID), tostring(err)))
             end
             task.wait(0.3)
         end
 
-        print("âœ… [Phase] All phases completed successfully")
+        print("✅ [Phase] All phases completed successfully")
         return true
     end
 
-    -- Anti-AFK Walk Loop (à¹€à¸”à¸´à¸™à¸§à¸™à¹ƒà¸™à¹à¸¡à¸ž)
+    -- Anti-AFK Walk Loop (เดินวนในแมพ)
     spawn(function()
         local Players = game:GetService("Players")
         local player = Players.LocalPlayer
@@ -1595,9 +1595,9 @@ if isInTargetMap() then
         end
     end)
 
-    -- Auto Claim Quest/Achievement Loop (à¸—à¸¸à¸ 5 à¸™à¸²à¸—à¸µ)
+    -- Auto Claim Quest/Achievement Loop (ทุก 5 นาที)
     spawn(function()
-        -- Claim à¸—à¸±à¸™à¸—à¸µ 1 à¸£à¸­à¸šà¸à¹ˆà¸­à¸™
+        -- Claim ทันที 1 รอบก่อน
         pcall(function()
             local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
             if replica and replica.Data.QuestData then
@@ -1626,9 +1626,9 @@ if isInTargetMap() then
             end
         end)
 
-        -- à¸§à¸™à¸¥à¸¹à¸›à¸—à¸¸à¸ 5 à¸™à¸²à¸—à¸µ
+        -- วนลูปทุก 5 นาที
         while true do
-            task.wait(300) -- 5 à¸™à¸²à¸—à¸µ
+            task.wait(300) -- 5 นาที
 
             pcall(function()
                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
@@ -1656,7 +1656,7 @@ if isInTargetMap() then
                         task.wait(0.1)
                     end
                 else
-                    warn("âš ï¸ Quest claim failed: Replica or QuestData not found")
+                    warn("⚠️ Quest claim failed: Replica or QuestData not found")
                 end
             end)
         end
@@ -1664,21 +1664,21 @@ if isInTargetMap() then
 
     task.wait(5)
 
-        -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸‚à¸²à¸¢ Unit à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸” (à¹€à¸£à¸µà¸¢à¸à¸à¹ˆà¸­à¸™à¹€à¸£à¸´à¹ˆà¸¡ Phase à¹ƒà¸«à¸¡à¹ˆ)
+        -- ฟังก์ชันขาย Unit ทั้งหมด (เรียกก่อนเริ่ม Phase ใหม่)
         local function sellAllUnits()
             local soldCount = 0
             local failCount = 0
 
-            print("ðŸ”„ [Wave Reset] Selling all existing units...")
+            print("🔄 [Wave Reset] Selling all existing units...")
 
-            -- à¸”à¸¶à¸‡ playerReplica à¹ƒà¸«à¸¡à¹ˆ
+            -- ดึง playerReplica ใหม่
             local playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
             if not playerReplica then
-                warn("âŒ [sellAllUnits] Failed to get playerReplica")
+                warn("❌ [sellAllUnits] Failed to get playerReplica")
                 return false
             end
 
-            -- Method 1: à¹ƒà¸Šà¹‰ Dependencies.GameUnits (à¹€à¸£à¹‡à¸§à¸à¸§à¹ˆà¸²)
+            -- Method 1: ใช้ Dependencies.GameUnits (เร็วกว่า)
             local success1 = pcall(function()
                 local dependenciesModule = ReplicatedStorage:FindFirstChild("Dependencies")
                 if dependenciesModule then
@@ -1693,22 +1693,22 @@ if isInTargetMap() then
 
                             if sellSuccess then
                                 soldCount = soldCount + 1
-                                print(string.format("   âœ… Sold unit ID: %s", tostring(unitID)))
+                                print(string.format("   ✅ Sold unit ID: %s", tostring(unitID)))
                             else
                                 failCount = failCount + 1
-                                warn(string.format("   âš ï¸ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
+                                warn(string.format("   ⚠️ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
                             end
 
-                            task.wait(0.2)  -- à¸«à¸™à¹ˆà¸§à¸‡à¹€à¸¥à¹‡à¸à¸™à¹‰à¸­à¸¢à¸£à¸°à¸«à¸§à¹ˆà¸²à¸‡à¸‚à¸²à¸¢
+                            task.wait(0.2)  -- หน่วงเล็กน้อยระหว่างขาย
                         end
                     end
                 end
             end)
 
             if not success1 then
-                warn("âš ï¸ Method 1 (Dependencies) failed - trying Method 2 (allPlacedIDs)")
+                warn("⚠️ Method 1 (Dependencies) failed - trying Method 2 (allPlacedIDs)")
 
-                -- Method 2: Fallback à¹ƒà¸Šà¹‰ allPlacedIDs
+                -- Method 2: Fallback ใช้ allPlacedIDs
                 if #allPlacedIDs > 0 then
                     for _, unitID in ipairs(allPlacedIDs) do
                         local sellSuccess, sellErr = pcall(function()
@@ -1717,10 +1717,10 @@ if isInTargetMap() then
 
                         if sellSuccess then
                             soldCount = soldCount + 1
-                            print(string.format("   âœ… Sold unit ID: %s", tostring(unitID)))
+                            print(string.format("   ✅ Sold unit ID: %s", tostring(unitID)))
                         else
                             failCount = failCount + 1
-                            warn(string.format("   âš ï¸ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
+                            warn(string.format("   ⚠️ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
                         end
 
                         task.wait(0.2)
@@ -1728,25 +1728,25 @@ if isInTargetMap() then
                 end
             end
 
-            print(string.format("âœ… [Wave Reset] Sold %d units (Failed: %d)", soldCount, failCount))
+            print(string.format("✅ [Wave Reset] Sold %d units (Failed: %d)", soldCount, failCount))
             task.wait(1)
 
             -- Return logic:
-            -- - true: à¸–à¹‰à¸²à¸‚à¸²à¸¢à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¸­à¸¢à¹ˆà¸²à¸‡à¸™à¹‰à¸­à¸¢ 1 à¸•à¸±à¸§ à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆà¸¡à¸µ unit à¹€à¸¥à¸¢ (soldCount=0 à¹à¸¥à¸° failCount=0)
-            -- - false: à¸–à¹‰à¸²à¸¡à¸µ unit à¹à¸•à¹ˆà¸‚à¸²à¸¢à¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆà¹€à¸¥à¸¢ (soldCount=0 à¹à¸¥à¸° failCount>0)
+            -- - true: ถ้าขายสำเร็จอย่างน้อย 1 ตัว หรือไม่มี unit เลย (soldCount=0 และ failCount=0)
+            -- - false: ถ้ามี unit แต่ขายไม่สำเร็จเลย (soldCount=0 และ failCount>0)
             if failCount > 0 and soldCount == 0 then
-                warn("âš ï¸ [sellAllUnits] All sell attempts failed")
+                warn("⚠️ [sellAllUnits] All sell attempts failed")
                 return false
             else
-                return true  -- à¸ªà¸³à¹€à¸£à¹‡à¸ˆ à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆà¸¡à¸µ unit
+                return true  -- สำเร็จ หรือไม่มี unit
             end
         end
 
         local isRunningPhase = false
         local lastWaveResetTime = 0
-        local WAVE_RESET_COOLDOWN = 5  -- à¸›à¹‰à¸­à¸‡à¸à¸±à¸™ trigger à¸‹à¹‰à¸³à¸ à¸²à¸¢à¹ƒà¸™ 5 à¸§à¸´à¸™à¸²à¸—à¸µ
+        local WAVE_RESET_COOLDOWN = 5  -- ป้องกัน trigger ซ้ำภายใน 5 วินาที
 
-        print("ðŸ”„ [In-Game] Starting initial phase...")
+        print("🔄 [In-Game] Starting initial phase...")
         placeAndUpgrade()
 
         while true do
@@ -1758,47 +1758,47 @@ if isInTargetMap() then
 
             local currentWave = getCurrentWave()
 
-            -- âš ï¸ à¸–à¹‰à¸² getCurrentWave() fail (return nil) à¹ƒà¸«à¹‰à¸‚à¹‰à¸²à¸¡à¸£à¸­à¸šà¸™à¸µà¹‰
+            -- ⚠️ ถ้า getCurrentWave() fail (return nil) ให้ข้ามรอบนี้
             if currentWave == nil then
-                warn("âš ï¸ [Wave Monitor] getCurrentWave() returned nil - skipping this check")
+                warn("⚠️ [Wave Monitor] getCurrentWave() returned nil - skipping this check")
                 continue
             end
 
             local currentTime = tick()
 
             if (currentWave == 0 or currentWave == 1) and (currentTime - lastWaveResetTime) >= WAVE_RESET_COOLDOWN then
-                print(string.format("ðŸ”„ [Wave Reset] Detected at Wave %d - preparing new phase", currentWave))
+                print(string.format("🔄 [Wave Reset] Detected at Wave %d - preparing new phase", currentWave))
                 isRunningPhase = true
                 lastWaveResetTime = currentTime
                 task.wait(2)
 
-                -- à¸‚à¸²à¸¢ Unit à¹€à¸à¹ˆà¸²à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¸à¹ˆà¸­à¸™à¹€à¸£à¸´à¹ˆà¸¡ Phase à¹ƒà¸«à¸¡à¹ˆ
+                -- ขาย Unit เก่าทั้งหมดก่อนเริ่ม Phase ใหม่
                 local sellSuccess = sellAllUnits()
                 if not sellSuccess then
-                    warn("âš ï¸ [Wave Reset] Sell failed but continuing with new phase")
+                    warn("⚠️ [Wave Reset] Sell failed but continuing with new phase")
                 end
 
-                -- à¹€à¸Šà¹‡à¸„ Banner à¸–à¹‰à¸²à¸¡à¸µ Summon Config à¹à¸¥à¸°à¹€à¸‡à¸´à¸™à¹€à¸à¸´à¸™ 10000
+                -- เช็ค Banner ถ้ามี Summon Config และเงินเกิน 10000
                 if hasSummonConfig and #SUMMON_CONFIG > 0 then
-                    print("ðŸ” [Wave Reset] Checking banner for target units...")
+                    print("🔍 [Wave Reset] Checking banner for target units...")
                     local bannerCheckSuccess, bannerResult = pcall(function()
                         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                         if replica and replica.Data then
                             local itemData = replica.Data.ItemData
                             local gems = itemData and itemData.Gem and itemData.Gem.Amount or 0
 
-                            print(string.format("   ðŸ’Ž Current Gems: %d", gems))
+                            print(string.format("   💎 Current Gems: %d", gems))
 
                             if gems >= 2500 then
-                                print("   âœ… Gems >= 2500 - checking banner...")
+                                print("   ✅ Gems >= 2500 - checking banner...")
 
-                                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹€à¸›à¹‡à¸™ Secret unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                                -- เช็คว่าเป็น Secret unit หรือไม่
                                 local isSecretUnit = false
                                 for _, configUnit in ipairs(SUMMON_CONFIG) do
                                     for _, secretUnit in ipairs(SECRET_UNITS) do
                                         if configUnit == secretUnit then
                                             isSecretUnit = true
-                                            print(string.format("   â„¹ï¸ '%s' is a Secret unit - Banner always available", configUnit))
+                                            print(string.format("   ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
                                             break
                                         end
                                     end
@@ -1806,15 +1806,15 @@ if isInTargetMap() then
                                 end
 
                                 if isSecretUnit then
-                                    -- Secret unit: à¸‚à¹‰à¸²à¸¡ Banner check
-                                    print(string.format("âœ… [Wave Reset] Secret unit + gems >= 2500 â†’ Rejoining..."))
+                                    -- Secret unit: ข้าม Banner check
+                                    print(string.format("✅ [Wave Reset] Secret unit + gems >= 2500 → Rejoining..."))
                                     task.wait(1)
 
                                     pcall(function()
                                         game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
                                     end)
                                 else
-                                    -- Mythic unit: à¹€à¸Šà¹‡à¸„ Banner à¸•à¸²à¸¡à¸›à¸à¸•à¸´
+                                    -- Mythic unit: เช็ค Banner ตามปกติ
                                     local bannerUnits = {}
                                     local bannerSuccess = pcall(function()
                                         local startTime = tick()
@@ -1831,9 +1831,9 @@ if isInTargetMap() then
                                     end)
 
                                     if bannerSuccess and #bannerUnits > 0 then
-                                        print(string.format("   ðŸ“‹ Banner units found: %s", table.concat(bannerUnits, ", ")))
+                                        print(string.format("   📋 Banner units found: %s", table.concat(bannerUnits, ", ")))
 
-                                        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µà¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                                        -- เช็คว่ามีตัวที่ต้องการหรือไม่
                                         local hasMatch = false
                                         local matchedUnit = nil
                                         for _, configUnit in pairs(SUMMON_CONFIG) do
@@ -1848,52 +1848,52 @@ if isInTargetMap() then
                                         end
 
                                         if hasMatch then
-                                            print(string.format("âœ… [Wave Reset] Target unit '%s' found in banner + gems >= 2500 â†’ Rejoining...", matchedUnit))
+                                            print(string.format("✅ [Wave Reset] Target unit '%s' found in banner + gems >= 2500 → Rejoining...", matchedUnit))
                                             task.wait(1)
 
                                             pcall(function()
                                                 game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
                                             end)
-                                            return  -- à¸«à¸¢à¸¸à¸”à¸ªà¸„à¸£à¸´à¸›à¸•à¹Œ
+                                            return  -- หยุดสคริปต์
                                         else
-                                            warn("âš ï¸ [Wave Reset] No target units found in banner - continuing farming")
+                                            warn("⚠️ [Wave Reset] No target units found in banner - continuing farming")
                                         end
                                     else
-                                        warn("âš ï¸ [Wave Reset] Failed to check banner (timeout or error) - continuing farming")
+                                        warn("⚠️ [Wave Reset] Failed to check banner (timeout or error) - continuing farming")
                                     end
                                 end
                             else
-                                print(string.format("   â­ï¸ Gems < 2500 - skipping banner check"))
+                                print(string.format("   ⏭️ Gems < 2500 - skipping banner check"))
                             end
                         else
-                            warn("âš ï¸ [Wave Reset] Failed to get Replica for banner check")
+                            warn("⚠️ [Wave Reset] Failed to get Replica for banner check")
                         end
                     end)
 
                     if not bannerCheckSuccess then
-                        warn(string.format("âš ï¸ [Wave Reset] Banner check error: %s - continuing farming", tostring(bannerResult)))
+                        warn(string.format("⚠️ [Wave Reset] Banner check error: %s - continuing farming", tostring(bannerResult)))
                     end
                 end
 
-                print("ðŸ”„ [Wave Reset] Starting new phase...")
+                print("🔄 [Wave Reset] Starting new phase...")
                 local success = placeAndUpgrade()
                 isRunningPhase = false
 
                 if not success then
-                    warn("âš ï¸ [Wave Reset] Phase failed - will retry on next wave reset")
+                    warn("⚠️ [Wave Reset] Phase failed - will retry on next wave reset")
                 else
-                    print("âœ… [Wave Reset] Phase completed successfully")
+                    print("✅ [Wave Reset] Phase completed successfully")
                 end
             end
         end
     end)
 
-    -- à¸«à¸¢à¸¸à¸”à¸—à¸µà¹ˆà¸™à¸µà¹ˆ - à¹„à¸¡à¹ˆà¸£à¸±à¸™ Lobby scripts
+    -- หยุดที่นี่ - ไม่รัน Lobby scripts
     return
 end
 
 -- ========================================
--- LOBBY SCRIPTS (à¸£à¸±à¸™à¹€à¸‰à¸žà¸²à¸°à¸•à¸­à¸™à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¹à¸¡à¸ž)
+-- LOBBY SCRIPTS (รันเฉพาะตอนไม่ได้อยู่ในแมพ)
 -- ========================================
 
 -- ========================================
@@ -1901,7 +1901,7 @@ end
 -- ========================================
 printStep("Removing Lobby Mesh...")
 
--- à¹ƒà¸Šà¹‰à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™ Performance Optimization
+-- ใช้ฟังก์ชัน Performance Optimization
 applyPerformanceOptimizations()
 
 task.wait(1)
@@ -1959,7 +1959,7 @@ task.wait(1)
 local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
 local Actions = require(FusionPackage.Actions)
 
--- à¹€à¸£à¸´à¹ˆà¸¡à¸•à¹‰à¸™: à¸‚à¸²à¸¢ Rare + Epic à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™ (à¹„à¸¡à¹ˆà¸‚à¸²à¸¢ Legendary)
+-- เริ่มต้น: ขาย Rare + Epic เท่านั้น (ไม่ขาย Legendary)
 for _, rarity in ipairs({"Rare", "Epic"}) do
     pcall(function()
         Actions.ToggleAutoSell("Standard", rarity, false, true)
@@ -1967,11 +1967,11 @@ for _, rarity in ipairs({"Rare", "Epic"}) do
     task.wait(0.3)
 end
 
--- à¹€à¸›à¸´à¸”à¸‚à¸²à¸¢ Shiny units à¸—à¸¸à¸ Rarity (Rare, Epic)
-print("ðŸ”§ Enabling Shiny AutoSell...")
+-- เปิดขาย Shiny units ทุก Rarity (Rare, Epic)
+print("🔧 Enabling Shiny AutoSell...")
 for _, rarity in ipairs({"Rare", "Epic"}) do
     pcall(function()
-        -- Parameter 3 = true à¸«à¸¡à¸²à¸¢à¸–à¸¶à¸‡ Shiny
+        -- Parameter 3 = true หมายถึง Shiny
         Actions.ToggleAutoSell("Standard", rarity, true, true)
     end)
     task.wait(0.3)
@@ -1991,13 +1991,13 @@ do
         FilterMode = false,
     }
 
-    -- à¸¥à¹‰à¸²à¸‡ filters (à¸–à¹‰à¸²à¸•à¹‰à¸­à¸‡à¸à¸²à¸£)
+    -- ล้าง filters (ถ้าต้องการ)
     if TRAIT_CONFIG.ClearBeforeSet then
         pcall(function() Nodes.CLIENT_CLEAR_TRAIT_FILTERS:Request() end)
         task.wait(0.3)
     end
 
-    -- à¸•à¸±à¹‰à¸‡ filters
+    -- ตั้ง filters
     local success, fail = 0, 0
     for _, trait in ipairs(TRAIT_CONFIG.TargetTraits) do
         if pcall(function() Nodes.CLIENT_TOGGLE_TRAIT_FILTER:Request(trait, TRAIT_CONFIG.FilterMode) end) then
@@ -2008,11 +2008,11 @@ do
         task.wait(0.1)
     end
 
-    -- à¹à¸ˆà¹‰à¸‡à¸œà¸¥à¸¥à¸±à¸žà¸˜à¹Œ
+    -- แจ้งผลลัพธ์
     if fail == 0 then
-        print(string.format("âœ… Trait Filters: %d traits %s", success, TRAIT_CONFIG.FilterMode and "enabled" or "disabled"))
+        print(string.format("✅ Trait Filters: %d traits %s", success, TRAIT_CONFIG.FilterMode and "enabled" or "disabled"))
     else
-        warn(string.format("âš ï¸ Trait Filters: %d success, %d failed", success, fail))
+        warn(string.format("⚠️ Trait Filters: %d success, %d failed", success, fail))
     end
 end
 
@@ -2029,7 +2029,7 @@ local Players = game:GetService("Players")
 
 local TARGET_UNIT = "Carrot"
 
--- à¸£à¸­à¹ƒà¸«à¹‰ Prompt à¹‚à¸«à¸¥à¸”
+-- รอให้ Prompt โหลด
 task.wait(2)
 
 local playerGui = Players.LocalPlayer.PlayerGui
@@ -2039,17 +2039,17 @@ if playerGui:FindFirstChild("Prompt") then
     end)
 
     if not success or not folder then
-        warn("âš ï¸ Starter Unit popup not found or already claimed - skipping")
+        warn("⚠️ Starter Unit popup not found or already claimed - skipping")
         task.wait(2)
         return
     end
 
-    -- à¸«à¸²à¸›à¸¸à¹ˆà¸¡à¸—à¸µà¹ˆà¸¡à¸µà¸Šà¸·à¹ˆà¸­ Carrot
+    -- หาปุ่มที่มีชื่อ Carrot
     for _, child in pairs(folder:GetChildren()) do
         if child:FindFirstChild("Folder") then
             local textLabel = child.Folder.Frame.Frame:FindFirstChild("TextLabel")
             if textLabel and (textLabel.ContentText == TARGET_UNIT or textLabel.Text == TARGET_UNIT) then
-                -- à¸à¸”à¸›à¸¸à¹ˆà¸¡à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸¥à¸°à¸„à¸£
+                -- กดปุ่มเลือกตัวละคร
                 local button = child.Folder.Frame:FindFirstChild("TextButton")
                 if button then
                     GuiService.SelectedCoreObject = nil
@@ -2068,7 +2068,7 @@ if playerGui:FindFirstChild("Prompt") then
 
                     task.wait(0.5)
 
-                    -- à¸à¸”à¸›à¸¸à¹ˆà¸¡à¸¢à¸·à¸™à¸¢à¸±à¸™
+                    -- กดปุ่มยืนยัน
                     local confirmButton = playerGui.Prompt.Frame.Frame.Frame.Frame:FindFirstChild("PrimaryButton")
                     if confirmButton then
                         GuiService.SelectedCoreObject = nil
@@ -2087,7 +2087,7 @@ if playerGui:FindFirstChild("Prompt") then
 
                         task.wait(0.5)
 
-                        -- spam à¸„à¸¥à¸´à¸à¸¡à¸¸à¸¡à¸‹à¹‰à¸²à¸¢à¸šà¸™ 5 à¸£à¸­à¸š
+                        -- spam คลิกมุมซ้ายบน 5 รอบ
                         for i = 1, 5 do
                             VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
                             task.wait(0.05)
@@ -2114,31 +2114,31 @@ printStep("Claiming Calendar Rewards...")
 local START_DAY = 1
 local END_DAY = 7
 
--- Claim ReleaseCalendar à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¸žà¸£à¹‰à¸­à¸¡à¸à¸±à¸™
+-- Claim ReleaseCalendar ทั้งหมดพร้อมกัน
 for day = START_DAY, END_DAY do
     spawn(function()
         pcall(function()
             Nodes.CLAIM_CALENDAR:FireServer("ReleaseCalendar", day)
         end)
     end)
-    task.wait(0.05)  -- à¸«à¸™à¹ˆà¸§à¸‡à¹€à¸¥à¹‡à¸à¸™à¹‰à¸­à¸¢
+    task.wait(0.05)  -- หน่วงเล็กน้อย
 end
 
-task.wait(2)  -- à¸£à¸­à¹ƒà¸«à¹‰ claim à¹€à¸ªà¸£à¹‡à¸ˆ
+task.wait(2)  -- รอให้ claim เสร็จ
 
--- Claim DailyRewards à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¸žà¸£à¹‰à¸­à¸¡à¸à¸±à¸™
+-- Claim DailyRewards ทั้งหมดพร้อมกัน
 for day = START_DAY, END_DAY do
     spawn(function()
         pcall(function()
             Nodes.CLAIM_CALENDAR:FireServer("DailyRewards", day)
         end)
     end)
-    task.wait(0.05)  -- à¸«à¸™à¹ˆà¸§à¸‡à¹€à¸¥à¹‡à¸à¸™à¹‰à¸­à¸¢
+    task.wait(0.05)  -- หน่วงเล็กน้อย
 end
 
-task.wait(2)  -- à¸£à¸­à¹ƒà¸«à¹‰ claim à¹€à¸ªà¸£à¹‡à¸ˆ
+task.wait(2)  -- รอให้ claim เสร็จ
 
--- à¸›à¸´à¸” popup à¸£à¸§à¸¡
+-- ปิด popup รวม
 local VirtualInputManager = game:GetService("VirtualInputManager")
 for i = 1, 10 do
     VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
@@ -2167,7 +2167,7 @@ do
     local successCount = 0
     local failCount = 0
 
-    -- Redeem à¸—à¸µà¸¥à¸°à¹‚à¸„à¹‰à¸” (à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸§à¸¥à¸²à¸£à¸°à¸«à¸§à¹ˆà¸²à¸‡à¹‚à¸„à¹‰à¸”)
+    -- Redeem ทีละโค้ด (เพิ่มเวลาระหว่างโค้ด)
     for i, code in ipairs(CODES) do
         local success, result = pcall(function()
             local request = Nodes.CLAIM_CODE:Request(code)
@@ -2181,14 +2181,14 @@ do
             failCount = failCount + 1
         end
 
-        task.wait(1.1)  -- à¸£à¸­ 5 à¸§à¸´à¸•à¹ˆà¸­à¹‚à¸„à¹‰à¸”
+        task.wait(1.1)  -- รอ 5 วิต่อโค้ด
     end
 
-    -- à¸£à¸­à¹€à¸žà¸´à¹ˆà¸¡à¸­à¸µà¸à¸™à¸´à¸”
+    -- รอเพิ่มอีกนิด
     task.wait(1)
 
 
-    -- à¸›à¸´à¸” popup (à¸–à¹‰à¸²à¸¡à¸µ)
+    -- ปิด popup (ถ้ามี)
     local VirtualInputManager = game:GetService("VirtualInputManager")
     for i = 1, 10 do
         VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
@@ -2206,21 +2206,21 @@ task.wait(1)
 printStep("Claiming All Quests, Achievements & BattlePass...")
 
 do
-    -- à¸”à¸¶à¸‡ QuestData
+    -- ดึง QuestData
     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
     if not replica or not replica.Data.QuestData then
-        warn("   âš ï¸ QuestData not found!")
+        warn("   ⚠️ QuestData not found!")
     else
         local questData = replica.Data.QuestData
         local categories = {}
 
-        -- à¹€à¸à¹‡à¸š categories à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”
+        -- เก็บ categories ทั้งหมด
         for categoryName, _ in pairs(questData) do
             table.insert(categories, categoryName)
         end
 
 
-        -- Claim à¹à¸•à¹ˆà¸¥à¸° category à¸žà¸£à¹‰à¸­à¸¡à¸à¸±à¸™
+        -- Claim แต่ละ category พร้อมกัน
         local claimedCount = 0
         for _, categoryName in ipairs(categories) do
             spawn(function()
@@ -2256,7 +2256,7 @@ do
     if battlepassClaimed == 0 then
     end
 
-    -- à¸›à¸´à¸” popup à¸—à¸µà¹ˆà¸­à¸²à¸ˆà¸ˆà¸°à¸‚à¸¶à¹‰à¸™à¸¡à¸²
+    -- ปิด popup ที่อาจจะขึ้นมา
     local VirtualInputManager = game:GetService("VirtualInputManager")
     for i = 1, 20 do
         VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
@@ -2268,20 +2268,20 @@ end
 task.wait(1)
 
 -- ========================================
--- 5. à¹€à¸Šà¹‡à¸„à¸•à¸±à¸§à¸¥à¸°à¸„à¸£à¸—à¸µà¹ˆà¸¡à¸µà¸­à¸¢à¸¹à¹ˆ + Summon System (Mythic/Secret)
+-- 5. เช็คตัวละครที่มีอยู่ + Summon System (Mythic/Secret)
 -- ========================================
 
 printStep("Checking Inventory...")
 
--- à¸¥à¸šà¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™ openInventory à¹à¸¥à¸° closeInventory à¹€à¸žà¸£à¸²à¸°à¹„à¸¡à¹ˆà¸ˆà¸³à¹€à¸›à¹‡à¸™à¹à¸¥à¹‰à¸§
--- à¹ƒà¸Šà¹‰ Nodes.GET_DATA_VALUE:InvokeSelf("UnitData") à¹‚à¸”à¸¢à¸•à¸£à¸‡
+-- ลบฟังก์ชัน openInventory และ closeInventory เพราะไม่จำเป็นแล้ว
+-- ใช้ Nodes.GET_DATA_VALUE:InvokeSelf("UnitData") โดยตรง
 
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µ units à¹ƒà¸™ Inventory (à¸žà¸£à¹‰à¸­à¸¡ Trait)
+-- ฟังก์ชันเช็คว่ามี units ใน Inventory (พร้อม Trait)
 local function checkInventoryForUnits(targetUnits, returnWithTrait)
     local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
     if not unitData then return {} end
 
-    -- à¸–à¹‰à¸² targetUnits à¹€à¸›à¹‡à¸™ string à¹ƒà¸«à¹‰à¹à¸›à¸¥à¸‡à¹€à¸›à¹‡à¸™ table
+    -- ถ้า targetUnits เป็น string ให้แปลงเป็น table
     if type(targetUnits) == "string" then
         targetUnits = {targetUnits}
     end
@@ -2297,7 +2297,7 @@ local function checkInventoryForUnits(targetUnits, returnWithTrait)
             for _, targetUnit in ipairs(targetUnits) do
                 if displayName == targetUnit then
                     if returnWithTrait then
-                        -- return à¸žà¸£à¹‰à¸­à¸¡ Trait à¹à¸¥à¸° Shiny
+                        -- return พร้อม Trait และ Shiny
                         table.insert(foundUnits, {
                             name = displayName,
                             trait = data.Trait or "None",
@@ -2306,7 +2306,7 @@ local function checkInventoryForUnits(targetUnits, returnWithTrait)
                             isShiny = data.Shiny or false
                         })
                     else
-                        -- return à¹à¸„à¹ˆà¸Šà¸·à¹ˆà¸­
+                        -- return แค่ชื่อ
                         table.insert(foundUnits, displayName)
                     end
                     break
@@ -2317,14 +2317,14 @@ local function checkInventoryForUnits(targetUnits, returnWithTrait)
     return foundUnits
 end
 
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸—à¸µà¹ˆà¸ˆà¸°à¸ªà¸¸à¹ˆà¸¡ Trait (Priority: None > Worst Trait)
+-- ฟังก์ชันเลือกตัวที่จะสุ่ม Trait (Priority: None > Worst Trait)
 local function selectBestUnitForReroll(units)
     if #units == 0 then return nil end
     if #units == 1 then return units[1] end
 
-    -- Trait Priority (à¸ˆà¸²à¸à¸à¸²à¸à¸ªà¸¸à¸” â†’ à¸”à¸µà¸ªà¸¸à¸”)
+    -- Trait Priority (จากกากสุด → ดีสุด)
     local TRAIT_PRIORITY = {
-        "Strength 1",    -- 1 (à¸à¸²à¸à¸ªà¸¸à¸”)
+        "Strength 1",    -- 1 (กากสุด)
         "Speed 1",       -- 2
         "Range 1",       -- 3
         "Enlightenment", -- 4
@@ -2340,16 +2340,16 @@ local function selectBestUnitForReroll(units)
         "Draconic",      -- 14
         "Forsaken",      -- 15
         "Primordial",    -- 16
-        "Unbound"        -- 17 (à¸”à¸µà¸ªà¸¸à¸”)
+        "Unbound"        -- 17 (ดีสุด)
     }
 
-    -- à¸ªà¸£à¹‰à¸²à¸‡ Trait â†’ Priority Map
+    -- สร้าง Trait → Priority Map
     local traitPriorityMap = {}
     for priority, traitName in ipairs(TRAIT_PRIORITY) do
         traitPriorityMap[traitName] = priority
     end
 
-    -- à¹à¸¢à¸ Shiny à¹à¸¥à¸° Non-Shiny
+    -- แยก Shiny และ Non-Shiny
     local shinyUnits = {}
     local normalUnits = {}
 
@@ -2361,12 +2361,12 @@ local function selectBestUnitForReroll(units)
         end
     end
 
-    -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸—à¸µà¹ˆà¸”à¸µà¸—à¸µà¹ˆà¸ªà¸¸à¸”à¸ˆà¸²à¸ list
+    -- ฟังก์ชันเลือกตัวที่ดีที่สุดจาก list
     local function selectFromList(list)
         if #list == 0 then return nil end
         if #list == 1 then return list[1] end
 
-        -- à¹à¸¢à¸à¸•à¸±à¸§à¸—à¸µà¹ˆ Trait = None
+        -- แยกตัวที่ Trait = None
         local noneUnits = {}
         local withTraitUnits = {}
 
@@ -2378,73 +2378,96 @@ local function selectBestUnitForReroll(units)
             end
         end
 
-        -- à¸–à¹‰à¸²à¸¡à¸µà¸•à¸±à¸§à¸—à¸µà¹ˆ Trait = None â†’ à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¹à¸£à¸
+        -- ถ้ามีตัวที่ Trait = None → เลือกตัวแรก
         if #noneUnits > 0 then
             return noneUnits[1]
         end
 
-        -- à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¸¡à¸µ None â†’ à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸—à¸µà¹ˆ Trait à¸à¸²à¸à¸ªà¸¸à¸” (priority à¸•à¹ˆà¸³à¸ªà¸¸à¸”)
+        -- ถ้าไม่มี None → เลือกตัวที่ Trait กากสุด (priority ต่ำสุด)
         if #withTraitUnits > 0 then
             table.sort(withTraitUnits, function(a, b)
                 local priorityA = traitPriorityMap[a.trait] or 999
                 local priorityB = traitPriorityMap[b.trait] or 999
-                return priorityA < priorityB  -- priority à¸•à¹ˆà¸³à¸à¸§à¹ˆà¸² = à¸à¸²à¸à¸à¸§à¹ˆà¸²
+                return priorityA < priorityB  -- priority ต่ำกว่า = กากกว่า
             end)
             return withTraitUnits[1]
         end
 
         return list[1]
-    end  -- à¸›à¸´à¸” selectFromList function
+    end  -- ปิด selectFromList function
 
-    -- à¹€à¸¥à¸·à¸­à¸ Shiny à¸à¹ˆà¸­à¸™ (à¸–à¹‰à¸²à¸¡à¸µ)
+    -- เลือก Shiny ก่อน (ถ้ามี)
     if #shinyUnits > 0 then
         local selected = selectFromList(shinyUnits)
         if selected then return selected end
     end
 
-    -- à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¸¡à¸µ Shiny à¸«à¸£à¸·à¸­à¹€à¸¥à¸·à¸­à¸à¹„à¸¡à¹ˆà¹„à¸”à¹‰ â†’ à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸˜à¸£à¸£à¸¡à¸”à¸²
+    -- ถ้าไม่มี Shiny หรือเลือกไม่ได้ → เลือกตัวธรรมดา
     if #normalUnits > 0 then
         local selected = selectFromList(normalUnits)
         if selected then return selected end
     end
 
-    -- Fallback (à¹„à¸¡à¹ˆà¸™à¹ˆà¸²à¹€à¸à¸´à¸”)
+    -- Fallback (ไม่น่าเกิด)
     return units[1]
-end  -- à¸›à¸´à¸” selectBestUnitForReroll function
+end  -- ปิด selectBestUnitForReroll function
 
--- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸ªà¹ˆà¸‡ Horst Description
-local function sendSummonStatus(foundUnits)
+-- ฟังก์ชันส่ง Horst Description
+local function sendSummonStatus(foundUnits, isComplete)
     if not HORST_ENABLED or not _G.Horst_SetDescription then return end
 
     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
     local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
     local rr = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
+    -- สร้าง unit list
     local unitNames = {}
     for _, unit in ipairs(foundUnits) do
         table.insert(unitNames, unit)
     end
     local unitText = table.concat(unitNames, ", ")
 
+    -- สร้าง message ในรูปแบบเดียวกับ GEM mode
     local message = string.format("💎 Gems: %d • RR: %d • %s", gems, rr, unitText)
 
     pcall(function()
-        _G.Horst_SetDescription(message)
+        _G.Horst_SetDescription(message, "")
     end)
 
-    print(string.format("📤 Updated status: %s", message))
+    if isComplete and _G.Horst_AccountChangeDone then
+        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
+
+        local ok = pcall(_G.Horst_AccountChangeDone)
+        if ok then
+            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+            print("✅ Summon completed - Script will stop...")
+
+            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+            while true do
+                pcall(function()
+                    local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                    local gemsLoop = replicaLoop and replicaLoop.Data.ItemData.Gem.Amount or 0
+                    local rrLoop = replicaLoop and replicaLoop.Data.ItemData.TraitReroll and replicaLoop.Data.ItemData.TraitReroll.Amount or 0
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s", gemsLoop, rrLoop, unitText), "")
+                end)
+                task.wait(5)
+            end
+        else
+            warn("❌ Failed to send DONE (Summon)")
+        end
+    end
 end
 
--- à¹€à¸Šà¹‡à¸„ Summon Config
+-- เช็ค Summon Config
 local shouldSummon = false
-local hasTargetUnitConfig = false  -- à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¸Šà¸·à¹ˆà¸­à¸ˆà¸²à¸ hasTargetUnit
-local autoSummonMode = false  -- à¹ƒà¸«à¸¡à¹ˆ: à¹‚à¸«à¸¡à¸” auto summon
+local hasTargetUnitConfig = false  -- เปลี่ยนชื่อจาก hasTargetUnit
+local autoSummonMode = false  -- ใหม่: โหมด auto summon
 
 if hasSummonConfig then
-    -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹€à¸›à¹‡à¸™ "auto" mode à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+    -- เช็คว่าเป็น "auto" mode หรือไม่
     if type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits:lower() == "auto" then
         autoSummonMode = true
-        -- Override SUMMON_CONFIG à¹€à¸›à¹‡à¸™ Mythic + Secret à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”
+        -- Override SUMMON_CONFIG เป็น Mythic + Secret ทั้งหมด
         local allTargets = {}
         for _, unit in ipairs(SECRET_UNITS) do
             table.insert(allTargets, unit)
@@ -2455,41 +2478,41 @@ if hasSummonConfig then
         SUMMON_CONFIG = allTargets
     end
 
-    -- à¹€à¸Šà¹‡à¸„ Level à¹à¸¥à¸° Gems
+    -- เช็ค Level และ Gems
     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
     local level = replica and replica.Data and replica.Data.Level or 0
     local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-    -- 1. à¹€à¸Šà¹‡à¸„ Inventory à¸à¹ˆà¸­à¸™à¹€à¸ªà¸¡à¸­ (à¹„à¸¡à¹ˆà¸§à¹ˆà¸² Gems à¸ˆà¸°à¸žà¸­à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ)
+    -- 1. เช็ค Inventory ก่อนเสมอ (ไม่ว่า Gems จะพอหรือไม่)
     local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
     if autoSummonMode then
-        -- à¹‚à¸«à¸¡à¸” auto: à¹„à¸”à¹‰à¸•à¸±à¸§à¹ƒà¸”à¸•à¸±à¸§à¸«à¸™à¸¶à¹ˆà¸‡à¸à¹‡à¸žà¸­
+        -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
         if #foundInInventory > 0 then
-            sendSummonStatus(true)
+            sendSummonStatus(foundInInventory, true)
             hasTargetUnitConfig = true
-            print("âœ… Found target unit in inventory - skipping summon")
+            print("✅ Found target unit in inventory - skipping summon")
         end
     else
-        -- à¹‚à¸«à¸¡à¸”à¸›à¸à¸•à¸´: à¸•à¹‰à¸­à¸‡à¹„à¸”à¹‰à¸„à¸£à¸šà¸—à¸¸à¸à¸•à¸±à¸§
+        -- โหมดปกติ: ต้องได้ครบทุกตัว
         if #foundInInventory >= #SUMMON_CONFIG then
-            sendSummonStatus(true)
+            sendSummonStatus(foundInInventory, true)
             hasTargetUnitConfig = true
-            print("âœ… Found all target units in inventory - skipping summon")
+            print("✅ Found all target units in inventory - skipping summon")
         end
     end
 
-    -- 2. à¸–à¹‰à¸²à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µà¸•à¸±à¸§ â†’ à¸žà¸´à¸ˆà¸²à¸£à¸“à¸²à¸§à¹ˆà¸²à¸ˆà¸°à¸ªà¸¸à¹ˆà¸¡à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+    -- 2. ถ้ายังไม่มีตัว → พิจารณาว่าจะสุ่มหรือไม่
     if not hasTargetUnitConfig then
         if level >= 10 and gems >= 2500 then
-            -- à¸¡à¸µ Level à¹à¸¥à¸° Gems à¸žà¸­ â†’ à¹„à¸›à¸ªà¸¸à¹ˆà¸¡
-            -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹€à¸›à¹‡à¸™ Secret unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+            -- มี Level และ Gems พอ → ไปสุ่ม
+            -- เช็คว่าเป็น Secret unit หรือไม่
             local isSecretUnit = false
             for _, configUnit in ipairs(SUMMON_CONFIG) do
                 for _, secretUnit in ipairs(SECRET_UNITS) do
                     if configUnit == secretUnit then
                         isSecretUnit = true
-                        print(string.format("â„¹ï¸ '%s' is a Secret unit - Banner always available", configUnit))
+                        print(string.format("ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
                         break
                     end
                 end
@@ -2497,10 +2520,10 @@ if hasSummonConfig then
             end
 
             if isSecretUnit then
-                -- Secret unit: à¸‚à¹‰à¸²à¸¡ Banner check (à¸¡à¸µà¹€à¸ªà¸¡à¸­)
+                -- Secret unit: ข้าม Banner check (มีเสมอ)
                 shouldSummon = true
             else
-                -- Mythic unit: à¹€à¸Šà¹‡à¸„ Banner à¸•à¸²à¸¡à¸›à¸à¸•à¸´
+                -- Mythic unit: เช็ค Banner ตามปกติ
                 local bannerUnits = checkCurrentBanner()
 
                 local hasMatch = false
@@ -2518,15 +2541,15 @@ if hasSummonConfig then
                     shouldSummon = true
                 else
                     if #foundInInventory > 0 then
-                        sendSummonStatus(false)
+                        sendSummonStatus(foundInInventory, false)
                     end
                 end
             end
         else
-            -- à¹„à¸¡à¹ˆà¸¡à¸µà¸•à¸±à¸§ + Gems à¹„à¸¡à¹ˆà¸žà¸­ â†’ à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µ Mythic Fallback à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
-            warn(string.format("âš ï¸ Target unit not found in inventory. Need to farm more gems. Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
+            -- ไม่มีตัว + Gems ไม่พอ → เช็คว่ามี Mythic Fallback หรือไม่
+            warn(string.format("⚠️ Target unit not found in inventory. Need to farm more gems. Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
 
-            -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸² Config à¹€à¸›à¹‡à¸™ Secret unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+            -- เช็คว่า Config เป็น Secret unit หรือไม่
             local isSecretSummon = false
             for _, configUnit in ipairs(SUMMON_CONFIG) do
                 for _, secretUnit in ipairs(SECRET_UNITS) do
@@ -2538,32 +2561,32 @@ if hasSummonConfig then
                 if isSecretSummon then break end
             end
 
-            -- à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ Secret + Change_Acc_Secrets = true â†’ Fallback à¹„à¸› Mythic
+            -- ถ้าเป็น Secret + Change_Acc_Secrets = true → Fallback ไป Mythic
             if isSecretSummon and CHANGE_ACC_SECRETS then
-                print("â„¹ï¸ Secret unit not found - checking for Mythic fallback...")
+                print("ℹ️ Secret unit not found - checking for Mythic fallback...")
 
-                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µ Mythic à¹ƒà¸™ Inventory à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                -- เช็คว่ามี Mythic ใน Inventory หรือไม่
                 local mythicFallback = checkInventoryForUnits(MYTHIC_UNITS)
 
                 if #mythicFallback > 0 then
-                    print(string.format("âœ… Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
-                    sendSummonStatus(false)
+                    print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
+                    sendSummonStatus(mythicFallback, false)
                     hasTargetUnitConfig = true
-                    -- à¹„à¸¡à¹ˆà¸•à¸±à¹‰à¸‡ shouldSummon = true (à¹„à¸¡à¹ˆà¹„à¸›à¸ªà¸¸à¹ˆà¸¡) à¹à¸•à¹ˆà¸¡à¸µ hasTargetUnitConfig = true (à¹„à¸› Trait Reroll)
+                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) แต่มี hasTargetUnitConfig = true (ไป Trait Reroll)
                 else
-                    print("âš ï¸ No Mythic fallback found - will proceed to farming")
-                    -- à¹„à¸¡à¹ˆà¸•à¸±à¹‰à¸‡ shouldSummon = true (à¹„à¸¡à¹ˆà¹„à¸›à¸ªà¸¸à¹ˆà¸¡) à¹ƒà¸«à¹‰à¹„à¸›à¹€à¸Šà¹‡à¸„ Legendary à¸•à¹ˆà¸­
+                    print("⚠️ No Mythic fallback found - will proceed to farming")
+                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
                 end
             else
-                print("â„¹ï¸ Script will proceed to farming to collect gems...")
-                -- à¹„à¸¡à¹ˆà¸•à¸±à¹‰à¸‡ shouldSummon = true (à¹„à¸¡à¹ˆà¹„à¸›à¸ªà¸¸à¹ˆà¸¡) à¹ƒà¸«à¹‰à¹„à¸›à¹€à¸Šà¹‡à¸„ Legendary à¸•à¹ˆà¸­
+                print("ℹ️ Script will proceed to farming to collect gems...")
+                -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
             end
         end
     end
 end
 
--- à¹€à¸Šà¹‡à¸„à¸•à¸±à¸§ Legendary (à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¸¡à¸µ Summon Config à¸«à¸£à¸·à¸­à¸‚à¹‰à¸²à¸¡à¸¡à¸²à¹à¸¥à¹‰à¸§)
--- à¹à¸•à¹ˆà¹„à¸¡à¹ˆ override hasTargetUnitConfig à¸–à¹‰à¸²à¸¡à¸µà¸„à¹ˆà¸²à¸­à¸¢à¸¹à¹ˆà¹à¸¥à¹‰à¸§ (à¹€à¸Šà¹ˆà¸™ à¸ˆà¸²à¸ Mythic Fallback)
+-- เช็คตัว Legendary (ถ้าไม่มี Summon Config หรือข้ามมาแล้ว)
+-- แต่ไม่ override hasTargetUnitConfig ถ้ามีค่าอยู่แล้ว (เช่น จาก Mythic Fallback)
 local hasTargetUnitLegendary = false
 
 if not shouldSummon and not hasTargetUnitConfig then
@@ -2578,7 +2601,7 @@ if not shouldSummon and not hasTargetUnitConfig then
             "Greed"
         }
 
-        -- à¹€à¸Šà¹‡à¸„à¸œà¹ˆà¸²à¸™ UnitData à¹‚à¸”à¸¢à¸•à¸£à¸‡à¹à¸—à¸™à¸à¸²à¸£à¸­à¹ˆà¸²à¸™ GUI
+        -- เช็คผ่าน UnitData โดยตรงแทนการอ่าน GUI
         local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
         if not unitData then
             return false
@@ -2586,7 +2609,7 @@ if not shouldSummon and not hasTargetUnitConfig then
 
         local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
 
-        -- à¹€à¸à¹‡à¸šà¸Šà¸·à¹ˆà¸­à¸—à¸µà¹ˆà¹€à¸ˆà¸­à¹€à¸žà¸·à¹ˆà¸­ debug
+        -- เก็บชื่อที่เจอเพื่อ debug
         local foundUnits = {}
         local targetFound = false
 
@@ -2597,12 +2620,12 @@ if not shouldSummon and not hasTargetUnitConfig then
             if unitInfo then
                 local displayName = unitInfo.DisplayName or internalName
 
-                -- à¹€à¸à¹‡à¸šà¹€à¸žà¸·à¹ˆà¸­ debug
+                -- เก็บเพื่อ debug
                 if not foundUnits[displayName] then
                     foundUnits[displayName] = true
                 end
 
-                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸•à¸£à¸‡à¸à¸±à¸š target unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                -- เช็คว่าตรงกับ target unit หรือไม่
                 for _, targetUnit in pairs(targetUnits) do
                     if displayName == targetUnit then
                         targetFound = true
@@ -2619,26 +2642,26 @@ if not shouldSummon and not hasTargetUnitConfig then
         return targetFound
     end
 
-    -- à¹€à¸Šà¹‡à¸„à¸•à¸±à¸§à¸¥à¸°à¸„à¸£à¹‚à¸”à¸¢à¸•à¸£à¸‡ (à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¹€à¸›à¸´à¸” Inventory)
+    -- เช็คตัวละครโดยตรง (ไม่ต้องเปิด Inventory)
     hasTargetUnitLegendary = checkForLegendaryUnits()
 
     if hasTargetUnitLegendary then
-        print("âœ… Found Legendary unit in inventory")
+        print("✅ Found Legendary unit in inventory")
     else
-        print("â„¹ï¸ No Legendary units found - will farm with Carrot to collect gems")
+        print("ℹ️ No Legendary units found - will farm with Carrot to collect gems")
     end
 end
 
 -- ========================================
--- 6. AutoSummon (à¸ªà¸³à¸«à¸£à¸±à¸š Summon Config à¸«à¸£à¸·à¸­ Legendary)
+-- 6. AutoSummon (สำหรับ Summon Config หรือ Legendary)
 -- ========================================
 if shouldSummon then
     printStep("Auto Summon (Mythic/Secret)...")
 
     -- ========================================
-    -- 6.1 à¹€à¸Šà¹‡à¸„à¹à¸¥à¸°à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² AutoSell Legendary à¸à¹ˆà¸­à¸™à¸ªà¸¸à¹ˆà¸¡
+    -- 6.1 เช็คและตั้งค่า AutoSell Legendary ก่อนสุ่ม
     -- ========================================
-    print("ðŸ” Checking for Legendary units before summon...")
+    print("🔍 Checking for Legendary units before summon...")
 
     local LEGENDARY_UNITS = {
         "The Hero",
@@ -2664,7 +2687,7 @@ if shouldSummon then
                 for _, legendaryUnit in ipairs(LEGENDARY_UNITS) do
                     if displayName == legendaryUnit then
                         hasLegendary = true
-                        print(string.format("   âœ… Found Legendary: %s", displayName))
+                        print(string.format("   ✅ Found Legendary: %s", displayName))
                         break
                     end
                 end
@@ -2675,66 +2698,66 @@ if shouldSummon then
     end
 
     if hasLegendary then
-        print("ðŸ”§ Enabling Legendary AutoSell before summon (Non-Shiny + Shiny)...")
+        print("🔧 Enabling Legendary AutoSell before summon (Non-Shiny + Shiny)...")
 
         local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
         local Actions = require(FusionPackage.Actions)
 
-        -- à¹€à¸›à¸´à¸”à¸‚à¸²à¸¢ Legendary (Non-Shiny)
+        -- เปิดขาย Legendary (Non-Shiny)
         pcall(function()
             Actions.ToggleAutoSell("Standard", "Legendary", false, true)
         end)
         task.wait(0.3)
 
-        -- à¹€à¸›à¸´à¸”à¸‚à¸²à¸¢ Legendary (Shiny)
+        -- เปิดขาย Legendary (Shiny)
         pcall(function()
             Actions.ToggleAutoSell("Standard", "Legendary", true, true)
         end)
         task.wait(0.3)
 
-        print("âœ… Legendary AutoSell enabled before summon (including Shiny)")
+        print("✅ Legendary AutoSell enabled before summon (including Shiny)")
     end
 
     task.wait(1)
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- à¸ˆà¸³à¸™à¸§à¸™à¸„à¸£à¸±à¹‰à¸‡à¸ªà¸¸à¹ˆà¸¡ (x50 multi)
-    local GEMS_PER_SUMMON = 2500  -- Gems à¸—à¸µà¹ˆà¹ƒà¸Šà¹‰à¸•à¹ˆà¸­à¸£à¸­à¸š
+    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
+    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
     local summonCount = 0
 
     while true do
-        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹„à¸”à¹‰à¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸à¹ˆà¸­à¸™à¸ªà¸¸à¹ˆà¸¡ (à¸—à¸¸à¸à¸£à¸­à¸š)
+        -- เช็คว่าได้ตัวที่ต้องการก่อนสุ่ม (ทุกรอบ)
         local foundBeforeSummon = checkInventoryForUnits(SUMMON_CONFIG)
 
         if autoSummonMode then
-            -- à¹‚à¸«à¸¡à¸” auto: à¹„à¸”à¹‰à¸•à¸±à¸§à¹ƒà¸”à¸•à¸±à¸§à¸«à¸™à¸¶à¹ˆà¸‡à¸à¹‡à¸žà¸­
+            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
             if #foundBeforeSummon > 0 then
-                sendSummonStatus(true)
+                sendSummonStatus(foundBeforeSummon, true)
                 hasTargetUnitConfig = true
-                print("âœ… Found target unit - stopping summon")
+                print("✅ Found target unit - stopping summon")
                 break
             end
         else
-            -- à¹‚à¸«à¸¡à¸”à¸›à¸à¸•à¸´: à¸•à¹‰à¸­à¸‡à¹„à¸”à¹‰à¸„à¸£à¸šà¸—à¸¸à¸à¸•à¸±à¸§
+            -- โหมดปกติ: ต้องได้ครบทุกตัว
             if #foundBeforeSummon >= #SUMMON_CONFIG then
-                sendSummonStatus(true)
+                sendSummonStatus(foundBeforeSummon, true)
                 hasTargetUnitConfig = true
-                print("âœ… Found all target units - stopping summon")
+                print("✅ Found all target units - stopping summon")
                 break
             end
         end
 
-        -- à¹€à¸Šà¹‡à¸„ Gems à¸à¹ˆà¸­à¸™à¸ªà¸¸à¹ˆà¸¡
+        -- เช็ค Gems ก่อนสุ่ม
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
         if gems < GEMS_PER_SUMMON then
-            warn(string.format("âš ï¸ Not enough gems for summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
+            warn(string.format("⚠️ Not enough gems for summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
             break
         end
 
         summonCount = summonCount + 1
-        print(string.format("ðŸŽ² Summon #%d | Gems: %d", summonCount, gems))
+        print(string.format("🎲 Summon #%d | Gems: %d", summonCount, gems))
 
         pcall(function()
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
@@ -2742,7 +2765,7 @@ if shouldSummon then
 
         task.wait(0.3)
 
-        -- à¸›à¸´à¸” popup
+        -- ปิด popup
         for j = 1, 5 do
             VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
             task.wait(0.01)
@@ -2752,31 +2775,31 @@ if shouldSummon then
 
         task.wait(0.2)
 
-        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹„à¸”à¹‰à¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸«à¸£à¸·à¸­à¸¢à¸±à¸‡à¸«à¸¥à¸±à¸‡à¸ªà¸¸à¹ˆà¸¡
+        -- เช็คว่าได้ตัวที่ต้องการหรือยังหลังสุ่ม
         local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
 
         if autoSummonMode then
-            -- à¹‚à¸«à¸¡à¸” auto: à¹„à¸”à¹‰à¸•à¸±à¸§à¹ƒà¸”à¸•à¸±à¸§à¸«à¸™à¸¶à¹ˆà¸‡à¸à¹‡à¸žà¸­
+            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
             if #foundInInventory > 0 then
-                sendSummonStatus(true)
+                sendSummonStatus(foundInInventory, true)
                 hasTargetUnitConfig = true
-                print(string.format("âœ… Found target unit after summon #%d - stopping", summonCount))
+                print(string.format("✅ Found target unit after summon #%d - stopping", summonCount))
                 break
             end
         else
-            -- à¹‚à¸«à¸¡à¸”à¸›à¸à¸•à¸´: à¸•à¹‰à¸­à¸‡à¹„à¸”à¹‰à¸„à¸£à¸šà¸—à¸¸à¸à¸•à¸±à¸§
+            -- โหมดปกติ: ต้องได้ครบทุกตัว
             if #foundInInventory >= #SUMMON_CONFIG then
-                sendSummonStatus(true)
+                sendSummonStatus(foundInInventory, true)
                 hasTargetUnitConfig = true
-                print(string.format("âœ… Found all target units after summon #%d - stopping", summonCount))
+                print(string.format("✅ Found all target units after summon #%d - stopping", summonCount))
                 break
             else
-                -- à¹à¸ªà¸”à¸‡à¸•à¸±à¸§à¸—à¸µà¹ˆà¸¡à¸µà¹à¸¥à¹‰à¸§
+                -- แสดงตัวที่มีแล้ว
                 if #foundInInventory > 0 then
-                    sendSummonStatus(false)
+                    sendSummonStatus(foundInInventory, false)
                 end
 
-                -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹€à¸›à¹‡à¸™ Secret unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                -- เช็คว่าเป็น Secret unit หรือไม่
                 local isSecretUnit = false
                 for _, configUnit in ipairs(SUMMON_CONFIG) do
                     for _, secretUnit in ipairs(SECRET_UNITS) do
@@ -2789,10 +2812,10 @@ if shouldSummon then
                 end
 
                 if isSecretUnit then
-                    -- Secret unit: à¸‚à¹‰à¸²à¸¡ Banner check (à¸¡à¸µà¹€à¸ªà¸¡à¸­)
-                    -- à¸—à¸³à¸•à¹ˆà¸­ loop
+                    -- Secret unit: ข้าม Banner check (มีเสมอ)
+                    -- ทำต่อ loop
                 else
-                    -- Mythic unit: à¹€à¸Šà¹‡à¸„ Banner à¸§à¹ˆà¸²à¸¢à¸±à¸‡à¸¡à¸µà¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸­à¸¢à¸¹à¹ˆà¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                    -- Mythic unit: เช็ค Banner ว่ายังมีตัวที่ต้องการอยู่หรือไม่
                     local bannerUnits = checkCurrentBanner()
                     local hasMatch = false
                     for _, configUnit in pairs(SUMMON_CONFIG) do
@@ -2807,9 +2830,9 @@ if shouldSummon then
 
                     if not hasMatch then
                         if #foundInInventory > 0 then
-                            sendSummonStatus(false)
+                            sendSummonStatus(foundInInventory, false)
                         end
-                        warn("âš ï¸ Target units no longer in banner - stopping summon")
+                        warn("⚠️ Target units no longer in banner - stopping summon")
                         break
                     end
                 end
@@ -2821,11 +2844,11 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     printStep("Auto Summon (Legendary)...")
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- à¸ˆà¸³à¸™à¸§à¸™à¸„à¸£à¸±à¹‰à¸‡à¸ªà¸¸à¹ˆà¸¡ (x50 multi)
-    local GEMS_PER_SUMMON = 2500  -- Gems à¸—à¸µà¹ˆà¹ƒà¸Šà¹‰à¸•à¹ˆà¸­à¸£à¸­à¸š
+    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
+    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
     local DELAY = 2
     local summonCount = 0
-    local MAX_SUMMONS = 100  -- à¸ˆà¸³à¸à¸±à¸”à¹„à¸§à¹‰ 100 à¸£à¸­à¸šà¸›à¹‰à¸­à¸‡à¸à¸±à¸™à¸§à¸™à¹„à¸¡à¹ˆà¸£à¸¹à¹‰à¸ˆà¸š
+    local MAX_SUMMONS = 100  -- จำกัดไว้ 100 รอบป้องกันวนไม่รู้จบ
 
     local function checkForTargetUnits()
         local targetUnits = {
@@ -2840,17 +2863,17 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     end
 
     while not hasTargetUnitLegendary and summonCount < MAX_SUMMONS do
-        -- à¹€à¸Šà¹‡à¸„ Gems à¸à¹ˆà¸­à¸™à¸ªà¸¸à¹ˆà¸¡
+        -- เช็ค Gems ก่อนสุ่ม
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
         if gems < GEMS_PER_SUMMON then
-            warn(string.format("âš ï¸ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
+            warn(string.format("⚠️ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
             break
         end
 
         summonCount = summonCount + 1
-        print(string.format("ðŸŽ² Legendary Summon #%d | Gems: %d", summonCount, gems))
+        print(string.format("🎲 Legendary Summon #%d | Gems: %d", summonCount, gems))
 
         pcall(function()
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
@@ -2858,7 +2881,7 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
 
         task.wait(DELAY)
 
-        -- spam à¸„à¸¥à¸´à¸à¸¡à¸¸à¸¡à¸‹à¹‰à¸²à¸¢à¸šà¸™ 5 à¸£à¸­à¸š
+        -- spam คลิกมุมซ้ายบน 5 รอบ
         for j = 1, 5 do
             VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
             task.wait(0.05)
@@ -2868,47 +2891,47 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
 
         task.wait(2)
 
-        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¹„à¸”à¹‰ target unit à¸«à¸£à¸·à¸­à¸¢à¸±à¸‡
+        -- เช็คว่าได้ target unit หรือยัง
         hasTargetUnitLegendary = checkForTargetUnits()
 
         if hasTargetUnitLegendary then
-            warn("âœ… Target Legendary unit found!")
+            warn("✅ Target Legendary unit found!")
         end
     end
 
     if not hasTargetUnitLegendary then
-        warn(string.format("âš ï¸ Reached max summons (%d) without finding target unit", MAX_SUMMONS))
+        warn(string.format("⚠️ Reached max summons (%d) without finding target unit", MAX_SUMMONS))
     end
 else
 end
 
 -- ========================================
--- 6.5 Trait Reroll System (à¸–à¹‰à¸²à¸¡à¸µ Config)
+-- 6.5 Trait Reroll System (ถ้ามี Config)
 -- ========================================
--- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸„à¸§à¸£à¸—à¸³ Trait Reroll à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+-- เช็คว่าควรทำ Trait Reroll หรือไม่
 local shouldDoTraitReroll = false
 local traitRerollTargetUnit = nil
 
 if TRAIT_REROLL_CONFIG and TRAIT_REROLL_CONFIG.TargetUnit then
-    -- Normalize TargetUnit: à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ table â†’ à¹€à¸­à¸²à¸•à¸±à¸§à¹à¸£à¸, à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ string â†’ à¹ƒà¸Šà¹‰à¸•à¸£à¸‡à¹†
+    -- Normalize TargetUnit: ถ้าเป็น table → เอาตัวแรก, ถ้าเป็น string → ใช้ตรงๆ
     local normalizedTargetUnit = TRAIT_REROLL_CONFIG.TargetUnit
     if type(normalizedTargetUnit) == "table" then
-        normalizedTargetUnit = normalizedTargetUnit[1]  -- à¹€à¸­à¸²à¸•à¸±à¸§à¹à¸£à¸
+        normalizedTargetUnit = normalizedTargetUnit[1]  -- เอาตัวแรก
     end
 
-    -- à¸à¸£à¸“à¸µà¸—à¸µà¹ˆ 1: TargetUnit = "auto" â†’ à¹ƒà¸Šà¹‰ Fallback logic
+    -- กรณีที่ 1: TargetUnit = "auto" → ใช้ Fallback logic
     if normalizedTargetUnit == "auto" then
         if hasTargetUnitConfig then
             shouldDoTraitReroll = true
-            traitRerollTargetUnit = "auto"  -- à¸ªà¹ˆà¸‡ "auto" à¸•à¹ˆà¸­à¹„à¸›
+            traitRerollTargetUnit = "auto"  -- ส่ง "auto" ต่อไป
         elseif not hasTargetUnitConfig and hasSummonConfig then
-            -- Fallback: à¹€à¸¥à¸·à¸­à¸ Mythic à¹ƒà¸™ Inventory
+            -- Fallback: เลือก Mythic ใน Inventory
             printStep("Checking for fallback Mythic units (auto mode)...")
 
             local availableMythics = checkInventoryForUnits(MYTHIC_UNITS, true)
 
             if #availableMythics > 0 then
-                -- à¹€à¸£à¸µà¸¢à¸‡à¸•à¸²à¸¡ Priority
+                -- เรียงตาม Priority
                 table.sort(availableMythics, function(a, b)
                     local priorityA = 999
                     local priorityB = 999
@@ -2927,13 +2950,13 @@ if TRAIT_REROLL_CONFIG and TRAIT_REROLL_CONFIG.TargetUnit then
                 shouldDoTraitReroll = true
                 traitRerollTargetUnit = fallbackUnit
             else
-                warn("   âš ï¸ No fallback Mythic units found")
+                warn("   ⚠️ No fallback Mythic units found")
             end
         end
-    -- à¸à¸£à¸“à¸µà¸—à¸µà¹ˆ 2: à¸£à¸°à¸šà¸¸à¸Šà¸·à¹ˆà¸­ unit à¹€à¸‰à¸žà¸²à¸° (à¹€à¸Šà¹ˆà¸™ "Shadow")
+    -- กรณีที่ 2: ระบุชื่อ unit เฉพาะ (เช่น "Shadow")
     else
         shouldDoTraitReroll = true
-        traitRerollTargetUnit = normalizedTargetUnit  -- à¹ƒà¸Šà¹‰à¸Šà¸·à¹ˆà¸­à¸—à¸µà¹ˆà¸£à¸°à¸šà¸¸
+        traitRerollTargetUnit = normalizedTargetUnit  -- ใช้ชื่อที่ระบุ
     end
 end
 
@@ -2943,14 +2966,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
     local targetUnitName = traitRerollTargetUnit
     local targetTrait = TRAIT_REROLL_CONFIG.TargetTrait
 
-    -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸² SUMMON_CONFIG à¹€à¸›à¹‡à¸™ Secret unit à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+    -- เช็คว่า SUMMON_CONFIG เป็น Secret unit หรือไม่
     local isSecretSummon = false
-    if hasSummonConfig and CHANGE_ACC_SECRETS then  -- à¸•à¹‰à¸­à¸‡à¹€à¸›à¸´à¸” Config à¸”à¹‰à¸§à¸¢
+    if hasSummonConfig and CHANGE_ACC_SECRETS then  -- ต้องเปิด Config ด้วย
         for _, configUnit in ipairs(SUMMON_CONFIG) do
             for _, secretUnit in ipairs(SECRET_UNITS) do
                 if configUnit == secretUnit then
                     isSecretSummon = true
-                    print(string.format("   â„¹ï¸ Config targets Secret unit '%s' + Change_Acc_Secrets enabled - will send DONE after Trait Reroll", configUnit))
+                    print(string.format("   ℹ️ Config targets Secret unit '%s' + Change_Acc_Secrets enabled - will send DONE after Trait Reroll", configUnit))
                     break
                 end
             end
@@ -2958,14 +2981,14 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
         end
     end
 
-    -- à¸–à¹‰à¸² TargetUnit à¹€à¸›à¹‡à¸™ "auto" â†’ à¹€à¸¥à¸·à¸­à¸à¸•à¸²à¸¡ Priority
+    -- ถ้า TargetUnit เป็น "auto" → เลือกตาม Priority
     if targetUnitName == "auto" then
         if hasSummonConfig and hasTargetUnitConfig then
-            -- à¹€à¸¥à¸·à¸­à¸à¸ˆà¸²à¸ SummonConfig à¸—à¸µà¹ˆà¹„à¸”à¹‰
+            -- เลือกจาก SummonConfig ที่ได้
             local availableUnits = checkInventoryForUnits(SUMMON_CONFIG, true)
 
             if #availableUnits > 0 then
-                -- à¹€à¸£à¸µà¸¢à¸‡à¸•à¸²à¸¡ Priority
+                -- เรียงตาม Priority
                 table.sort(availableUnits, function(a, b)
                     local priorityA = 999
                     local priorityB = 999
@@ -2981,16 +3004,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 targetUnitName = availableUnits[1].name
                 print(string.format("   Auto-selected: %s (Priority)", targetUnitName))
             else
-                -- à¹„à¸¡à¹ˆà¹€à¸ˆà¸­ Config units â†’ à¸¥à¸­à¸‡ Fallback à¹„à¸› Mythic
-                warn("   âš ï¸ No summon config units found in inventory")
+                -- ไม่เจอ Config units → ลอง Fallback ไป Mythic
+                warn("   ⚠️ No summon config units found in inventory")
 
-                -- à¸–à¹‰à¸²à¹€à¸›à¹‡à¸™ Secret Summon + Change_Acc_Secrets â†’ à¹ƒà¸Šà¹‰ Mythic Fallback
+                -- ถ้าเป็น Secret Summon + Change_Acc_Secrets → ใช้ Mythic Fallback
                 if isSecretSummon and CHANGE_ACC_SECRETS then
-                    print("   â„¹ï¸ Checking Mythic fallback for Trait Reroll...")
+                    print("   ℹ️ Checking Mythic fallback for Trait Reroll...")
                     local mythicUnits = checkInventoryForUnits(MYTHIC_UNITS, true)
 
                     if #mythicUnits > 0 then
-                        -- à¹€à¸£à¸µà¸¢à¸‡à¸•à¸²à¸¡ Priority
+                        -- เรียงตาม Priority
                         table.sort(mythicUnits, function(a, b)
                             local priorityA = 999
                             local priorityB = 999
@@ -3004,7 +3027,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         end)
 
                         targetUnitName = mythicUnits[1].name
-                        print(string.format("   âœ… Auto-selected Mythic fallback: %s (Priority)", targetUnitName))
+                        print(string.format("   ✅ Auto-selected Mythic fallback: %s (Priority)", targetUnitName))
                     else
                         targetUnitName = nil
                     end
@@ -3013,35 +3036,35 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 end
             end
         else
-            warn("   âš ï¸ Cannot use 'auto' without SummonConfig or target unit")
+            warn("   ⚠️ Cannot use 'auto' without SummonConfig or target unit")
             targetUnitName = nil
         end
     end
 
     if targetUnitName then
-        -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µà¸•à¸±à¸§à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+        -- เช็คว่ามีตัวที่ต้องการหรือไม่
         local unitsWithTrait = checkInventoryForUnits({targetUnitName}, true)
 
         if #unitsWithTrait > 0 then
-            -- à¹€à¸¥à¸·à¸­à¸à¸•à¸±à¸§à¸—à¸µà¹ˆà¸”à¸µà¸—à¸µà¹ˆà¸ªà¸¸à¸”à¸ªà¸³à¸«à¸£à¸±à¸šà¸ªà¸¸à¹ˆà¸¡ Trait (à¹€à¸¥à¸·à¸­à¸ Shiny à¸à¹ˆà¸­à¸™)
+            -- เลือกตัวที่ดีที่สุดสำหรับสุ่ม Trait (เลือก Shiny ก่อน)
             local unitInfo = selectBestUnitForReroll(unitsWithTrait)
             local currentTrait = unitInfo.trait
 
             print(string.format("   Selected unit: %s (Trait: %s, Shiny: %s, Full Key: %s)",
                 unitInfo.name, currentTrait, tostring(unitInfo.isShiny or false), unitInfo.fullKey))
 
-            -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µ Trait à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¹à¸¥à¹‰à¸§à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+            -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
             local hasTargetTrait = false
 
             if not targetTrait then
-                -- nil = à¸ªà¸¸à¹ˆà¸¡à¹à¸šà¸šà¸ªà¸¸à¹ˆà¸¡ (à¹„à¸”à¹‰à¸­à¸°à¹„à¸£à¸à¹‡à¹„à¸”à¹‰à¸—à¸µà¹ˆà¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ None)
+                -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
                 hasTargetTrait = (currentTrait ~= "None")
             elseif type(targetTrait) == "table" then
                 if #targetTrait == 0 then
-                    -- {} = empty table â†’ à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¸ªà¸¸à¹ˆà¸¡ Trait
+                    -- {} = empty table → ไม่ต้องสุ่ม Trait
                     hasTargetTrait = true
                 else
-                    -- à¹€à¸Šà¹‡à¸„à¸§à¹ˆà¸²à¸¡à¸µà¹ƒà¸™ list à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                    -- เช็คว่ามีใน list หรือไม่
                     for _, trait in ipairs(targetTrait) do
                         if currentTrait == trait then
                             hasTargetTrait = true
@@ -3050,37 +3073,38 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
                 end
             else
-                -- string à¹€à¸”à¸µà¸¢à¸§
+                -- string เดียว
                 hasTargetTrait = (currentTrait == targetTrait)
             end
 
             if hasTargetTrait then
-                -- à¸¡à¸µ Trait à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¹à¸¥à¹‰à¸§ â†’ à¸‚à¹‰à¸²à¸¡à¸à¸²à¸£à¸ªà¸¸à¹ˆà¸¡
-                print(string.format("âœ… %s already has target Trait: %s", targetUnitName, currentTrait))
+                -- มี Trait ที่ต้องการแล้ว → ข้ามการสุ่ม
+                print(string.format("✅ %s already has target Trait: %s", targetUnitName, currentTrait))
 
-                -- à¸ªà¹ˆà¸‡ Horst Description + DONE
+                -- ส่ง Horst Description + DONE
                 if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                     local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                     local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
-                    _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", currentGems, currentRR, targetUnitName, currentTrait))
+                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, currentTrait))
 
-                    task.wait(15)  -- à¸£à¸­ 15 à¸§à¸´à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ DONE
+                    task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                    -- à¸–à¹‰à¸² Config à¹€à¸›à¹‡à¸™ Secret unit â†’ à¸šà¸±à¸‡à¸„à¸±à¸šà¸ªà¹ˆà¸‡ DONE
-                    local ok = pcall(_G.Horst_AccountChangeDone)
+                    -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                    if isSecretSummon then
+                        local ok = pcall(_G.Horst_AccountChangeDone)
                         if ok then
-                            _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                            print("âœ… Secret unit Trait completed - Script will stop...")
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                            print("✅ Secret unit Trait completed - Script will stop...")
 
-                            -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                             while true do
                                 pcall(function()
                                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                     local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                     local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, currentTrait))
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
                                 end)
                                 task.wait(5)
                             end
@@ -3091,16 +3115,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         if currentGems >= GEM_TARGET then
                             local ok = pcall(_G.Horst_AccountChangeDone)
                             if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… GEM_TARGET reached - Script will stop...")
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ GEM_TARGET reached - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
                                     pcall(function()
                                         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                         local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                         local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, currentTrait))
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
                                     end)
                                     task.wait(5)
                                 end
@@ -3109,16 +3133,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     else
                         local ok = pcall(_G.Horst_AccountChangeDone)
                         if ok then
-                            _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                            print("âœ… Trait Reroll completed - Script will stop...")
+                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                            print("✅ Trait Reroll completed - Script will stop...")
 
-                            -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                             while true do
                                 pcall(function()
                                     local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                     local gems = replica and replica.Data.ItemData.Gem.Amount or 0
                                     local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, currentTrait))
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
                                 end)
                                 task.wait(5)
                             end
@@ -3126,10 +3150,10 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
                 end
             else
-                -- à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µ Trait à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£ â†’ à¹€à¸£à¸´à¹ˆà¸¡à¸ªà¸¸à¹ˆà¸¡
+                -- ยังไม่มี Trait ที่ต้องการ → เริ่มสุ่ม
                 printStep(string.format("Rerolling Trait for %s...", targetUnitName))
 
-                -- à¹€à¸Šà¹‡à¸„ Trait Reroll à¸ˆà¸³à¸™à¸§à¸™
+                -- เช็ค Trait Reroll จำนวน
                 local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                 local traitRerolls = 0
                 if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
@@ -3137,37 +3161,77 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                 end
 
                 if traitRerolls <= 0 then
-                    warn("âŒ No Trait Reroll items available")
+                    warn("❌ No Trait Reroll items available")
 
-                    -- à¸ªà¹ˆà¸‡ Horst Description + DONE (Out of RR)
+                    -- ส่ง Horst Description + DONE (Out of RR)
                     if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
                         local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
                         local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
 
                         _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
 
-                        task.wait(15)
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        local ok = pcall(_G.Horst_AccountChangeDone)
-                        if ok then
-                            _G.ScriptShouldStop = true
-                            print("✅ Out of RR - Script will stop...")
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit (Out of RR) - Script will stop...")
 
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                end)
-                                task.wait(5)
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                    end)
+                                    task.wait(5)
+                                end
+                            end
+                        end
+
+                        if GEM_TARGET then
+                            if currentGems >= GEM_TARGET then
+                                local ok = pcall(_G.Horst_AccountChangeDone)
+                                if ok then
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
+
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                    while true do
+                                        pcall(function()
+                                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                        end)
+                                        task.wait(5)
+                                    end
+                                end
+                            end
+                        else
+                            local ok = pcall(_G.Horst_AccountChangeDone)
+                            if ok then
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Out of RR - Script will stop...")
+
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
+                                while true do
+                                    pcall(function()
+                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
+                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
+                                    end)
+                                    task.wait(5)
+                                end
                             end
                         end
                     end
-                    return
-                end
                 else
-                -- à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¹€à¸Šà¹‡à¸„ Trait à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™à¸žà¸£à¹‰à¸­à¸¡ retry
+                -- ฟังก์ชันเช็ค Trait ปัจจุบันพร้อม retry
                 local function getCurrentTrait(fullKey, maxRetries)
                     maxRetries = maxRetries or 10
 
@@ -3192,13 +3256,13 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     return nil
                 end
 
-                -- à¹€à¸£à¸´à¹ˆà¸¡à¸ªà¸¸à¹ˆà¸¡ Trait
+                -- เริ่มสุ่ม Trait
                 local attempts = 0
                 local success = false
                 local finalTrait = currentTrait
 
                 while attempts < traitRerolls do
-                    -- à¹€à¸Šà¹‡à¸„ RR à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™à¸à¹ˆà¸­à¸™à¸ªà¸¸à¹ˆà¸¡à¹à¸•à¹ˆà¸¥à¸°à¸£à¸­à¸š
+                    -- เช็ค RR ปัจจุบันก่อนสุ่มแต่ละรอบ
                     local currentReplica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                     local currentRR = 0
                     if currentReplica and currentReplica.Data and currentReplica.Data.ItemData and currentReplica.Data.ItemData.TraitReroll then
@@ -3206,17 +3270,17 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     end
 
                     if currentRR <= 0 then
-                        print(string.format("âš ï¸ Out of RR during reroll (attempt %d/%d)", attempts, traitRerolls))
+                        print(string.format("⚠️ Out of RR during reroll (attempt %d/%d)", attempts, traitRerolls))
                         break
                     end
 
-                    -- à¸à¸³à¸«à¸™à¸” Trait à¸—à¸µà¹ˆà¸ˆà¸°à¸ªà¹ˆà¸‡à¹„à¸›
+                    -- กำหนด Trait ที่จะส่งไป
                     local traitToRoll = nil
                     if type(targetTrait) == "string" then
                         traitToRoll = targetTrait
                     end
 
-                    -- à¸ªà¸¸à¹ˆà¸¡ Trait
+                    -- สุ่ม Trait
                     local rollSuccess, rollError = pcall(function()
                         Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
                     end)
@@ -3226,12 +3290,12 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         continue
                     end
 
-                    -- à¸™à¸±à¸š attempts à¹€à¸‰à¸žà¸²à¸°à¹€à¸¡à¸·à¹ˆà¸­ FireServer à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
+                    -- นับ attempts เฉพาะเมื่อ FireServer สำเร็จ
                     attempts = attempts + 1
 
                     task.wait(0.5)
 
-                    -- à¹€à¸Šà¹‡à¸„ Trait à¹ƒà¸«à¸¡à¹ˆ
+                    -- เช็ค Trait ใหม่
                     local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
 
                     if not newTrait then
@@ -3241,7 +3305,7 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
 
                     finalTrait = newTrait
 
-                    -- à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸šà¸§à¹ˆà¸²à¹„à¸”à¹‰ Trait à¸—à¸µà¹ˆà¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸«à¸£à¸·à¸­à¹„à¸¡à¹ˆ
+                    -- ตรวจสอบว่าได้ Trait ที่ต้องการหรือไม่
                     local gotTargetTrait = false
 
                     if not targetTrait then
@@ -3269,34 +3333,35 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                     task.wait(0.1)
                 end
 
-                -- à¹à¸ªà¸”à¸‡à¸œà¸¥à¸¥à¸±à¸žà¸˜à¹Œ
+                -- แสดงผลลัพธ์
                 if success then
-                    print(string.format("âœ… %s | Trait: %s | Used: %d | Left: %d",
+                    print(string.format("✅ %s | Trait: %s | Used: %d | Left: %d",
                         targetUnitName, finalTrait, attempts, traitRerolls - attempts))
 
-                    -- à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
+                    -- สำเร็จ
                     if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                         local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                         local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", currentGems, currentRR, targetUnitName, finalTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, finalTrait))
 
-                        task.wait(15)  -- à¸£à¸­ 15 à¸§à¸´à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        -- à¸–à¹‰à¸² Config à¹€à¸›à¹‡à¸™ Secret unit â†’ à¸šà¸±à¸‡à¸„à¸±à¸šà¸ªà¹ˆà¸‡ DONE
-                        local ok = pcall(_G.Horst_AccountChangeDone)
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            local ok = pcall(_G.Horst_AccountChangeDone)
                             if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… Secret unit Trait succeeded - Script will stop...")
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit Trait succeeded - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
                                     pcall(function()
                                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                         local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                         local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, finalTrait))
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
                                     end)
                                     task.wait(5)
                                 end
@@ -3307,16 +3372,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                             if currentGems >= GEM_TARGET then
                                 local ok = pcall(_G.Horst_AccountChangeDone)
                                 if ok then
-                                    _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                    print("âœ… GEM_TARGET reached - Script will stop...")
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
 
-                                    -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                     while true do
                                         pcall(function()
                                             local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                             local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                             local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, finalTrait))
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
                                         end)
                                         task.wait(5)
                                     end
@@ -3325,16 +3390,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         else
                             local ok = pcall(_G.Horst_AccountChangeDone)
                             if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… Trait Reroll succeeded - Script will stop...")
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Trait Reroll succeeded - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
                                     pcall(function()
                                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                         local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                         local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âœ… %s", gems, rr, targetUnitName, finalTrait))
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
                                     end)
                                     task.wait(5)
                                 end
@@ -3342,31 +3407,32 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         end
                     end
                 else
-                    -- à¹ƒà¸Šà¹‰à¸«à¸¡à¸”
-                    print(string.format("âš ï¸ %s | Final Trait: %s | Used: %d (all rerolls)", targetUnitName, finalTrait, traitRerolls))
+                    -- ใช้หมด
+                    print(string.format("⚠️ %s | Final Trait: %s | Used: %d (all rerolls)", targetUnitName, finalTrait, traitRerolls))
 
                     if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                         local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                         local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
 
-                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
+                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
 
-                        task.wait(15)  -- à¸£à¸­ 15 à¸§à¸´à¸à¹ˆà¸­à¸™à¸ªà¹ˆà¸‡ DONE
+                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
 
-                        -- à¸–à¹‰à¸² Config à¹€à¸›à¹‡à¸™ Secret unit â†’ à¸šà¸±à¸‡à¸„à¸±à¸šà¸ªà¹ˆà¸‡ DONE
-                        local ok = pcall(_G.Horst_AccountChangeDone)
+                        -- ถ้า Config เป็น Secret unit → บังคับส่ง DONE
+                        if isSecretSummon then
+                            local ok = pcall(_G.Horst_AccountChangeDone)
                             if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… Secret unit (all rerolls used) - Script will stop...")
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ Secret unit (all rerolls used) - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
                                     pcall(function()
                                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                         local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                         local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
                                     end)
                                     task.wait(5)
                                 end
@@ -3377,16 +3443,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                             if currentGems >= GEM_TARGET then
                                 local ok = pcall(_G.Horst_AccountChangeDone)
                                 if ok then
-                                    _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                    print("âœ… GEM_TARGET reached - Script will stop...")
+                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                    print("✅ GEM_TARGET reached - Script will stop...")
 
-                                    -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                     while true do
                                         pcall(function()
                                             local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                             local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                             local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
                                         end)
                                         task.wait(5)
                                     end
@@ -3395,16 +3461,16 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         else
                             local ok = pcall(_G.Horst_AccountChangeDone)
                             if ok then
-                                _G.ScriptShouldStop = true  -- à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² flag à¸«à¸¥à¸±à¸‡à¸ªà¹ˆà¸‡ DONE à¸ªà¸³à¹€à¸£à¹‡à¸ˆ
-                                print("âœ… All rerolls used - Script will stop...")
+                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
+                                print("✅ All rerolls used - Script will stop...")
 
-                                -- Loop à¸ªà¹ˆà¸‡ Description à¸—à¸¸à¸ 5 à¸§à¸´à¸«à¸¥à¸±à¸‡ DONE
+                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
                                 while true do
                                     pcall(function()
                                         local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
                                         local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
                                         local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("ðŸ’Ž Gems: %d â€¢ RR: %d â€¢ %s â€¢ Trait: âŒ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
+                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
                                 end)
                                 task.wait(5)
                                 end
@@ -3412,29 +3478,29 @@ if shouldDoTraitReroll and traitRerollTargetUnit then
                         end
                     end
                 end
-                end  -- à¸›à¸´à¸” else à¸‚à¸­à¸‡ if traitRerolls <= 0
-            end  -- à¸›à¸´à¸” if hasTargetTrait
+                end  -- ปิด else ของ if traitRerolls <= 0
+            end  -- ปิด if hasTargetTrait
         else
-            warn(string.format("âš ï¸ Unit '%s' not found in inventory - skipping Trait Reroll", targetUnitName))
-        end  -- à¸›à¸´à¸” if #unitsWithTrait > 0
+            warn(string.format("⚠️ Unit '%s' not found in inventory - skipping Trait Reroll", targetUnitName))
+        end  -- ปิด if #unitsWithTrait > 0
     else
-        warn("âš ï¸ No target unit specified - skipping Trait Reroll")
-    end  -- à¸›à¸´à¸” if targetUnitName then
+        warn("⚠️ No target unit specified - skipping Trait Reroll")
+    end  -- ปิด if targetUnitName then
 
     task.wait(1)
-end  -- à¸›à¸´à¸” if shouldDoTraitReroll and traitRerollTargetUnit
+end  -- ปิด if shouldDoTraitReroll and traitRerollTargetUnit
 
 -- ========================================
--- 7. QuickEquip (à¹€à¸‰à¸žà¸²à¸° Carrot + Legendary à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™)
+-- 7. QuickEquip (เฉพาะ Carrot + Legendary เท่านั้น)
 -- ========================================
--- à¹€à¸‚à¹‰à¸²à¹€à¸à¸¡à¹€à¸ªà¸¡à¸­ à¹à¸•à¹ˆ equip Legendary à¹€à¸‰à¸žà¸²à¸°à¸•à¸­à¸™à¸—à¸µà¹ˆà¸¡à¸µ
+-- เข้าเกมเสมอ แต่ equip Legendary เฉพาะตอนที่มี
 printStep("Quick Equip...")
 
--- Get UnitData à¹à¸¥à¸° UnitInfo à¹‚à¸”à¸¢à¸•à¸£à¸‡ (à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¸›à¸´à¸” Inventory)
+-- Get UnitData และ UnitInfo โดยตรง (ไม่ต้องปิด Inventory)
 local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
 local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
 
--- à¸ªà¸£à¹‰à¸²à¸‡ displayNameMap (à¹€à¸¥à¸·à¸­à¸ Shiny à¸à¹ˆà¸­à¸™)
+-- สร้าง displayNameMap (เลือก Shiny ก่อน)
 local displayNameMap = {}
 for fullKey, data in pairs(unitData) do
     local internalName = fullKey:match("^(.+)#") or fullKey
@@ -3442,25 +3508,25 @@ for fullKey, data in pairs(unitData) do
     local lowerName = displayName:lower()
     local isShiny = data.Shiny or false
 
-    -- à¹€à¸¥à¸·à¸­à¸ Shiny à¸à¹ˆà¸­à¸™ à¸«à¸£à¸·à¸­à¸–à¹‰à¸²à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸¡à¸µà¸à¹‡à¹€à¸­à¸²à¸•à¸±à¸§à¸›à¸à¸•à¸´
+    -- เลือก Shiny ก่อน หรือถ้ายังไม่มีก็เอาตัวปกติ
     if not displayNameMap[lowerName] or isShiny then
         displayNameMap[lowerName] = fullKey
     end
 end
 
--- à¸«à¸² Legendary à¸—à¸µà¹ˆà¸¡à¸µà¸­à¸¢à¸¹à¹ˆ (à¹€à¸¥à¸·à¸­à¸à¸ˆà¸²à¸ Legendary List à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™)
+-- หา Legendary ที่มีอยู่ (เลือกจาก Legendary List เท่านั้น)
 local LEGENDARY_UNITS = {
-    "Ice Queen",           -- Priority 1 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 4 à¸•à¸±à¸§)
-    "Forbidden Teacher",   -- Priority 2 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 4 à¸•à¸±à¸§)
-    "The Hero",           -- Priority 3 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 4 à¸•à¸±à¸§)
-    "Greed",              -- Priority 4 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 3 à¸•à¸±à¸§)
-    "Scissor",            -- Priority 5 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 3 à¸•à¸±à¸§)
-    "Water Princess"      -- Priority 6 (à¸§à¸²à¸‡à¹„à¸”à¹‰ 3 à¸•à¸±à¸§)
+    "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
+    "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
+    "The Hero",           -- Priority 3 (วางได้ 4 ตัว)
+    "Greed",              -- Priority 4 (วางได้ 3 ตัว)
+    "Scissor",            -- Priority 5 (วางได้ 3 ตัว)
+    "Water Princess"      -- Priority 6 (วางได้ 3 ตัว)
 }
 
 local foundLegendaryUnit = nil
 
--- à¹€à¸Šà¹‡à¸„à¸•à¸²à¸¡à¸¥à¸³à¸”à¸±à¸š Priority
+-- เช็คตามลำดับ Priority
 for _, targetUnit in ipairs(LEGENDARY_UNITS) do
     if displayNameMap[targetUnit:lower()] then
         foundLegendaryUnit = targetUnit
@@ -3468,30 +3534,30 @@ for _, targetUnit in ipairs(LEGENDARY_UNITS) do
     end
 end
 
--- Unequip All à¸à¹ˆà¸­à¸™
+-- Unequip All ก่อน
 Nodes.UNIT_UNEQUIP_ALL:FireServer("Unit")
 task.wait(0.5)
 
--- Equip Carrot à¸Šà¹ˆà¸­à¸‡ 1 (à¹€à¸ªà¸¡à¸­)
+-- Equip Carrot ช่อง 1 (เสมอ)
 local carrotFullKey = displayNameMap["carrot"]
 if carrotFullKey then
     Nodes.UNIT_EQUIP:FireServer(carrotFullKey, "1")
     task.wait(0.3)
-    print("âœ… Equipped Carrot in slot 1")
+    print("✅ Equipped Carrot in slot 1")
 else
-    warn("âŒ Carrot not found in inventory")
+    warn("❌ Carrot not found in inventory")
 end
 
--- Equip Legendary à¸Šà¹ˆà¸­à¸‡ 2 (à¸–à¹‰à¸²à¸¡à¸µ)
+-- Equip Legendary ช่อง 2 (ถ้ามี)
 if foundLegendaryUnit then
     local legendaryFullKey = displayNameMap[foundLegendaryUnit:lower()]
     if legendaryFullKey then
         Nodes.UNIT_EQUIP:FireServer(legendaryFullKey, "2")
         task.wait(0.3)
-        print(string.format("âœ… Equipped %s in slot 2", foundLegendaryUnit))
+        print(string.format("✅ Equipped %s in slot 2", foundLegendaryUnit))
     end
 else
-    print("â„¹ï¸ No Legendary unit found - will farm with Carrot only in slot 1")
+    print("ℹ️ No Legendary unit found - will farm with Carrot only in slot 1")
 end
 
 task.wait(1)
