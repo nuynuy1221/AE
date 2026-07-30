@@ -1,11 +1,10 @@
 repeat wait() until game:IsLoaded()
--- เช็คว่าอยู่ในแมพ Murder Mystery 2 หรือไม่
+
 if game.PlaceId ~= 84515722934860 then
     return
 end
 
-print("Version 1.2.9")
--- 5.28
+print("Version 10.00")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2727,7 +2726,7 @@ if shouldSummon then
     task.wait(1)
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- 50 gems ต่อรอบ (x10 summon)
+    local AMOUNT_PER_SUMMON = 2500  -- 2500 gems ต่อรอบ
     local summonCount = 0
 
     while true do
@@ -2757,7 +2756,7 @@ if shouldSummon then
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
         if gems < AMOUNT_PER_SUMMON then
-            warn(string.format("⚠️ Not enough gems for summon: %d (require %d)", gems, AMOUNT_PER_SUMMON))
+            warn(string.format("⚠️ Not enough gems for summon: %d (require %d) - stopping", gems, AMOUNT_PER_SUMMON))
             break
         end
 
@@ -2849,7 +2848,7 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     printStep("Auto Summon (Legendary)...")
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50
+    local AMOUNT_PER_SUMMON = 2500
     local DELAY = 2
     local summonCount = 0
     local MAX_SUMMONS = 100  -- จำกัดไว้ 100 รอบป้องกันวนไม่รู้จบ
@@ -2867,7 +2866,17 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     end
 
     while not hasTargetUnitLegendary and summonCount < MAX_SUMMONS do
+        -- เช็ค Gems ก่อนสุ่ม
+        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+        local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
+
+        if gems < AMOUNT_PER_SUMMON then
+            warn(string.format("⚠️ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, AMOUNT_PER_SUMMON))
+            break
+        end
+
         summonCount = summonCount + 1
+        print(string.format("🎲 Legendary Summon #%d | Gems: %d", summonCount, gems))
 
         pcall(function()
             Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
