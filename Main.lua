@@ -4,7 +4,8 @@ if game.PlaceId ~= 84515722934860 then
     return
 end
 
-print("Version 10.00")
+print("Version 1.2.9")
+print("10.22")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2726,7 +2727,8 @@ if shouldSummon then
     task.wait(1)
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 2500  -- 2500 gems ต่อรอบ
+    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
+    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
     local summonCount = 0
 
     while true do
@@ -2755,8 +2757,8 @@ if shouldSummon then
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-        if gems < AMOUNT_PER_SUMMON then
-            warn(string.format("⚠️ Not enough gems for summon: %d (require %d) - stopping", gems, AMOUNT_PER_SUMMON))
+        if gems < GEMS_PER_SUMMON then
+            warn(string.format("⚠️ Not enough gems for summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
             break
         end
 
@@ -2848,7 +2850,8 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
     printStep("Auto Summon (Legendary)...")
 
     local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 2500
+    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
+    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
     local DELAY = 2
     local summonCount = 0
     local MAX_SUMMONS = 100  -- จำกัดไว้ 100 รอบป้องกันวนไม่รู้จบ
@@ -2870,8 +2873,8 @@ elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
         local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
         local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
 
-        if gems < AMOUNT_PER_SUMMON then
-            warn(string.format("⚠️ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, AMOUNT_PER_SUMMON))
+        if gems < GEMS_PER_SUMMON then
+            warn(string.format("⚠️ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
             break
         end
 
