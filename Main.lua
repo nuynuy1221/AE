@@ -3,8 +3,8 @@ repeat wait() until game:IsLoaded()
 if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
-print("6.39")
 
+print("7.44")
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
@@ -1396,76 +1396,6 @@ end
 print("\n[Step 5] Warping to Wave1 TriggerZone...")
 updateStatus("Warping to TriggerZone...")
 
--- ล็อคตัวไม่ให้ตกตลอดเวลา (ดึง character สดทุก tick กัน respawn)
-local function getLiveParts()
-    local char = LocalPlayer.Character
-    if not char or not char.Parent then return nil, nil end
-    return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
-end
-
-local triggerZone = retryUntil("find Wave1 TriggerZone", function()
-    local functional = getStrongholdFunctional()
-    local tz = functional
-        and functional:FindFirstChild("EnemyWaves12")
-        and functional.EnemyWaves12:FindFirstChild("Wave1")
-        and functional.EnemyWaves12.Wave1:FindFirstChild("TriggerZone")
-    if tz and tz:IsA("BasePart") then return tz end
-    return nil
-end, 0.5)
-
-local tzPos = triggerZone.Position - Vector3.new(0, 3, 0)
-strongholdFloorPos = tzPos
-
-if platform and platform.Parent then
-    platform.Size = Vector3.new(16, 1, 16)
-    platform.Position = tzPos - Vector3.new(0, 4, 0)
-end
-
-do
-    local hrp = getLiveParts()
-    if hrp then hrp.CFrame = CFrame.new(tzPos) end
-end
-task.wait(0.3)
-print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
-
--- ============================================
--- STEP 6: Fight loop - ล็อคลอยตลอด, ตี Cultist จากด้านใต้ 15 studs, เช็คซ้ำเรื่อยๆ
--- ============================================
-
-print("\n[Step 6] Fighting Cultists in Stronghold...")
-updateStatus("Fighting Cultists...")
-
-local combatCenter = strongholdFloorPos or humanoidRootPart.Position
-local COMBAT_RADIUS = 100    -- รัศมีเช็คว่า Cultist อยู่ในพื้นที่ Stronghold
-local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
-local ATTACK_INTERVAL = 0.18
-
-local function isInsideStronghold(pos)
-    return (pos - combatCenter).Magnitude <= COMBAT_RADIUS
-end
-
--- ชื่อมอนที่ให้ตีใน Stronghold
-local CULTIST_NAMES = {
-    ["Cultist"] = true,
-    ["Crossbow Cultist"] = true,
-}
-
-local function findCultists()
-    local list = {}
-    local chars = workspace:FindFirstChild("Characters")
-    if not chars then return list end
-    for _, c in ipairs(chars:GetChildren()) do
-        if CULTIST_NAMES[c.Name] then
-            local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
-            local hum = c:FindFirstChildOfClass("Humanoid")
-            if root and hum and hum.Health > 0 and isInsideStronghold(root.Position) then
-                table.insert(list, c)
-            end
-        end
-    end
-    return list
-end
-
 -- กล่องล่องหน 6 ด้านคลุมตัวเรา กันมอนประชิดและกระสุน Crossbow
 local SHIELD_SIZE = 12
 local SHIELD_THICK = 1
@@ -1524,7 +1454,129 @@ local function destroyShield()
     shieldParts = {}
 end
 
-buildShield()
+-- ล็อคตัวไม่ให้ตกตลอดเวลา (ดึง character สดทุก tick กัน respawn)
+local function getLiveParts()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then return nil, nil end
+    return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
+end
+
+local triggerZone = retryUntil("find Wave1 TriggerZone", function()
+    local functional = getStrongholdFunctional()
+    local tz = functional
+        and functional:FindFirstChild("EnemyWaves12")
+        and functional.EnemyWaves12:FindFirstChild("Wave1")
+        and functional.EnemyWaves12.Wave1:FindFirstChild("TriggerZone")
+    if tz and tz:IsA("BasePart") then return tz end
+    return nil
+end, 0.5)
+
+local tzPos = triggerZone.Position - Vector3.new(0, 3, 0)
+strongholdFloorPos = tzPos
+
+if platform and platform.Parent then
+    platform.Size = Vector3.new(16, 1, 16)
+    platform.Position = tzPos - Vector3.new(0, 4, 0)
+end
+
+local function warpToTriggerZone()
+    local hrp = getLiveParts()
+    if hrp then
+        hrp.CFrame = CFrame.new(tzPos)
+        updateShield(hrp)
+    end
+end
+
+warpToTriggerZone()
+task.wait(0.3)
+print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
+
+buildShield() -- สร้างกำแพงล้อมตัวทันที ไม่ต้องรอมอนเกิดก่อน
+updateShield(getLiveParts())
+
+-- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
+do
+    local floorCenter = getFloorInfo()
+    local floorPos = floorCenter and (floorCenter + Vector3.new(0, 10, 0))
+
+    local function anyCultistSpawned()
+        local chars = workspace:FindFirstChild("Characters")
+        if not chars then return false end
+        for _, c in ipairs(chars:GetChildren()) do
+            if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then return true end
+            end
+        end
+        return false
+    end
+
+    local waited = 0
+    local WAIT_STEP = 0.5
+    local SPAWN_TIMEOUT = 8 -- วิ ที่รอมอนเกิดก่อนจะวาร์ปไป Floor แล้ววาร์ปกลับ
+
+    while not anyCultistSpawned() do
+        task.wait(WAIT_STEP)
+        waited += WAIT_STEP
+
+        if waited >= SPAWN_TIMEOUT then
+            print("[Step 5] Cultist ยังไม่เกิด - วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone")
+            updateStatus("Re-warp waiting for spawn...")
+
+            if floorPos then
+                local hrp = getLiveParts()
+                if hrp then
+                    hrp.CFrame = CFrame.new(floorPos)
+                    updateShield(hrp)
+                end
+                task.wait(0.3)
+            end
+
+            warpToTriggerZone()
+            waited = 0
+        end
+    end
+
+    print("✅ Cultist spawned!")
+end
+
+-- ============================================
+-- STEP 6: Fight loop - ล็อคลอยตลอด, ตี Cultist จากด้านใต้ 15 studs, เช็คซ้ำเรื่อยๆ
+-- ============================================
+
+print("\n[Step 6] Fighting Cultists in Stronghold...")
+updateStatus("Fighting Cultists...")
+
+local combatCenter = strongholdFloorPos or humanoidRootPart.Position
+local COMBAT_RADIUS = 100    -- รัศมีเช็คว่า Cultist อยู่ในพื้นที่ Stronghold
+local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
+local ATTACK_INTERVAL = 0.18
+
+local function isInsideStronghold(pos)
+    return (pos - combatCenter).Magnitude <= COMBAT_RADIUS
+end
+
+-- ชื่อมอนที่ให้ตีใน Stronghold
+local CULTIST_NAMES = {
+    ["Cultist"] = true,
+    ["Crossbow Cultist"] = true,
+}
+
+local function findCultists()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+    for _, c in ipairs(chars:GetChildren()) do
+        if CULTIST_NAMES[c.Name] then
+            local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            if root and hum and hum.Health > 0 and isInsideStronghold(root.Position) then
+                table.insert(list, c)
+            end
+        end
+    end
+    return list
+end
 
 local lockConn
 lockConn = RunService.Heartbeat:Connect(function()
