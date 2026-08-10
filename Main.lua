@@ -3,6 +3,7 @@ repeat wait() until game:IsLoaded()
 if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
+print("6.39")
 
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
@@ -224,11 +225,9 @@ local function sendHorstDescription()
         return
     end
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local currentDate = os.date("%d/%m/%y")
     local description = string.format(
-        "🌲 99 Nights • Diamonds: %d (%s)%s",
+        "🌲 99 Nights • Diamonds: %d%s",
         diamonds,
-        currentDate,
         diamondsGoalReached and " ✅" or ""
     )
     _G.Horst_SetDescription(description)
@@ -324,9 +323,11 @@ hubPadding.PaddingTop = UDim.new(0.15, 0)
 hubPadding.PaddingBottom = UDim.new(0.15, 0)
 hubPadding.Parent = hubLabel
 
--- Update Status Function
+-- Update Status Function (pcall กันพัง ถ้า label ถูก Destroy ไปแล้วจะไม่ทำให้ script ทั้งเส้นตายไปด้วย)
 local function updateStatus(text)
-    statusValueLabel.Text = text
+    pcall(function()
+        statusValueLabel.Text = text
+    end)
 end
 
 -- ============================================
