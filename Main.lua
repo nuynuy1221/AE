@@ -4,10 +4,9 @@ if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
 
-print("8.23")
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
-
+print("9.48")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1119,6 +1118,13 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                     break
                 end
 
+                if isTimerExceeded() then
+                    print("⏰ Timer exceeded 20:00! (stopped mid-tree)")
+                    updateStatus("✅ Fire Complete!")
+                    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                    break
+                end
+
                 pcall(function()
                     Event:InvokeServer(tree, axe, ownerId, humanoidRootPart.CFrame, false)
                 end)
@@ -1126,16 +1132,13 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                 hitCount = hitCount + 1
             end
 
+            if getCurrentLevel() >= maxLevel or isTimerExceeded() then
+                break
+            end
+
             print(string.format("✅ Tree %d destroyed (%d hits)", treeIndex, hitCount))
             treeIndex = treeIndex + 1
             treesSinceFlight = treesSinceFlight + 1
-
-            if getCurrentLevel() >= maxLevel then
-                print("✅ Max level reached")
-                updateStatus("✅ Fire Complete!")
-                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
-                break
-            end
 
             task.wait(0.5)
         end
@@ -1562,12 +1565,69 @@ print("\n[Step 6] Fighting Cultists in Stronghold...")
 updateStatus("Fighting Cultists...")
 
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
-local COMBAT_RADIUS = 100    -- รัศมีเช็คว่า Cultist อยู่ในพื้นที่ Stronghold
 local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
 local ATTACK_INTERVAL = 0.18
 
-local function isInsideStronghold(pos)
-    return (pos - combatCenter).Magnitude <= COMBAT_RADIUS
+-- เช็คว่ามอนอยู่ "ภายในสิ่งก่อสร้างจริง" ของ workspace.Map.Landmarks.Stronghold.Building
+-- ตึกเป็นรูปทรงหยักๆ ไม่ใช่สี่เหลี่ยมเป๊ะ ใช้ bounding box กล่องเดียวไม่พอ
+-- เช็คแทนโดยดูว่าตำแหน่งมอนอยู่ในกรอบ (OBB) ของ part ใด part หนึ่งของตึกจริงๆ (บวก margin เล็กน้อยกันคลาดเคลื่อน)
+local strongholdParts = nil
+local PART_MARGIN = 4 -- studs กันคลาดเคลื่อนเล็กน้อยรอบ part แต่ละชิ้น (รัศมีตัวละคร/มอนประมาณนี้)
+
+local function refreshStrongholdParts()
+    local building = getStrongholdBuilding()
+    if not building then
+        strongholdParts = nil
+        return
+    end
+
+    local floorNames = { "Floor2", "Floor", "Floor3", "Interior" }
+    local parts = {}
+    for _, floorName in ipairs(floorNames) do
+        local floor = building:FindFirstChild(floorName)
+        if floor then
+            for _, inst in ipairs(floor:GetDescendants()) do
+                if inst:IsA("BasePart") then
+                    table.insert(parts, inst)
+                end
+            end
+        end
+    end
+
+    strongholdParts = parts
+end
+
+refreshStrongholdParts()
+
+local function isPointInPart(part, pos)
+    local local_ = part.CFrame:PointToObjectSpace(pos)
+    local half = part.Size / 2 + Vector3.new(PART_MARGIN, PART_MARGIN, PART_MARGIN)
+    return math.abs(local_.X) <= half.X
+        and math.abs(local_.Y) <= half.Y
+        and math.abs(local_.Z) <= half.Z
+end
+
+local function isInsideStronghold(cultistModel, pos)
+    local sh = getStrongholdRoot()
+    if sh and cultistModel:IsDescendantOf(sh) then
+        return true
+    end
+
+    if not strongholdParts then
+        refreshStrongholdParts()
+    end
+
+    if not strongholdParts then
+        return false
+    end
+
+    for _, part in ipairs(strongholdParts) do
+        if part.Parent and isPointInPart(part, pos) then
+            return true
+        end
+    end
+
+    return false
 end
 
 -- ชื่อมอนที่ให้ตีใน Stronghold
@@ -1584,7 +1644,7 @@ local function findCultists()
         if CULTIST_NAMES[c.Name] then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
-            if root and hum and hum.Health > 0 and isInsideStronghold(root.Position) then
+            if root and hum and hum.Health > 0 and isInsideStronghold(c, root.Position) then
                 table.insert(list, c)
             end
         end
