@@ -6,7 +6,7 @@ end
 
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
-print("9.48")
+print("10.03")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -259,8 +259,19 @@ LocalPlayer:GetAttributeChangedSignal("Diamonds"):Connect(function()
     checkDiamondsGoalAndSendDone()
 end)
 updateDiamondsLabel()
-sendHorstDescription()
-checkDiamondsGoalAndSendDone()
+
+-- รอให้ attribute Diamonds sync มาจาก server ก่อน (อาจยังเป็น nil ตอนสคริปต์เริ่ม)
+-- ป้องกันการส่ง "Diamonds: 0" ไปที่ Horst ทั้งที่ยังโหลดค่าจริงไม่เสร็จ
+task.spawn(function()
+    local waited = 0
+    while LocalPlayer:GetAttribute("Diamonds") == nil and waited < 15 do
+        task.wait(0.2)
+        waited = waited + 0.2
+    end
+    updateDiamondsLabel()
+    sendHorstDescription()
+    checkDiamondsGoalAndSendDone()
+end)
 
 -- ============================================
 -- Toggle GUI/Render3D ด้วยปุ่ม N
