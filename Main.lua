@@ -4,7 +4,7 @@ if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
 
-print("7.44")
+print("8.23")
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
@@ -1479,10 +1479,12 @@ if platform and platform.Parent then
     platform.Position = tzPos - Vector3.new(0, 4, 0)
 end
 
+local tzWaitPos = tzPos + Vector3.new(0, 3, 0) -- วาร์ปสูงกว่า TriggerZone 3 studs ตอนรอมอนเกิด ให้ตกลงมาโดน TriggerZone จริงๆ
+
 local function warpToTriggerZone()
     local hrp = getLiveParts()
     if hrp then
-        hrp.CFrame = CFrame.new(tzPos)
+        hrp.CFrame = CFrame.new(tzWaitPos)
         updateShield(hrp)
     end
 end
@@ -1493,6 +1495,13 @@ print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X
 
 buildShield() -- สร้างกำแพงล้อมตัวทันที ไม่ต้องรอมอนเกิดก่อน
 updateShield(getLiveParts())
+
+-- ให้กำแพงตามตัวเราตลอดตอนรอมอนเกิด (ไม่ล็อคตัว แค่ไม่ให้กำแพงค้างจนตัวเราไปเกยชน)
+local waitShieldConn
+waitShieldConn = RunService.Heartbeat:Connect(function()
+    local hrp = getLiveParts()
+    if hrp then updateShield(hrp) end
+end)
 
 -- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
 do
@@ -1538,6 +1547,11 @@ do
     end
 
     print("✅ Cultist spawned!")
+end
+
+if waitShieldConn then
+    waitShieldConn:Disconnect()
+    waitShieldConn = nil
 end
 
 -- ============================================
