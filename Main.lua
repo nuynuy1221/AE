@@ -6,8 +6,7 @@ end
 
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
-
-print("1.32")
+print("2.52")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1658,8 +1657,24 @@ local function findCultists()
         if CULTIST_NAMES[c.Name] then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
-            if root and hum and hum.Health > 0 and isInsideStronghold(c, root.Position) then
-                table.insert(list, c)
+            if root and hum and hum.Health > 0 then
+                local pos = root.Position
+                local sh = getStrongholdRoot()
+                local inHierarchy = sh and c:IsDescendantOf(sh)
+                local inOBB = false
+                if strongholdParts then
+                    for _, part in ipairs(strongholdParts) do
+                        if part.Parent and isPointInPart(part, pos) then
+                            inOBB = true
+                            break
+                        end
+                    end
+                end
+                warn(string.format("[DEBUG] Cultist '%s' pos=(%.1f,%.1f,%.1f) inHierarchy=%s inOBB=%s",
+                    c.Name, pos.X, pos.Y, pos.Z, tostring(inHierarchy), tostring(inOBB)))
+                if inHierarchy or inOBB then
+                    table.insert(list, c)
+                end
             end
         end
     end
