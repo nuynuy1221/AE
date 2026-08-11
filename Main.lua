@@ -6,7 +6,8 @@ end
 
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
-print("2.52")
+
+print("5.34")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1509,15 +1510,8 @@ warpToTriggerZone()
 task.wait(0.3)
 print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
 
-buildShield() -- สร้างกำแพงล้อมตัวทันที ไม่ต้องรอมอนเกิดก่อน
-updateShield(getLiveParts())
-
--- ให้กำแพงตามตัวเราตลอดตอนรอมอนเกิด (ไม่ล็อคตัว แค่ไม่ให้กำแพงค้างจนตัวเราไปเกยชน)
-local waitShieldConn
-waitShieldConn = RunService.Heartbeat:Connect(function()
-    local hrp = getLiveParts()
-    if hrp then updateShield(hrp) end
-end)
+-- ไม่สร้างกำแพงก่อนมอนเกิด เพราะอาจไปขัดขวาง TriggerZone ทำให้มอนไม่ spawn
+-- รอให้มอนเกิดก่อน แล้วค่อยสร้างกำแพงตอนเข้าสู่ Step 6
 
 -- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
 do
@@ -1527,10 +1521,30 @@ do
     local function anyCultistSpawned()
         local chars = workspace:FindFirstChild("Characters")
         if not chars then return false end
+        local building = getStrongholdBuilding()
+        local bCF, bSize
+        if building then
+            bCF, bSize = building:GetBoundingBox()
+        end
         for _, c in ipairs(chars:GetChildren()) do
             if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
                 local hum = c:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then return true end
+                local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+                if hum and hum.Health > 0 and root then
+                    if bCF and bSize then
+                        -- เช็คว่าอยู่ใน bounding box ของตึก Stronghold (+ margin 30 stud)
+                        local local_ = bCF:PointToObjectSpace(root.Position)
+                        local half = bSize / 2 + Vector3.new(30, 30, 30)
+                        if math.abs(local_.X) <= half.X
+                            and math.abs(local_.Y) <= half.Y
+                            and math.abs(local_.Z) <= half.Z
+                        then
+                            return true
+                        end
+                    else
+                        return true -- หา building ไม่เจอ ให้ผ่านไปก่อน
+                    end
+                end
             end
         end
         return false
@@ -1565,10 +1579,6 @@ do
     print("✅ Cultist spawned!")
 end
 
-if waitShieldConn then
-    waitShieldConn:Disconnect()
-    waitShieldConn = nil
-end
 
 -- ============================================
 -- STEP 6: Fight loop - ล็อคลอยตลอด, ตี Cultist จากด้านใต้ 15 studs, เช็คซ้ำเรื่อยๆ
