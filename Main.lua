@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("5.34")
+print("6.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -584,37 +584,49 @@ if isLobby() then
         {num = 3, obj = workspace:FindFirstChild("Teleporter3")},
     }
 
-    local selectedTeleporter = nil
-    while not selectedTeleporter do
-        for _, tp in ipairs(teleporters) do
-            if tp.obj and not hasPlayersInBeam(tp.obj) then
-                selectedTeleporter = tp.num
-                print("Found empty Teleporter:", selectedTeleporter)
-                break
+    -- วนลองหาห้องจนกว่าจะเข้าได้จริง (กันเคสมีคนเข้าพร้อมกันแล้ว teleport ล้มเหลว)
+    while isLobby() do
+        local selectedTeleporter = nil
+        while not selectedTeleporter do
+            for _, tp in ipairs(teleporters) do
+                if tp.obj and not hasPlayersInBeam(tp.obj) then
+                    selectedTeleporter = tp.num
+                    print("Found empty Teleporter:", selectedTeleporter)
+                    break
+                end
+            end
+            if not selectedTeleporter then
+                print("All teleporters busy - waiting...")
+                updateStatus("Waiting for Empty Teleporter...")
+                task.wait(1)
             end
         end
-        if not selectedTeleporter then
-            print("All teleporters busy - waiting...")
-            updateStatus("Waiting for Empty Teleporter...")
+
+        Client.Events.TeleportEvent:FireServer("Remove")
+        task.wait(0.3)
+        Client.Events.TeleportEvent:FireServer("Add", selectedTeleporter)
+        task.wait(0.3)
+        Client.Events.TeleportEvent:FireServer("Chosen", nil, 1, nil)
+        print("Entering Solo map...")
+        updateStatus("Loading Map...")
+
+        -- รอสูงสุด 20 วิ ถ้ายังอยู่ Lobby อยู่ = teleport ล้มเหลว ให้ลองใหม่
+        local waited = 0
+        local TELEPORT_TIMEOUT = 20
+        while isLobby() and waited < TELEPORT_TIMEOUT do
+            waited = waited + 1
+            if waited % 5 == 0 then
+                print(("Still in Lobby... (%ds)"):format(waited))
+            end
+            updateStatus(("Loading Map... (%ds)"):format(waited))
             task.wait(1)
         end
-    end
 
-    Client.Events.TeleportEvent:FireServer("Add", selectedTeleporter)
-    task.wait(0.3)
-    Client.Events.TeleportEvent:FireServer("Chosen", nil, 1, nil)
-    print("Entering Solo map...")
-    updateStatus("Loading Map...")
-
-    -- Wait for map load (ไม่มีหมดเวลา)
-    local waited = 0
-    while isLobby() do
-        waited = waited + 1
-        if waited % 10 == 0 then
-            print(("Still in Lobby... (%ds)"):format(waited))
+        if isLobby() then
+            print("Teleport failed or room was taken - retrying...")
+            updateStatus("Retrying Teleport...")
+            task.wait(2)
         end
-        updateStatus(("Loading Map... (%ds)"):format(waited))
-        task.wait(1)
     end
     print("Successfully entered Farm map!")
     updateStatus("Map Loaded!")
@@ -1329,6 +1341,16 @@ do
         end
     end
 
+    -- ลบทุกอย่างใต้ workspace.Characters
+    local chars = workspace:FindFirstChild("Characters")
+    if chars then
+        pcall(function()
+            for _, child in ipairs(chars:GetChildren()) do
+                pcall(function() child:Destroy() end)
+            end
+        end)
+    end
+
     print("[OK] FPS boost cleanup done")
 end
 
@@ -1383,7 +1405,7 @@ while true do
     else
         local minutes = math.floor(remaining / 60)
         local seconds = math.floor(remaining % 60)
-        print(string.format("Stronghold opens in: %02d:%02d", minutes, seconds))
+        --print(string.format("Stronghold opens in: %02d:%02d", minutes, seconds))
         updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
 
         local crossed = nil
@@ -1510,8 +1532,16 @@ warpToTriggerZone()
 task.wait(0.3)
 print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
 
--- ไม่สร้างกำแพงก่อนมอนเกิด เพราะอาจไปขัดขวาง TriggerZone ทำให้มอนไม่ spawn
--- รอให้มอนเกิดก่อน แล้วค่อยสร้างกำแพงตอนเข้าสู่ Step 6
+-- Equip Old Sack เพื่อ trigger TriggerZone แล้วกลับไปใช้ axe เดิม
+do
+    local oldSack = LocalPlayer.Inventory:FindFirstChild("Old Sack")
+    if oldSack then
+        Client.InventoryHandler.RequestEquipItem(oldSack)
+        task.wait(0.5)
+    end
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+end
+
 
 -- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
 do
@@ -1586,6 +1616,22 @@ end
 
 print("\n[Step 6] Fighting Cultists in Stronghold...")
 updateStatus("Fighting Cultists...")
+
+-- Re-equip axe ก่อนเริ่ม fight เผื่อถูก unequip ระหว่างรอ
+do
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    local waited = 0
+    while waited < 3 do
+        local char = LocalPlayer.Character
+        local th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then
+            axe = th.OriginalItem.Value
+            break
+        end
+        task.wait(0.1)
+        waited += 0.1
+    end
+end
 
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
 local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
@@ -1667,24 +1713,8 @@ local function findCultists()
         if CULTIST_NAMES[c.Name] then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
-            if root and hum and hum.Health > 0 then
-                local pos = root.Position
-                local sh = getStrongholdRoot()
-                local inHierarchy = sh and c:IsDescendantOf(sh)
-                local inOBB = false
-                if strongholdParts then
-                    for _, part in ipairs(strongholdParts) do
-                        if part.Parent and isPointInPart(part, pos) then
-                            inOBB = true
-                            break
-                        end
-                    end
-                end
-                warn(string.format("[DEBUG] Cultist '%s' pos=(%.1f,%.1f,%.1f) inHierarchy=%s inOBB=%s",
-                    c.Name, pos.X, pos.Y, pos.Z, tostring(inHierarchy), tostring(inOBB)))
-                if inHierarchy or inOBB then
-                    table.insert(list, c)
-                end
+            if root and hum and hum.Health > 0 and isInsideStronghold(c, root.Position) then
+                table.insert(list, c)
             end
         end
     end
