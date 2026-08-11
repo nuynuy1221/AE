@@ -6,7 +6,8 @@ end
 
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
-print("10.03")
+
+print("1.32")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1439,7 +1440,9 @@ local function buildShield()
         p.Name = "Face" .. i
         p.Size = f[1]
         p.Anchored = true        -- ขับด้วย CFrame ทุก tick ไม่ให้ physics ลากตัวเรา
-        p.CanCollide = true      -- กันตัวมอนกับกระสุนที่เป็น physics part
+        -- บน/ล่าง (offset.Y ~= 0) ไม่ทึบ กันชนพื้น Stronghold จนโดนดีดออกจาก TriggerZone
+        -- (กระสุน Crossbow Cultist ยิงแนวนอน ไม่จำเป็นต้องกันบน/ล่างอยู่แล้ว)
+        p.CanCollide = (f[2].Y == 0)
         p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
         p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
         p.Transparency = 1
