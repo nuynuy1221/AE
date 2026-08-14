@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 10.04")
+print("Version 1.0.6 / 10.20")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -795,8 +795,7 @@ local function sendDescription()
     end
 end
 
--- ฟังก์ชัน Tween ไปยังตำแหน่ง (หยุดทันทีที่ถึงเหรียญ)
-local COLLECT_THRESHOLD = 3
+-- ฟังก์ชัน Tween ไปยังตำแหน่ง
 local function tweenToPosition(targetPosition)
     local distance = (humanoidRootPart.Position - targetPosition).Magnitude
     local duration = distance / SPEED
@@ -814,14 +813,7 @@ local function tweenToPosition(targetPosition)
     )
 
     tween:Play()
-    -- หยุด tween ทันทีที่เข้าใกล้พอ
-    while tween.PlaybackState == Enum.PlaybackState.Playing do
-        if (humanoidRootPart.Position - targetPosition).Magnitude <= COLLECT_THRESHOLD then
-            tween:Cancel()
-            break
-        end
-        task.wait(0.05)
-    end
+    tween.Completed:Wait()
 end
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
@@ -1158,6 +1150,19 @@ while true do
                                 -- Tween ไปเก็บเหรียญ
                                 tweenToPosition(coinPos)
                                 wait(0.1)
+
+                                coinPickupCount = (coinPickupCount or 0) + 1
+                                if coinPickupCount >= 10 then
+                                    coinPickupCount = 0
+                                    -- เดินสุ่มทิศทาง 3 วิ
+                                    local walkEnd = os.clock() + 3
+                                    while os.clock() < walkEnd do
+                                        local angle = math.random() * math.pi * 2
+                                        local dest = humanoidRootPart.Position
+                                            + Vector3.new(math.cos(angle) * 8, 0, math.sin(angle) * 8)
+                                        tweenToPosition(dest)
+                                    end
+                                end
                             end
                         end
                     end
