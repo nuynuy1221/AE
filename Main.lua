@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 9.36")
+print("Version 1.0.6 / 9.45")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -35,7 +35,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 -- ตั้งค่า
-local SPEED = 35
+local SPEED = Config.TweenSpeed or 35
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
 local questCompleted = false -- เช็คว่า Quest เสร็จหรือยัง
