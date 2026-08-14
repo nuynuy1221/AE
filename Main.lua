@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 9.59")
+print("Version 1.0.6 / 10.04")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -803,7 +803,7 @@ local function tweenToPosition(targetPosition)
 
     local tweenInfo = TweenInfo.new(
         duration,
-        Enum.EasingStyle.Linear,
+        Enum.EasingStyle.Quad,
         Enum.EasingDirection.InOut
     )
 
@@ -1074,22 +1074,16 @@ while true do
         local inGame = earnedXP.Visible or xpTextChanged
 
         if not inGame then
-            -- Reset ทุกอย่างใน Lobby + ปิด noclip
+            -- Reset ทุกอย่างใน Lobby
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-            for _, part in ipairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then part.CanCollide = true end
-            end
             wait(1)
             return
         end
 
-        -- อยู่ในแมพฟาร์ม - Reset ทุกอย่างใหม่ + เปิด noclip
+        -- อยู่ในแมพฟาร์ม - Reset ทุกอย่างใหม่
         character = player.Character or player.CharacterAdded:Wait()
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-        for _, part in ipairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then part.CanCollide = false end
-        end
 
         -- เช็คว่า CoinBags UI โหลดเสร็จหรือยัง
         local coinBags = gameUI:FindFirstChild("CoinBags")
