@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 10.28")
+print("Version 1.0.6 / 10.45")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -1058,71 +1058,45 @@ while true do
         local xpText = timer and timer:FindFirstChild("XPText")
         local lastXPText = xpText and xpText.Text or ""
 
-        -- รอเล็กน้อยแล้วเช็คอีกครั้ง
-        wait(0.5)
+        task.wait(0.05)
         local currentXPText = xpText and xpText.Text or ""
         local xpTextChanged = (lastXPText ~= currentXPText)
 
         local inGame = earnedXP.Visible or xpTextChanged
 
         if not inGame then
-            -- Reset ทุกอย่างใน Lobby
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-            wait(1)
+            task.wait(0.5)
             return
         end
 
-        -- อยู่ในแมพฟาร์ม - Reset ทุกอย่างใหม่
         character = player.Character or player.CharacterAdded:Wait()
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
-        -- เช็คว่า CoinBags UI โหลดเสร็จหรือยัง
         local coinBags = gameUI:FindFirstChild("CoinBags")
-        if not coinBags then
-            wait(1)
-            return
-        end
+        if not coinBags then task.wait(0.1) return end
 
         local container = coinBags:FindFirstChild("Container")
-        if not container then
-            wait(1)
-            return
-        end
+        if not container then task.wait(0.1) return end
 
         local coin = container:FindFirstChild("Coin")
-        if not coin then
-            wait(1)
-            return
-        end
+        if not coin then task.wait(0.1) return end
 
         local currencyFrame = coin:FindFirstChild("CurrencyFrame")
-        if not currencyFrame then
-            wait(1)
-            return
-        end
+        if not currencyFrame then task.wait(0.1) return end
 
         local icon = currencyFrame:FindFirstChild("Icon")
-        if not icon then
-            wait(1)
-            return
-        end
+        if not icon then task.wait(0.1) return end
 
         local coinsText = icon:FindFirstChild("Coins")
-        if not coinsText then
-            wait(1)
-            return
-        end
+        if not coinsText then task.wait(0.1) return end
 
-        -- เช็คจำนวน Coin ก่อน
         local coinAmount = tonumber(coinsText.Text) or 0
 
         if coinAmount >= 40 then
-                -- เต็มแล้ว - Reset ตัวละครเพื่อกลับ Lobby
                 character:BreakJoints()
-                wait(1)
-
-                -- ถ้าเปิด HopBagFull ให้ hop server หลัง reset
+                task.wait(1)
                 if Config.HopBagFull then
                     hopServer()
                 end
@@ -1133,37 +1107,17 @@ while true do
                 local coinContainer = findCoinContainer()
 
                 if coinContainer then
-                    -- ดึงเหรียญทั้งหมดภายใต้ CoinContainer
                     local coins = coinContainer:GetChildren()
 
                     if #coins > 0 then
-                        -- หาเหรียญที่ใกล้ที่สุด
                         local nearestCoin, distance = findNearestCoin(coins)
 
-                        if nearestCoin then
-                            -- เช็คว่าเหรียญยังอยู่ก่อนไป
-                            if nearestCoin.Parent then
-                                local coinPos = nearestCoin:IsA("Model")
-                                    and nearestCoin:GetPivot().Position
-                                    or nearestCoin.Position
+                        if nearestCoin and nearestCoin.Parent then
+                            local coinPos = nearestCoin:IsA("Model")
+                                and nearestCoin:GetPivot().Position
+                                or nearestCoin.Position
 
-                                -- Tween ไปเก็บเหรียญ
-                                tweenToPosition(coinPos)
-                                task.wait(0.01)
-
-                                coinPickupCount = (coinPickupCount or 0) + 1
-                                if coinPickupCount >= 10 then
-                                    coinPickupCount = 0
-                                    -- เดินสุ่มทิศทาง 3 วิ
-                                    local walkEnd = os.clock() + 3
-                                    while os.clock() < walkEnd do
-                                        local angle = math.random() * math.pi * 2
-                                        local dest = humanoidRootPart.Position
-                                            + Vector3.new(math.cos(angle) * 8, 0, math.sin(angle) * 8)
-                                        tweenToPosition(dest)
-                                    end
-                                end
-                            end
+                            tweenToPosition(coinPos)
                         end
                     end
                 else
