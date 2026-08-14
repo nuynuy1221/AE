@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 9.45")
+print("Version 1.0.6 / 9.59")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -35,7 +35,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 -- ตั้งค่า
-local SPEED = Config.TweenSpeed or 35
+local SPEED = Config.TweenSpeed or 30
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
 local questCompleted = false -- เช็คว่า Quest เสร็จหรือยัง
@@ -795,7 +795,8 @@ local function sendDescription()
     end
 end
 
--- ฟังก์ชัน Tween ไปยังตำแหน่ง
+-- ฟังก์ชัน Tween ไปยังตำแหน่ง (หยุดทันทีที่ถึงเหรียญ)
+local COLLECT_THRESHOLD = 3
 local function tweenToPosition(targetPosition)
     local distance = (humanoidRootPart.Position - targetPosition).Magnitude
     local duration = distance / SPEED
@@ -813,7 +814,14 @@ local function tweenToPosition(targetPosition)
     )
 
     tween:Play()
-    tween.Completed:Wait()
+    -- หยุด tween ทันทีที่เข้าใกล้พอ
+    while tween.PlaybackState == Enum.PlaybackState.Playing do
+        if (humanoidRootPart.Position - targetPosition).Magnitude <= COLLECT_THRESHOLD then
+            tween:Cancel()
+            break
+        end
+        task.wait(0.05)
+    end
 end
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
@@ -1066,16 +1074,22 @@ while true do
         local inGame = earnedXP.Visible or xpTextChanged
 
         if not inGame then
-            -- Reset ทุกอย่างใน Lobby
+            -- Reset ทุกอย่างใน Lobby + ปิด noclip
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+            for _, part in ipairs(character:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = true end
+            end
             wait(1)
             return
         end
 
-        -- อยู่ในแมพฟาร์ม - Reset ทุกอย่างใหม่
+        -- อยู่ในแมพฟาร์ม - Reset ทุกอย่างใหม่ + เปิด noclip
         character = player.Character or player.CharacterAdded:Wait()
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
 
         -- เช็คว่า CoinBags UI โหลดเสร็จหรือยัง
         local coinBags = gameUI:FindFirstChild("CoinBags")
