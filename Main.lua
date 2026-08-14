@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6 / 10.20")
+print("Version 1.0.6 / 10.28")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -1149,7 +1149,7 @@ while true do
 
                                 -- Tween ไปเก็บเหรียญ
                                 tweenToPosition(coinPos)
-                                wait(0.1)
+                                task.wait(0.01)
 
                                 coinPickupCount = (coinPickupCount or 0) + 1
                                 if coinPickupCount >= 10 then
@@ -1167,15 +1167,15 @@ while true do
                         end
                     end
                 else
-                    wait(2)
+                    task.wait(0.1)
                 end
             end
     end)
 
     if not success then
         warn("Error:", tostring(result))
-        wait(2)
+        task.wait(0.5)
     end
 
-    wait(0.5)
+    task.wait(0.01)
 end
