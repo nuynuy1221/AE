@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.6")
+print("Version 1.0.6 / 9.36")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -67,8 +67,8 @@ mainCorner.Parent = mainFrame
 local mainPadding = Instance.new("UIPadding")
 mainPadding.PaddingTop = UDim.new(0.03, 0)
 mainPadding.PaddingBottom = UDim.new(0.03, 0)
-mainPadding.PaddingLeft = UDim.new(0.04, 0)
-mainPadding.PaddingRight = UDim.new(0.04, 0)
+mainPadding.PaddingLeft = UDim.new(0.03, 0)
+mainPadding.PaddingRight = UDim.new(0.03, 0)
 mainPadding.Parent = mainFrame
 
 local listLayout = Instance.new("UIListLayout")
@@ -258,6 +258,41 @@ questLabel.Font = Enum.Font.GothamBold
 questLabel.TextScaled = true
 questLabel.TextXAlignment = Enum.TextXAlignment.Right
 questLabel.Parent = contentFrame
+
+-- Sugar Hub Box
+local hubBox = Instance.new("Frame")
+hubBox.Name = "HubBox"
+hubBox.Size = UDim2.new(1, 0, 0.15, 0)
+hubBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
+hubBox.BorderSizePixel = 0
+hubBox.LayoutOrder = 5
+hubBox.Parent = mainFrame
+
+local hubCorner = Instance.new("UICorner")
+hubCorner.CornerRadius = UDim.new(0, 10)
+hubCorner.Parent = hubBox
+
+local hubStroke = Instance.new("UIStroke")
+hubStroke.Color = Color3.fromRGB(70, 45, 22)
+hubStroke.Thickness = 3
+hubStroke.Parent = hubBox
+
+local hubLabel = Instance.new("TextLabel")
+hubLabel.Size = UDim2.new(1, 0, 1, 0)
+hubLabel.BackgroundTransparency = 1
+hubLabel.Text = "Sugar Hub"
+hubLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
+hubLabel.TextSize = 80
+hubLabel.Font = Enum.Font.GothamBold
+hubLabel.TextScaled = true
+hubLabel.Parent = hubBox
+
+local hubPadding = Instance.new("UIPadding")
+hubPadding.PaddingLeft = UDim.new(0.03, 0)
+hubPadding.PaddingRight = UDim.new(0.03, 0)
+hubPadding.PaddingTop = UDim.new(0.15, 0)
+hubPadding.PaddingBottom = UDim.new(0.15, 0)
+hubPadding.Parent = hubLabel
 
 -- ฟังก์ชันอัปเดต Currency Labels
 local function updateCurrencyLabels()
