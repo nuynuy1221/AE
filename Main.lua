@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.0")
+print("Version 1.1.0 / 11.44")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -17,25 +17,25 @@ local LocalPlayer = Players.LocalPlayer
 print("=== Sugar Hub Started ===")
 
 -- ============================================
--- Config (ตั้งได้จากภายนอกผ่าน _G.Config ก่อนรันสคริปต์นี้)
+-- Config (can be set externally via _G.Config before running this script)
 -- ============================================
 _G.Config = _G.Config or {}
 local Config = _G.Config
 
--- ค่าพื้นฐาน: ถ้าไม่ได้ตั้งจากภายนอก ให้เป็น false / ไม่ตั้ง
+-- Defaults: if not set externally, use false / leave unset
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
--- Config.Diamonds: ไม่ตั้งค่า default ให้ (ถ้าไม่ตั้งจากภายนอก = nil = ไม่ส่ง DONE เลย)
+-- Config.Diamonds: no default (if not set externally = nil = never send DONE)
 
--- ถ้าเปิด Horst ให้โหลดสคริปต์ Horst
+-- If Horst is enabled, load the Horst script
 if Config.Horst then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
 end
 
-local diamondsGoalReached = false -- เช็คว่าส่ง DONE ไปแล้วหรือยัง (กันส่งซ้ำ)
+local diamondsGoalReached = false -- track whether DONE was already sent (prevent duplicates)
 
 -- ============================================
--- Anti-AFK (กัน Roblox เตะออกตอนไม่ได้ขยับ)
+-- Anti-AFK (prevent Roblox from kicking for inactivity)
 -- ============================================
 local VirtualUser = game:GetService("VirtualUser")
 LocalPlayer.Idled:Connect(function()
@@ -1971,7 +1971,7 @@ do
         waited += WAIT_STEP
 
         if waited >= SPAWN_TIMEOUT then
-            print("[Step 5] Cultist ยังไม่เกิด - วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone")
+            print("[Step 5] Cultist not spawned - warping to Floor then back to TriggerZone")
             updateStatus("Re-warp waiting for spawn...")
 
             if floorPos then
@@ -2217,7 +2217,7 @@ local function doOneRound()
             task.wait(WAIT_STEP)
             waited += WAIT_STEP
             if waited >= SPAWN_TIMEOUT then
-                print("[Round " .. completedRounds+1 .. "] Cultist ยังไม่เกิด - วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone")
+                print("[Round " .. completedRounds+1 .. "] Cultist not spawned - warping to Floor then back to TriggerZone")
                 updateStatus("Re-warp waiting for spawn...")
                 if floorPos2 then
                     local hrp = getLiveParts()
@@ -2444,10 +2444,25 @@ while completedRounds < TOTAL_ROUNDS do
     print(("[OK] Collected %d diamonds (round %d)"):format(collected, completedRounds))
     updateStatus(("✅ Collected %d Diamonds"):format(collected))
 
-    -- ถ้ายังไม่ครบ 3 รอบ วาร์ปกลับรอรอบถัดไป
+    -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
     if completedRounds < TOTAL_ROUNDS then
-        print(string.format("[Round %d done] Warping back to TriggerZone...", completedRounds))
-        updateStatus(string.format("Round %d done - waiting next round...", completedRounds))
+        print(string.format("[Round %d done] Waiting for Stronghold to reopen...", completedRounds))
+        warpToStrongholdFloor(1)
+        while true do
+            local remaining = getStrongholdTimeRemaining()
+            if not remaining then
+                updateStatus("Stronghold Timer Not Found...")
+                task.wait(1)
+            elseif remaining <= 0 then
+                print("✅ Stronghold reopened!")
+                break
+            else
+                local mins = math.floor(remaining / 60)
+                local secs = math.floor(remaining % 60)
+                updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
+                task.wait(1)
+            end
+        end
         warpToTriggerZone()
         task.wait(1)
     end
