@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.0 / 11.44")
+print("Version 1.1.0 / 12.53")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2173,11 +2173,8 @@ local completedRounds = 0
 local function doOneRound()
     fightStart = os.clock()
     clearHits = 0
-    gateOrigin = nil
-    do
-        local part = getFinalGatePart()
-        if part then gateOrigin = part.Position end
-    end
+    -- ใช้ตำแหน่ง gate ตอน Stronghold ยังปิด (จับไว้แล้วตอน Step 3.5)
+    gateOrigin = finalGateBasePos
 
     -- รอ Cultist เกิด
     do
