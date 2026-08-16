@@ -1,55 +1,64 @@
 repeat wait() until game:IsLoaded()
--- เช็คว่าอยู่ในแมพ Murder Mystery 2 หรือไม่
-if game.PlaceId ~= 142823291 then
+
+if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
 
-print("Version 1.0.6 / 10.45")
--- Config (ตั้งได้จากภายนอก)
+-- Main Script - Auto Farm Manager
+-- Sugar Hub - Auto Farm System
+
+print("Version 1.1.0")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+print("=== Sugar Hub Started ===")
+
+-- ============================================
+-- Config (ตั้งได้จากภายนอกผ่าน _G.Config ก่อนรันสคริปต์นี้)
+-- ============================================
 _G.Config = _G.Config or {}
 local Config = _G.Config
 
--- ค่าพื้นฐาน
+-- ค่าพื้นฐาน: ถ้าไม่ได้ตั้งจากภายนอก ให้เป็น false / ไม่ตั้ง
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
-Config.HopBagFull = Config.HopBagFull == true
--- Config.CoinsBox = ชื่อกล่องที่ต้องการเปิดด้วย Coins (เช่น "KnifeBox1", "MysteryBox2")
--- ถ้าไม่ตั้งค่า จะไม่เปิดกล่องด้วย Coins
--- รายการกล่องที่ใช้ได้:
---   MysteryBox1, MysteryBox2
---   KnifeBox1, KnifeBox2, KnifeBox3, KnifeBox4, KnifeBox5
---   MLG Box, GunBox1, GunBox2, GunBox3
-Config.CoinsBox = Config.CoinsBox or nil
+-- Config.Diamonds: ไม่ตั้งค่า default ให้ (ถ้าไม่ตั้งจากภายนอก = nil = ไม่ส่ง DONE เลย)
 
--- ถ้าเปิด Horst ให้โหลด script
+-- ถ้าเปิด Horst ให้โหลดสคริปต์ Horst
 if Config.Horst then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
 end
 
-local TweenService = game:GetService("TweenService")
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local diamondsGoalReached = false -- เช็คว่าส่ง DONE ไปแล้วหรือยัง (กันส่งซ้ำ)
 
--- ตั้งค่า
-local SPEED = Config.TweenSpeed or 30
-local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
-local lastDescriptionTime = 0
-local questCompleted = false -- เช็คว่า Quest เสร็จหรือยัง
+-- ============================================
+-- Anti-AFK (กัน Roblox เตะออกตอนไม่ได้ขยับ)
+-- ============================================
+local VirtualUser = game:GetService("VirtualUser")
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+    print("[AntiAFK] Idled -> sent virtual input")
+end)
 
--- สร้าง ScreenGui สำหรับแสดง Quest Progress
+-- ============================================
+-- GUI Setup
+-- ============================================
+
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "QuestStatsGUI"
+screenGui.Name = "SugarHubGUI"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 999999
 screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
--- Frame หลัก
+-- Main Frame (ขนาด/ตำแหน่งเป็น scale ทั้งหมด เพื่อปรับตามขนาดจอ - เหมือน Anime Expeditions)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
@@ -63,12 +72,11 @@ local mainCorner = Instance.new("UICorner")
 mainCorner.CornerRadius = UDim.new(0, 12)
 mainCorner.Parent = mainFrame
 
--- Padding
 local mainPadding = Instance.new("UIPadding")
 mainPadding.PaddingTop = UDim.new(0.03, 0)
 mainPadding.PaddingBottom = UDim.new(0.03, 0)
-mainPadding.PaddingLeft = UDim.new(0.03, 0)
-mainPadding.PaddingRight = UDim.new(0.03, 0)
+mainPadding.PaddingLeft = UDim.new(0.04, 0)
+mainPadding.PaddingRight = UDim.new(0.04, 0)
 mainPadding.Parent = mainFrame
 
 local listLayout = Instance.new("UIListLayout")
@@ -78,77 +86,20 @@ listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Parent = mainFrame
 
--- ฟังก์ชันสร้าง Info Box (สำหรับ Summer Keys และ Coins)
-local function createInfoBox(name, layoutOrder)
-	local box = Instance.new("Frame")
-	box.Name = name .. "Box"
-	box.Size = UDim2.new(1, 0, 0.15, 0)
-	box.BackgroundColor3 = Color3.fromRGB(194, 144, 90)
-	box.BorderSizePixel = 0
-	box.LayoutOrder = layoutOrder
-	box.Parent = mainFrame
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = box
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(139, 90, 43)
-	stroke.Thickness = 3
-	stroke.Parent = box
-
-	local contentFrame = Instance.new("Frame")
-	contentFrame.Size = UDim2.new(1, 0, 1, 0)
-	contentFrame.BackgroundTransparency = 1
-	contentFrame.Parent = box
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0.03, 0)
-	padding.PaddingRight = UDim.new(0.03, 0)
-	padding.PaddingTop = UDim.new(0.1, 0)
-	padding.PaddingBottom = UDim.new(0.1, 0)
-	padding.Parent = contentFrame
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
-	nameLabel.Position = UDim2.new(0, 0, 0, 0)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Text = name
-	nameLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-	nameLabel.TextSize = 72
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextScaled = true
-	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	nameLabel.Parent = contentFrame
-
-	local colonLabel = Instance.new("TextLabel")
-	colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
-	colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
-	colonLabel.BackgroundTransparency = 1
-	colonLabel.Text = ":"
-	colonLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-	colonLabel.TextSize = 72
-	colonLabel.Font = Enum.Font.GothamBold
-	colonLabel.TextScaled = true
-	colonLabel.Parent = contentFrame
-
-	local valueLabel = Instance.new("TextLabel")
-	valueLabel.Name = "ValueLabel"
-	valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
-	valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
-	valueLabel.BackgroundTransparency = 1
-	valueLabel.Text = "..."
-	valueLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-	valueLabel.TextSize = 72
-	valueLabel.Font = Enum.Font.GothamBold
-	valueLabel.TextScaled = true
-	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-	valueLabel.Parent = contentFrame
-
-	return box, valueLabel
+-- ฟังก์ชันใส่ลูกน้ำ (เหมือน Anime Expeditions)
+local function formatNumber(num)
+    local formatted = tostring(num)
+    local k
+    while true do
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if k == 0 then
+            break
+        end
+    end
+    return formatted
 end
 
--- Username Box
+-- Username Box (LayoutOrder 1 - เหมือน Anime Expeditions)
 local usernameBox = Instance.new("Frame")
 usernameBox.Name = "UsernameBox"
 usernameBox.Size = UDim2.new(1, 0, 0.15, 0)
@@ -169,7 +120,7 @@ usernameStroke.Parent = usernameBox
 local usernameLabel = Instance.new("TextLabel")
 usernameLabel.Size = UDim2.new(1, 0, 1, 0)
 usernameLabel.BackgroundTransparency = 1
-usernameLabel.Text = player.Name
+usernameLabel.Text = LocalPlayer.Name
 usernameLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
 usernameLabel.TextSize = 80
 usernameLabel.Font = Enum.Font.GothamBold
@@ -183,89 +134,178 @@ usernamePadding.PaddingTop = UDim.new(0.15, 0)
 usernamePadding.PaddingBottom = UDim.new(0.15, 0)
 usernamePadding.Parent = usernameLabel
 
--- Summer Keys Box
-local summerKeysBox, summerKeysLabel = createInfoBox("Summer Keys", 2)
+-- ฟังก์ชันสร้างกล่อง Stat แบบ name/colon/value (เหมือน Anime Expeditions)
+local function createStatBox(name, key, color, layoutOrder)
+    local statBox = Instance.new("Frame")
+    statBox.Name = key .. "Box"
+    statBox.Size = UDim2.new(1, 0, 0.18, 0)
+    statBox.BackgroundColor3 = color
+    statBox.BorderSizePixel = 0
+    statBox.LayoutOrder = layoutOrder
+    statBox.Parent = mainFrame
 
--- Coins Box
-local coinsBox, coinsLabel = createInfoBox("Coins", 3)
+    local statCorner = Instance.new("UICorner")
+    statCorner.CornerRadius = UDim.new(0, 10)
+    statCorner.Parent = statBox
 
--- Daily Quest Box
-local dailyBox = Instance.new("Frame")
-dailyBox.Name = "DailyBox"
-dailyBox.Size = UDim2.new(1, 0, 0.18, 0)
-dailyBox.BackgroundColor3 = Color3.fromRGB(194, 144, 90)
-dailyBox.BorderSizePixel = 0
-dailyBox.LayoutOrder = 4
-dailyBox.Parent = mainFrame
+    local statStroke = Instance.new("UIStroke")
+    statStroke.Color = Color3.fromRGB(139, 90, 43)
+    statStroke.Thickness = 3
+    statStroke.Parent = statBox
 
-local dailyCorner = Instance.new("UICorner")
-dailyCorner.CornerRadius = UDim.new(0, 10)
-dailyCorner.Parent = dailyBox
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1, 0, 1, 0)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = statBox
 
-local dailyStroke = Instance.new("UIStroke")
-dailyStroke.Color = Color3.fromRGB(139, 90, 43)
-dailyStroke.Thickness = 3
-dailyStroke.Parent = dailyBox
+    local contentPadding = Instance.new("UIPadding")
+    contentPadding.PaddingLeft = UDim.new(0.03, 0)
+    contentPadding.PaddingRight = UDim.new(0.03, 0)
+    contentPadding.PaddingTop = UDim.new(0.1, 0)
+    contentPadding.PaddingBottom = UDim.new(0.1, 0)
+    contentPadding.Parent = contentFrame
 
--- Container สำหรับ Daily Quest
-local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(1, 0, 1, 0)
-contentFrame.BackgroundTransparency = 1
-contentFrame.Parent = dailyBox
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    nameLabel.TextSize = 72
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextScaled = true
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = contentFrame
 
-local contentPadding = Instance.new("UIPadding")
-contentPadding.PaddingLeft = UDim.new(0.03, 0)
-contentPadding.PaddingRight = UDim.new(0.03, 0)
-contentPadding.PaddingTop = UDim.new(0.1, 0)
-contentPadding.PaddingBottom = UDim.new(0.1, 0)
-contentPadding.Parent = contentFrame
+    local colonLabel = Instance.new("TextLabel")
+    colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
+    colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
+    colonLabel.BackgroundTransparency = 1
+    colonLabel.Text = ":"
+    colonLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    colonLabel.TextSize = 72
+    colonLabel.Font = Enum.Font.GothamBold
+    colonLabel.TextScaled = true
+    colonLabel.Parent = contentFrame
 
--- Label "Daily"
-local nameLabel = Instance.new("TextLabel")
-nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
-nameLabel.Position = UDim2.new(0, 0, 0, 0)
-nameLabel.BackgroundTransparency = 1
-nameLabel.Text = "Daily Quest"
-nameLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-nameLabel.TextSize = 72
-nameLabel.Font = Enum.Font.GothamBold
-nameLabel.TextScaled = true
-nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-nameLabel.Parent = contentFrame
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
+    valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = "..."
+    valueLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    valueLabel.TextSize = 72
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.TextScaled = true
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.Parent = contentFrame
 
--- Colon
-local colonLabel = Instance.new("TextLabel")
-colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
-colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
-colonLabel.BackgroundTransparency = 1
-colonLabel.Text = ":"
-colonLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-colonLabel.TextSize = 72
-colonLabel.Font = Enum.Font.GothamBold
-colonLabel.TextScaled = true
-colonLabel.Parent = contentFrame
+    return valueLabel
+end
 
--- Value Label (Progress)
-local questLabel = Instance.new("TextLabel")
-questLabel.Name = "QuestLabel"
-questLabel.Size = UDim2.new(0.5, 0, 1, 0)
-questLabel.Position = UDim2.new(0.5, 0, 0, 0)
-questLabel.BackgroundTransparency = 1
-questLabel.Text = "..."
-questLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-questLabel.TextSize = 72
-questLabel.Font = Enum.Font.GothamBold
-questLabel.TextScaled = true
-questLabel.TextXAlignment = Enum.TextXAlignment.Right
-questLabel.Parent = contentFrame
+-- Status Box (LayoutOrder 2)
+local diamondsValueLabel
+local statusValueLabel = createStatBox("Status", "Status", Color3.fromRGB(194, 144, 90), 2)
+statusValueLabel.Text = "Initializing..."
 
--- Sugar Hub Box
+-- Diamonds Box (LayoutOrder 3) - อ่านค่าจาก LocalPlayer.Diamonds attribute (ดูตาม diamond_checker_print.lua)
+diamondsValueLabel = createStatBox("Diamonds", "Diamonds", Color3.fromRGB(210, 180, 140), 3)
+
+local function updateDiamondsLabel()
+    local diamonds = LocalPlayer:GetAttribute("Diamonds")
+    diamondsValueLabel.Text = diamonds and formatNumber(diamonds) or "..."
+end
+
+-- ส่ง Description และ DONE ให้ Horst เมื่อ Diamonds ถึงจำนวนที่ตั้งใน Config.Diamonds
+-- ถ้าไม่ได้ตั้ง Config.Diamonds (เป็น nil) จะไม่มีการส่ง DONE เลย
+local function sendHorstDescription()
+    if not Config.Horst then return end
+    if not _G.Horst_SetDescription then
+        warn("[DEBUG] Horst_SetDescription not found")
+        return
+    end
+    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    local description = string.format(
+        "🌲 99 Nights • Diamonds: %d%s",
+        diamonds,
+        diamondsGoalReached and " ✅" or ""
+    )
+    _G.Horst_SetDescription(description)
+end
+
+local function checkDiamondsGoalAndSendDone()
+    if not Config.Horst then return end
+    if diamondsGoalReached then return end
+    if Config.Diamonds == nil then return end -- ไม่ได้ตั้ง Config.Diamonds = ไม่ส่ง DONE
+
+    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    if diamonds >= Config.Diamonds then
+        diamondsGoalReached = true
+        sendHorstDescription()
+
+        task.spawn(function()
+            task.wait(7) -- รอ Description ส่งเสร็จก่อนส่ง DONE
+            if _G.Horst_AccountChangeDone then
+                _G.Horst_AccountChangeDone()
+            else
+                warn("[DEBUG] Horst_AccountChangeDone not found")
+            end
+        end)
+    end
+end
+
+LocalPlayer:GetAttributeChangedSignal("Diamonds"):Connect(function()
+    updateDiamondsLabel()
+    sendHorstDescription()
+    checkDiamondsGoalAndSendDone()
+end)
+updateDiamondsLabel()
+
+-- รอให้ attribute Diamonds sync มาจาก server ก่อน (อาจยังเป็น nil ตอนสคริปต์เริ่ม)
+-- ป้องกันการส่ง "Diamonds: 0" ไปที่ Horst ทั้งที่ยังโหลดค่าจริงไม่เสร็จ
+task.spawn(function()
+    local waited = 0
+    while LocalPlayer:GetAttribute("Diamonds") == nil and waited < 15 do
+        task.wait(0.2)
+        waited = waited + 0.2
+    end
+    updateDiamondsLabel()
+    sendHorstDescription()
+    checkDiamondsGoalAndSendDone()
+end)
+
+-- ============================================
+-- Toggle GUI/Render3D ด้วยปุ่ม N
+-- ============================================
+local UserInputService = game:GetService("UserInputService")
+local isGuiVisible = true
+
+-- ถ้าเปิด ToggleRender3D ให้ปิด Render3D ตอนเริ่มต้น (เพราะ GUI เปิดอยู่)
+if Config.ToggleRender3D then
+    RunService:Set3dRenderingEnabled(false)
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.N then
+        isGuiVisible = not isGuiVisible
+        mainFrame.Visible = isGuiVisible
+
+        -- ถ้าเปิด ToggleRender3D ให้เปิด/ปิด 3D Rendering ตาม GUI (กลับกัน)
+        if Config.ToggleRender3D then
+            RunService:Set3dRenderingEnabled(not isGuiVisible)
+        end
+    end
+end)
+
+-- Hub Name Box (LayoutOrder 4 - อยู่ล่างสุด เหมือน Sugar Hub ใน Anime Expeditions)
 local hubBox = Instance.new("Frame")
 hubBox.Name = "HubBox"
 hubBox.Size = UDim2.new(1, 0, 0.15, 0)
 hubBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
 hubBox.BorderSizePixel = 0
-hubBox.LayoutOrder = 5
+hubBox.LayoutOrder = 4
 hubBox.Parent = mainFrame
 
 local hubCorner = Instance.new("UICorner")
@@ -294,842 +334,2151 @@ hubPadding.PaddingTop = UDim.new(0.15, 0)
 hubPadding.PaddingBottom = UDim.new(0.15, 0)
 hubPadding.Parent = hubLabel
 
--- ฟังก์ชันอัปเดต Currency Labels
-local function updateCurrencyLabels()
-	local success = pcall(function()
-		local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-
-		-- อัปเดต Summer Keys
-		local summerKeys = ProfileData.Materials.Owned["SummerKey2026"] or 0
-		summerKeysLabel.Text = tostring(summerKeys)
-
-		-- อัปเดต Coins
-		local coins = ProfileData.Materials.Owned["Coins"] or 0
-		coinsLabel.Text = tostring(coins)
-	end)
-
-	if not success then
-		summerKeysLabel.Text = "..."
-		coinsLabel.Text = "..."
-	end
+-- Update Status Function (pcall กันพัง ถ้า label ถูก Destroy ไปแล้วจะไม่ทำให้ script ทั้งเส้นตายไปด้วย)
+local function updateStatus(text)
+    pcall(function()
+        statusValueLabel.Text = text
+    end)
 end
 
--- ฟังก์ชันอัปเดต Quest Label (คัดลอกจาก QuestChecker.lua)
-local function updateQuestLabel()
-    local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-    local EventInfoService = require(ReplicatedStorage:WaitForChild("SharedServices"):WaitForChild("EventInfoService"))
+-- ============================================
+-- Retry helper: วนจนสำเร็จ ไม่มีเพดานรอบ ไม่มี timeout
+-- ============================================
+local function retryUntil(label, fn, interval)
+    interval = interval or 0.5
+    local attempt = 0
+    while true do
+        attempt = attempt + 1
+        local ok, result = pcall(fn)
+        if ok and result then
+            if attempt > 1 then
+                print(("  [OK] %s succeeded on attempt %d"):format(label, attempt))
+            end
+            return result
+        end
+        if not ok then
+            warn(("  [WARN] %s error on attempt %d: %s"):format(label, attempt, tostring(result)))
+        end
+        if attempt % 20 == 0 then
+            print(("  ...%s not yet (attempt %d)"):format(label, attempt))
+        end
+        pcall(updateStatus, ("%s... (%d)"):format(label, attempt))
+        task.wait(interval)
+    end
+end
 
-    local success, eventInfo = pcall(function()
-        return EventInfoService:WaitForInitializedAsync()
-    end)
+print("✅ GUI Loaded")
 
-    if not success then
-        return false
+-- ============================================
+-- STEP 1: Check Map and Enter Solo if needed
+-- ============================================
+
+local function isLobby()
+    return workspace:FindFirstChild("Boards") ~= nil
+end
+
+print("\n[Step 1] Checking current map...")
+updateStatus("Checking Map...")
+
+if isLobby() then
+    print("Currently in Lobby - Entering Solo map...")
+    updateStatus("Entering Solo Map...")
+
+    local Client = require(LocalPlayer.PlayerScripts.Client)
+
+    -- ============================================
+    -- Daily Quests & Badges (before entering map)
+    -- ============================================
+
+    local function makeInvisible()
+        local character = LocalPlayer.Character
+        if not character then return end
+
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") or part:IsA("Decal") then
+                part.Transparency = 1
+            elseif part:IsA("Accessory") then
+                local handle = part:FindFirstChild("Handle")
+                if handle then handle.Transparency = 1 end
+            end
+        end
+
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+        end
     end
 
-    local mainEvent = eventInfo:GetMainEvent()
-    if not mainEvent then
-        return false
+    -- Make invisible first
+    updateStatus("Preparing...")
+    makeInvisible()
+    task.wait(0.1)
+
+    local LEVER_PATH = {
+        "Boards", "DailyQuest", "MainBoard", "Functional", "Lever",
+        "Meshes/dailyquestmachine_Cube.007 (1)",
+    }
+
+    local function resolvePath(root, path)
+        local node = root
+        for _, name in ipairs(path) do
+            if not node then return nil end
+            node = node:FindFirstChild(name)
+        end
+        return node
     end
 
-    local eventTitle = mainEvent.Title
-    local questsData = ProfileData[eventTitle] and ProfileData[eventTitle].Quests
-
-    if not questsData then
-        return false
+    local function needsRoll()
+        -- เทียบ DailyQuests.QuestDay กับ workspace.DailyQuestDay
+        local day = workspace:GetAttribute("DailyQuestDay")
+        local quests = LocalPlayer:FindFirstChild("DailyQuests")
+        if not day or not quests then return false end
+        return quests:GetAttribute("QuestDay") ~= day
     end
 
-    local eventQuests = mainEvent.EventStartInfo.Quests
-    if not eventQuests then
-        return false
+    local function getRollPrompt()
+        local folder = workspace:FindFirstChild("DailyQuests")
+        local promptPart = folder and folder:FindFirstChild("PromptPart")
+        local attachment = promptPart and promptPart:FindFirstChild("PromptAttachment")
+        return attachment and attachment:FindFirstChildWhichIsA("ProximityPrompt"), promptPart
     end
 
-    -- วนลูปเช็คแต่ละ Quest Type
-    for questType, questConfig in pairs(eventQuests) do
-        local playerProgress = questsData[questType]
-        if playerProgress then
-            -- เช็คว่าเป็น Daily Quest (ไม่ใช่ DailyCoins)
-            if questConfig.Quests and questConfig.Title and string.find(questConfig.Title, "DAILY") then
-                local totalQuests = #questConfig.Quests
+    local function firePrompt(prompt)
+        if not prompt or not prompt.Enabled then return false end
+        if typeof(fireproximityprompt) == "function" then
+            return (pcall(fireproximityprompt, prompt))
+        end
+        -- fallback สำหรับ executor ที่ไม่มี fireproximityprompt
+        pcall(function() prompt.HoldDuration = 0 end)
+        prompt:InputHoldBegin()
+        task.wait(0.1)
+        prompt:InputHoldEnd()
+        return true
+    end
 
-                -- เอา Quest ตัวสุดท้าย (Quest 6)
-                if totalQuests >= 6 then
-                    local quest = questConfig.Quests[6]
-                    local currentProgress = playerProgress.Progress or 0
-                    local targetAmount = quest.ChallengeAmount
-                    local isCompleted = currentProgress >= targetAmount
+    local function teleportToLever()
+        local hrp = retryUntil("find HumanoidRootPart", function()
+            local char = LocalPlayer.Character
+            return char and char:FindFirstChild("HumanoidRootPart")
+        end, 0.2)
 
-                    -- อัปเดต GUI
-                    questLabel.Text = string.format("%d/%d%s", currentProgress, targetAmount, isCompleted and " ✓" or "")
+        local pivot = retryUntil("find DailyQuest Lever", function()
+            local lever = resolvePath(workspace, LEVER_PATH)
+            if not lever then return nil end
+            if lever:IsA("BasePart") then return lever.CFrame end
+            if lever:IsA("Model") then return lever:GetPivot() end
+            return nil
+        end, 0.3)
 
-                    if isCompleted then
-                        dailyBox.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-                    else
-                        dailyBox.BackgroundColor3 = Color3.fromRGB(194, 144, 90)
-                    end
+        -- ยืนหน้า lever เยื้องขึ้นกันจมพื้น แล้วหันหน้าเข้าหา
+        local standPos = pivot.Position + Vector3.new(0, 3, 5)
+        hrp.CFrame = CFrame.lookAt(standPos, pivot.Position)
+        task.wait(0.1)
+        print("Teleported to lever")
+    end
 
-                    return true
+    local function rollDailyQuest()
+        if not needsRoll() then
+            print("Daily quests already rolled for today")
+            return
+        end
+
+        print("Rolling daily quests...")
+        teleportToLever()
+
+        -- lever กับ prompt อยู่คนละ path เตือนถ้าหลุดระยะกด
+        local prompt, promptPart = getRollPrompt()
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if prompt and hrp and promptPart and promptPart:IsA("BasePart") then
+            local dist = (promptPart.Position - hrp.Position).Magnitude
+            if dist > prompt.MaxActivationDistance then
+                warn(("Prompt out of range after teleport: %.1f > %d"):format(dist, prompt.MaxActivationDistance))
+            end
+        end
+
+        -- ยิงซ้ำจน QuestDay ตรงกับวันปัจจุบัน ไม่มีเพดาน
+        retryUntil("roll daily quest", function()
+            if not needsRoll() then return true end
+            local p = getRollPrompt()
+            if p then firePrompt(p) end
+            return not needsRoll()
+        end, 0.25)
+
+        print("Roll complete")
+    end
+
+    local function claimAllDailyQuestRewards()
+        print("Claiming Daily Quest rewards...")
+        local DailyQuests = LocalPlayer:FindFirstChild("DailyQuests")
+        if not DailyQuests then return end
+        for _, quest in ipairs(DailyQuests:GetChildren()) do
+            if quest:GetAttribute("Completed") and not quest:GetAttribute("Rewarded") then
+                local slot = quest:GetAttribute("QuestNumber")
+                if slot then
+                    Client.Events.RequestClaimDailyRequestReward:InvokeServer(slot)
+                    task.wait(0.1)
                 end
             end
+        end
+    end
+
+    local function claimAllBadges()
+        print("Claiming Badges...")
+        local Unclaimed = LocalPlayer:FindFirstChild("UnclaimedBadges")
+        if not Unclaimed then return end
+        local BadgeDB = Client.Databases and Client.Databases.BadgeDatabase
+        if not BadgeDB then return end
+        for _, badge in pairs(BadgeDB.Badges or {}) do
+            if Unclaimed:GetAttribute(tostring(badge.ID)) == true then
+                Client.Events.RequestClaimBadgeDiamonds:FireServer(badge.ID)
+                task.wait(0.2)
+            end
+        end
+    end
+
+    updateStatus("Rolling Daily Quest...")
+    rollDailyQuest()
+
+    updateStatus("Claiming Quest Rewards...")
+    claimAllDailyQuestRewards()
+
+    updateStatus("Claiming Badges...")
+    claimAllBadges()
+
+    print("Daily Quests & Badges done")
+
+    -- Solo Teleport Logic
+    updateStatus("Entering Solo Map...")
+
+    local function hasPlayersInBeam(teleporter)
+        local beamPart = teleporter:FindFirstChild("BeamPart")
+        if not beamPart then return true end
+
+        local radius = math.max(beamPart.Size.X, beamPart.Size.Z) / 2
+
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local distance = math.sqrt(
+                        (hrp.Position.X - beamPart.Position.X)^2 +
+                        (hrp.Position.Z - beamPart.Position.Z)^2
+                    )
+                    if distance <= radius then return true end
+                end
+            end
+        end
+        return false
+    end
+
+    task.wait(1)
+    makeInvisible()
+
+    Client.Events.TeleportEvent:FireServer("Remove")
+    task.wait(0.1)
+
+    local teleporters = {
+        {num = 1, obj = workspace:FindFirstChild("Teleporter1")},
+        {num = 2, obj = workspace:FindFirstChild("Teleporter2")},
+        {num = 3, obj = workspace:FindFirstChild("Teleporter3")},
+    }
+
+    -- วนลองหาห้องจนกว่าจะเข้าได้จริง (กันเคสมีคนเข้าพร้อมกันแล้ว teleport ล้มเหลว)
+    while isLobby() do
+        local selectedTeleporter = nil
+        while not selectedTeleporter do
+            for _, tp in ipairs(teleporters) do
+                if tp.obj and not hasPlayersInBeam(tp.obj) then
+                    selectedTeleporter = tp.num
+                    print("Found empty Teleporter:", selectedTeleporter)
+                    break
+                end
+            end
+            if not selectedTeleporter then
+                print("All teleporters busy - waiting...")
+                updateStatus("Waiting for Empty Teleporter...")
+                task.wait(1)
+            end
+        end
+
+        Client.Events.TeleportEvent:FireServer("Remove")
+        task.wait(0.1)
+        Client.Events.TeleportEvent:FireServer("Add", selectedTeleporter)
+        task.wait(0.1)
+        Client.Events.TeleportEvent:FireServer("Chosen", nil, 1, nil)
+        print("Entering Solo map...")
+        updateStatus("Loading Map...")
+
+        -- รอสูงสุด 20 วิ ถ้ายังอยู่ Lobby อยู่ = teleport ล้มเหลว ให้ลองใหม่
+        local waited = 0
+        local TELEPORT_TIMEOUT = 20
+        while isLobby() and waited < TELEPORT_TIMEOUT do
+            waited = waited + 0.1
+            if math.floor(waited) % 5 == 0 and math.abs(waited - math.floor(waited)) < 0.05 then
+                print(("Still in Lobby... (%ds)"):format(math.floor(waited)))
+            end
+            updateStatus(("Loading Map... (%.0fs)"):format(waited))
+            task.wait(0.1)
+        end
+
+        if isLobby() then
+            print("Teleport failed or room was taken - retrying...")
+            updateStatus("Retrying Teleport...")
+            task.wait(0.5)
+        end
+    end
+    print("Successfully entered Farm map!")
+    updateStatus("Map Loaded!")
+else
+    print("Already in Farm map - continuing...")
+    updateStatus("Already in Map")
+end
+
+task.wait(0.3)
+
+-- ============================================
+-- STEP 2: Start Auto-Eat Food (Continuous Background)
+-- ============================================
+
+print("\n[Step 2] Starting continuous auto-eat food...")
+
+task.spawn(function()
+    local Client = require(LocalPlayer.PlayerScripts.Client)
+    local MAX_HUNGER = 200
+    local MIN_HUNGER = 150
+
+    local function getHunger()
+        return LocalPlayer:GetAttribute("Hunger") or 100
+    end
+
+    local function getHRP()
+        local char = LocalPlayer.Character
+        return char and char:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function getItemPos(item)
+        if item:IsA("Model") then
+            if item.PrimaryPart then return item.PrimaryPart.Position end
+            local part = item:FindFirstChildWhichIsA("BasePart", true)
+            return part and part.Position
+        elseif item:IsA("BasePart") then
+            return item.Position
+        end
+        return nil
+    end
+
+    local function findClosestFood()
+        local hrp = getHRP()
+        if not hrp then return nil end
+
+        local closest, closestDist = nil, math.huge
+
+        for _, item in ipairs(workspace.Items:GetChildren()) do
+            local restore = item:GetAttribute("RestoreHunger")
+            if restore and restore > 0 then
+                local owner = item:GetAttribute("Owner")
+                local interaction = item:GetAttribute("Interaction")
+                local skip = false
+
+                if owner and owner ~= LocalPlayer.UserId then skip = true end
+                if interaction and interaction ~= "Item" and interaction ~= "Tool" then skip = true end
+                if LocalPlayer:GetAttribute("Class") == "Bunny" and item:GetAttribute("HasMeat") then skip = true end
+
+                if not skip then
+                    local pos = getItemPos(item)
+                    if pos then
+                        local dist = (pos - hrp.Position).Magnitude
+                        if dist < closestDist then
+                            closestDist = dist
+                            closest = item
+                        end
+                    end
+                end
+            end
+        end
+        return closest, closestDist
+    end
+
+    local function pullItem(item)
+        local hrp = getHRP()
+        if not hrp then return false end
+
+        local success = pcall(function()
+            local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+            local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+
+            StartDrag:FireServer(item)
+            task.wait(0.1)
+
+            if item:IsA("Model") then
+                item:PivotTo(CFrame.new(hrp.Position))
+            else
+                item.CFrame = CFrame.new(hrp.Position)
+            end
+
+            task.wait(0.1)
+            StopDrag:FireServer(item)
+        end)
+        return success
+    end
+
+    local function consumeItem(item)
+        if not Client.PlayerHandler.Alive then return false end
+
+        local parent = item.Parent
+        item.Parent = ReplicatedStorage.TempStorage
+
+        local result = Client.Events.RequestConsumeItem:InvokeServer(item)
+        if not (result and result.Success) then
+            item.Parent = parent
+            return false
+        end
+
+        return true
+    end
+
+    -- Continuous loop
+    while true do
+        local currentHunger = getHunger()
+
+        if currentHunger < MIN_HUNGER then
+            local food = findClosestFood()
+            if food then
+                pullItem(food)
+                consumeItem(food)
+            end
+        end
+
+        task.wait(0.2)
+    end
+end)
+
+print("✅ Auto-Eat Running")
+
+-- ============================================
+-- DEATH WATCHER: ตายแล้วรอ 5 วิ กดเล่นใหม่
+-- ============================================
+
+local suppressPlayAgain = false   -- true = เป็นการ reset ที่เราสั่งเอง ไม่ต้องกดเล่นใหม่
+
+task.spawn(function()
+    local AcceptPlayAgain = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("AcceptPlayAgain")
+    local handling = false
+
+    local function onDied()
+        if suppressPlayAgain or handling then return end
+        handling = true
+        print("[DEATH] Character died - waiting 5s then respawning")
+        pcall(updateStatus, "Died - Play Again in 5s...")
+        task.wait(5)
+        print("Clicking Play Again...")
+        pcall(function() AcceptPlayAgain:FireServer() end)
+        handling = false
+    end
+
+    local function bindDeath(char)
+        local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 10)
+        if hum then hum.Died:Connect(onDied) end
+    end
+
+    if LocalPlayer.Character then bindDeath(LocalPlayer.Character) end
+    LocalPlayer.CharacterAdded:Connect(bindDeath)   -- re-bind ทุก respawn
+end)
+
+print("✅ Death Watcher Running")
+
+-- ============================================
+-- STEP 3: Farm Trees and Upgrade Fire
+-- ============================================
+
+print("\n[Step 3] Starting tree farming and fire upgrade...")
+updateStatus("Finding Fire...")
+
+local player = LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- respawn แล้วอัปเดตตัวแปรที่ warp ใช้ ให้เป็นของสดตลอด
+player.CharacterAdded:Connect(function(char)
+    character = char
+    humanoidRootPart = char:WaitForChild("HumanoidRootPart", 10)
+    humanoid = char:WaitForChild("Humanoid", 10)
+end)
+
+local mainFire = retryUntil("find MainFire", function()
+    local map = workspace:FindFirstChild("Map")
+    local camp = map and map:FindFirstChild("Campground")
+    return camp and camp:FindFirstChild("MainFire")
+end)
+
+local firePart = retryUntil("find Fire part", function()
+    return mainFire:FindFirstChildWhichIsA("BasePart", true)
+end)
+
+local firePos = firePart.Position
+print("Fire position:", firePos)
+updateStatus("Finding Trees...")
+
+local trees = retryUntil("find Small Tree", function()
+    local found = {}
+    for _, item in ipairs(workspace:GetDescendants()) do
+        if item:GetAttribute("Health") and item.Name == "Small Tree" then
+            table.insert(found, item)
+        end
+    end
+    if #found > 0 then return found end
+    return nil
+end, 1)
+
+print("Found trees:", #trees)
+
+updateStatus("Sorting Trees...")
+
+table.sort(trees, function(a, b)
+    local posA = a:IsA("Model") and a:GetPivot().Position or a.Position
+    local posB = b:IsA("Model") and b:GetPivot().Position or b.Position
+    local distA = (posA - firePos).Magnitude
+    local distB = (posB - firePos).Magnitude
+    return distA < distB
+end)
+
+updateStatus("Finding Best Axe...")
+
+local bestAxe = retryUntil("find Axe in Inventory", function()
+    local inv = player:FindFirstChild("Inventory")
+    if not inv then return nil end
+
+    local best, bestDmg = nil, 0
+    for _, tool in ipairs(inv:GetChildren()) do
+        local damage = tool:GetAttribute("WeaponResourceDamage")
+        if damage and damage > bestDmg then
+            bestDmg = damage
+            best = tool
+        end
+    end
+    return best
+end, 1)
+
+print("Best axe:", bestAxe.Name, "Damage:", bestAxe:GetAttribute("WeaponResourceDamage"))
+updateStatus("Equipping Axe...")
+
+local Client = require(player.PlayerScripts.Client)
+
+local toolHandle = retryUntil("equip axe", function()
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    for _ = 1, 10 do
+        local char = LocalPlayer.Character
+        local th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then return th end
+        task.wait(0.1)
+    end
+    return nil
+end, 0.5)
+
+local axe = toolHandle.OriginalItem.Value
+print("Equipped:", axe.Name)
+
+local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
+local ownerId = tostring(player.UserId) .. "_" .. player.UserId
+
+local fireFrame = retryUntil("find MainFire BillboardGui", function()
+    local center = mainFire:FindFirstChild("Center")
+    local gui = center and center:FindFirstChild("BillboardGui")
+    local frame = gui and gui:FindFirstChild("Frame")
+    if frame and frame:FindFirstChild("TextLabel") and frame:FindFirstChild("RealTimer") then
+        return frame
+    end
+    return nil
+end, 0.3)
+
+local textLabel = fireFrame.TextLabel
+local timerLabel = fireFrame.RealTimer
+
+local maxLevel = 7
+
+local function getCurrentLevel()
+    local fireText = textLabel.Text
+
+    if fireText:find("FIRE FULLY UPGRADED") or fireText:find("MAP FULLY REVEALED") then
+        return maxLevel
+    end
+
+    if fireText == "" or fireText:match("^%s*$") then
+        return maxLevel
+    end
+
+    local levelMatch = string.match(fireText, "level (%d+)")
+    return tonumber(levelMatch) or 1
+end
+
+local function isTimerExceeded()
+    local timerText = timerLabel.Text
+    local minutes, seconds = string.match(timerText, "(%d+):(%d+)")
+
+    if minutes and seconds then
+        local totalMinutes = tonumber(minutes)
+        return totalMinutes >= 20
+    end
+
+    return false
+end
+
+local warpedItems = {}
+local collectedChildren = {}
+
+local CRAFTING_BENCH_ITEMS = {
+    ["Bolt"] = true,
+    ["Broken Fan"] = true,
+    ["Broken Microwave"] = true,
+    ["Old Radio"] = true,
+    ["Sheet Metal"] = true,
+    ["Chair"] = true,
+}
+local CRAFTING_BENCH_SKIP_FIRE = {}
+
+local function getCraftingTouchZone()
+    local bench = workspace:FindFirstChild("Map")
+        and workspace.Map:FindFirstChild("Campground")
+        and workspace.Map.Campground:FindFirstChild("CraftingBench")
+    return bench and bench:FindFirstChild("TouchZone")
+end
+
+local function warpItemToTarget(item, targetPos)
+    if warpedItems[item] then return end
+
+    task.spawn(function()
+        pcall(function()
+            local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+            local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+
+            StartDrag:FireServer(item)
+            task.wait(0.1)
+
+            if item:IsA("Model") then
+                item:PivotTo(CFrame.new(targetPos))
+            else
+                item.CFrame = CFrame.new(targetPos)
+            end
+
+            task.wait(0.1)
+            StopDrag:FireServer(item)
+        end)
+    end)
+    warpedItems[item] = true
+end
+
+local function warpItemToFire(item)
+    warpItemToTarget(item, firePos + Vector3.new(0, 10, 0))
+end
+
+local LOST_CHILD_NAMES = {
+    "Lost Child",
+    "Lost Child2",
+    "Lost Child3",
+    "Lost Child4",
+}
+local LOST_CHILD_TOTAL = #LOST_CHILD_NAMES
+
+local function equipSackAndWait()
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local oldSack = inv and inv:FindFirstChild("Old Sack")
+    if not oldSack then return nil end
+    Client.InventoryHandler.RequestEquipItem(oldSack)
+    task.wait(0.3)
+    return LocalPlayer:FindFirstChild("Inventory") and LocalPlayer:FindFirstChild("Inventory"):FindFirstChild("Old Sack")
+end
+
+local function collectLostChildren()
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return end
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    for _, name in ipairs(LOST_CHILD_NAMES) do
+        if not collectedChildren[name] then
+            local c = chars:FindFirstChild(name)
+            if c then
+                local head = c:FindFirstChild("Head")
+                local attachment = head and head:FindFirstChild("ProximityAttachment")
+                local prompt = attachment and attachment:FindFirstChild("ProximityInteraction")
+                if prompt then
+                    -- วาร์ปเราไปหาเด็ก แล้วยิง prompt ซ้ำจนกว่าเด็กจะหาย
+                    local attempts = 0
+                    while chars:FindFirstChild(name) and attempts < 10 do
+                        local root2 = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
+                        if root2 then
+                            hrp.CFrame = CFrame.new(root2.Position + Vector3.new(0, 2, 0))
+                        end
+                        task.wait(0.1)
+                        pcall(function()
+                            if typeof(fireproximityprompt) == "function" then
+                                fireproximityprompt(prompt, 0, true)
+                            else
+                                prompt.HoldDuration = 0
+                                prompt:InputHoldBegin()
+                                task.wait(0.05)
+                                prompt:InputHoldEnd()
+                            end
+                        end)
+                        attempts += 1
+                        task.wait(0.2)
+                    end
+                    if not chars:FindFirstChild(name) then
+                        collectedChildren[name] = true
+                        local count = 0
+                        for _ in pairs(collectedChildren) do count += 1 end
+                        print(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
+                        updateStatus(string.format("Lost Children: %d/%d", count, LOST_CHILD_TOTAL))
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function allChildrenCollected()
+    for _, name in ipairs(LOST_CHILD_NAMES) do
+        if not collectedChildren[name] then return false end
+    end
+    return true
+end
+
+local function dropAllLostChildren()
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local oldSack = inv and inv:FindFirstChild("Old Sack")
+    if not oldSack then return end
+    -- วาร์ปไปกองไฟก่อนปล่อย
+    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(0, 3, 0))
+    task.wait(0.3)
+    -- equip sack ก่อนปล่อย
+    Client.InventoryHandler.RequestEquipItem(oldSack)
+    task.wait(0.3)
+    inv = LocalPlayer:FindFirstChild("Inventory")
+    oldSack = inv and inv:FindFirstChild("Old Sack")
+    if not oldSack then return end
+    local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
+    for name in pairs(collectedChildren) do
+        local bag = LocalPlayer:FindFirstChild("ItemBag")
+        local bagChild = bag and bag:FindFirstChild(name)
+        if bagChild then
+            pcall(function()
+                BagDrop:FireServer(oldSack, bagChild, false)
+            end)
+        end
+    end
+    collectedChildren = {}
+    -- re-equip axe หลังปล่อย
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+end
+
+local platform = Instance.new("Part")
+platform.Size = Vector3.new(10, 1, 10)
+platform.Anchored = true
+platform.CanCollide = true
+platform.Transparency = 1
+platform.Parent = workspace
+
+local airHeight = 20
+local treeIndex = 1
+
+local function flyAndWarpItems()
+    updateStatus("Flying & Warping Items...")
+
+    for radius = 20, 1000, 40 do
+        local steps = 50 + math.floor(radius / 40) * 5
+        local circumference = 2 * math.pi * radius
+        local speed = 1000
+        local duration = circumference / speed
+
+        for i = 0, steps do
+            local alpha = i / steps
+            local angle = alpha * math.pi * 2
+            local offsetX = math.cos(angle) * radius
+            local offsetZ = math.sin(angle) * radius
+            local circlePos = firePos + Vector3.new(offsetX, airHeight, offsetZ)
+
+            humanoidRootPart.CFrame = CFrame.new(circlePos)
+            platform.Position = circlePos - Vector3.new(0, 3, 0)
+
+            for _, item in ipairs(workspace.Items:GetChildren()) do
+                if not warpedItems[item] and item.Name ~= "Sapling" then
+                    if CRAFTING_BENCH_ITEMS[item.Name] or item.Name == "Log" then
+                        local tz = getCraftingTouchZone()
+                        local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                            or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                        if tzPos then
+                            warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                        end
+                    elseif not CRAFTING_BENCH_SKIP_FIRE[item.Name] and item:GetAttribute("BurnFuel") then
+                        warpItemToFire(item)
+                    end
+                end
+            end
+
+            collectLostChildren()
+
+            task.wait(duration / steps)
+        end
+    end
+
+    print("✅ Flight complete")
+
+    -- Warp back to fire after flight
+    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+    platform.Position = firePos + Vector3.new(5, 0, 0)
+    task.wait(0.1)
+
+    -- ถ้าเก็บเด็กไม่ครบ ให้บินวนหาใหม่อีกรอบก่อน drop
+    if not allChildrenCollected() then
+        print("[LostChild] Not all found (" .. LOST_CHILD_TOTAL .. " needed) - searching again with extended range...")
+        updateStatus("Searching Lost Children (extended)...")
+        for radius = 20, 1500, 40 do
+            -- ต้องบินครบรอบก่อน ไม่หยุดกลางคัน
+            local steps = 60
+            local circumference = 2 * math.pi * radius
+            local speed = 1000
+            local duration = circumference / speed
+            for i = 0, steps do
+                local angle = (i / steps) * math.pi * 2
+                local circlePos = firePos + Vector3.new(math.cos(angle) * radius, airHeight, math.sin(angle) * radius)
+                humanoidRootPart.CFrame = CFrame.new(circlePos)
+                platform.Position = circlePos - Vector3.new(0, 3, 0)
+                collectLostChildren()
+                task.wait(duration / steps)
+            end
+            -- เช็คหลังครบรอบเท่านั้น
+            if allChildrenCollected() then break end
+        end
+    end
+
+    dropAllLostChildren()
+
+    if isTimerExceeded() then
+        return true
+    end
+
+    return false
+end
+
+updateStatus("Initial Flight...")
+flyAndWarpItems()
+
+local currentLevel = getCurrentLevel()
+task.wait(0.3)
+print(string.format("📊 Current Level: %d", currentLevel))
+updateStatus("Upgrading Fire...")
+
+local levelChanged = false
+task.spawn(function()
+    while currentLevel < maxLevel and not isTimerExceeded() do
+        task.wait(0.1)
+        local newLevel = getCurrentLevel()
+        if newLevel ~= currentLevel then
+            currentLevel = newLevel
+            levelChanged = true
+
+            if currentLevel >= maxLevel then
+                print("🎉 Max level reached!")
+                updateStatus("🎉 Fire Complete!")
+            else
+                print(string.format("🎉 Level changed to %d!", currentLevel))
+                updateStatus("Upgrading Fire...")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                platform.Position = firePos + Vector3.new(5, 0, 0)
+            end
+
+            if currentLevel >= maxLevel then
+                break
+            end
+        end
+
+        if isTimerExceeded() then
+            print("⏰ Timer exceeded 20:00!")
+            updateStatus("✅ Fire Complete!")
+            break
+        end
+    end
+
+    if isTimerExceeded() then
+        updateStatus("✅ Fire Complete!")
+    end
+end)
+
+print("🔄 Starting main loop...")
+local treesSinceFlight = 0
+
+while currentLevel < maxLevel and not isTimerExceeded() do
+    currentLevel = getCurrentLevel()
+    if currentLevel >= maxLevel or isTimerExceeded() then
+        print("✅ Max level reached")
+        updateStatus("✅ Fire Complete!")
+        humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        break
+    end
+
+    task.wait(0.2)
+
+    if levelChanged then
+        levelChanged = false
+        treesSinceFlight = 0
+
+        currentLevel = getCurrentLevel()
+        if currentLevel >= maxLevel then
+            print("✅ Max level reached")
+            updateStatus("✅ Fire Complete!")
+            humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+            break
+        end
+
+        print(string.format("🎉 Level increased to %d!", currentLevel))
+        updateStatus("Upgrading Fire...")
+
+        local timerExceeded = flyAndWarpItems()
+
+        if timerExceeded or getCurrentLevel() >= maxLevel or isTimerExceeded() then
+            print("✅ Max level reached or timer exceeded")
+            updateStatus("✅ Fire Complete!")
+            humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+            break
+        end
+    else
+        if treesSinceFlight >= 3 then
+            print(string.format("🔄 Cut 3 trees but level still %d, flying...", currentLevel))
+            updateStatus("Flying for Items...")
+            treesSinceFlight = 0
+
+            local timerExceeded = flyAndWarpItems()
+
+            if timerExceeded or getCurrentLevel() >= maxLevel or isTimerExceeded() then
+                print("✅ Max level reached or timer exceeded")
+                updateStatus("✅ Fire Complete!")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                break
+            end
+
+            continue
+        end
+
+        updateStatus("Cutting Trees...")
+
+        if treeIndex > #trees then
+            print("⚠️ No more trees, flying...")
+            updateStatus("Finding Trees...")
+            flyAndWarpItems()
+
+            if getCurrentLevel() >= maxLevel then
+                print("✅ Max level reached")
+                updateStatus("✅ Fire Complete!")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                break
+            end
+        else
+            if getCurrentLevel() >= maxLevel then
+                print("✅ Max level reached")
+                updateStatus("✅ Fire Complete!")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                break
+            end
+
+            local tree = trees[treeIndex]
+            local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+
+            print(string.format("[%d/%d] Cutting tree...", treeIndex, #trees))
+            humanoidRootPart.CFrame = CFrame.new(treePos + Vector3.new(0, 0, 5))
+            platform.Position = humanoidRootPart.Position - Vector3.new(0, 3, 0)
+            task.wait(0.1)
+
+            local hitCount = 0
+            while tree.Parent do
+                if getCurrentLevel() >= maxLevel then
+                    print("✅ Max level reached")
+                    updateStatus("✅ Fire Complete!")
+                    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                    break
+                end
+
+                if isTimerExceeded() then
+                    print("⏰ Timer exceeded 20:00! (stopped mid-tree)")
+                    updateStatus("✅ Fire Complete!")
+                    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                    break
+                end
+
+                pcall(function()
+                    Event:InvokeServer(tree, axe, ownerId, humanoidRootPart.CFrame, false)
+                end)
+                task.wait(0.05)
+                hitCount = hitCount + 1
+            end
+
+            if getCurrentLevel() >= maxLevel or isTimerExceeded() then
+                break
+            end
+
+            print(string.format("✅ Tree %d destroyed (%d hits)", treeIndex, hitCount))
+            treeIndex = treeIndex + 1
+            treesSinceFlight = treesSinceFlight + 1
+
+            task.wait(0.1)
+        end
+    end
+end
+
+print("🎉 Fire reached max level!")
+updateStatus("✅ Fire Complete!")
+
+-- ปล่อยเด็กทั้งหมดก่อนไป Stronghold (กรณีบินรอบสุดท้ายไม่ได้ drop)
+dropAllLostChildren()
+
+-- ============================================
+-- STEP 3.7: Wait 15s, check Wood/Scrap, craft bench upgrade + beds
+-- ============================================
+
+print("\n[Step 3.7] Waiting 15s before crafting check...")
+for i = 15, 1, -1 do
+    updateStatus(string.format("Crafting check in %ds...", i))
+    task.wait(1)
+end
+
+local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
+local campground = workspace.Map.Campground
+
+local function getTotalScrap() return campground:GetAttribute("TotalScrap") or 0 end
+local function getTotalWood()  return campground:GetAttribute("TotalWood")  or 0 end
+
+local NEED_WOOD  = 50
+local NEED_SCRAP = 26
+
+-- หา Wood ที่ขาด: ตัดต้นไม้แล้วดึงไม้ไปโต๊ะคราฟ
+if getTotalWood() < NEED_WOOD then
+    print("[Step 3.7] Wood insufficient - chopping trees...")
+    updateStatus("Chopping trees for Wood...")
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    task.wait(0.3)
+    local craftTZ = getCraftingTouchZone()
+    local craftPos = craftTZ and (craftTZ:IsA("BasePart") and craftTZ.Position or craftTZ:GetPivot().Position)
+    local tIdx = 1
+    while getTotalWood() < NEED_WOOD do
+        local tree = trees[tIdx]
+        if not tree or not tree.Parent then tIdx += 1 continue end
+        local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+        Client.InventoryHandler.RequestEquipItem(bestAxe)
+        task.wait(0.2)
+        humanoidRootPart.CFrame = CFrame.new(treePos + Vector3.new(0, 3, 0))
+        task.wait(0.1)
+        while tree.Parent do
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+            if not currentAxe then break end
+            pcall(function()
+                Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
+            end)
+            updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+            task.wait(0.15)
+        end
+        -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ
+        if craftPos then
+            for _, item in ipairs(workspace.Items:GetChildren()) do
+                if item.Name == "Log" and not warpedItems[item] then
+                    warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
+                end
+            end
+        end
+        updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+        tIdx += 1
+        if tIdx > #trees then break end
+    end
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    task.wait(0.3)
+end
+
+-- หา Scrap ที่ขาด: บินวนหา items แล้วดึงไปโต๊ะคราฟ
+if getTotalScrap() < NEED_SCRAP then
+    print("[Step 3.7] Scrap insufficient - searching items...")
+    updateStatus("Searching Scrap items...")
+    local craftTZ2 = getCraftingTouchZone()
+    local craftPos2 = craftTZ2 and (craftTZ2:IsA("BasePart") and craftTZ2.Position or craftTZ2:GetPivot().Position)
+    for radius = 20, 400, 40 do
+        if getTotalScrap() >= NEED_SCRAP then break end
+        local steps = 20
+        for i = 0, steps do
+            if getTotalScrap() >= NEED_SCRAP then break end
+            local angle = (i / steps) * math.pi * 2
+            local pos = firePos + Vector3.new(math.cos(angle)*radius, airHeight, math.sin(angle)*radius)
+            humanoidRootPart.CFrame = CFrame.new(pos)
+            if craftPos2 then
+                for _, item in ipairs(workspace.Items:GetChildren()) do
+                    if not warpedItems[item] and item:GetAttribute("Scrappable") then
+                        warpItemToTarget(item, craftPos2 + Vector3.new(0, 2, 0))
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+    end
+end
+
+-- รอจนครบ
+local waitCraft = 0
+while (getTotalWood() < NEED_WOOD or getTotalScrap() < NEED_SCRAP) and waitCraft < 30 do
+    updateStatus(string.format("Waiting resources... Wood:%d/%d Scrap:%d/%d",
+        getTotalWood(), NEED_WOOD, getTotalScrap(), NEED_SCRAP))
+    task.wait(1)
+    waitCraft += 1
+end
+print(string.format("[Step 3.7] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
+
+-- อัพโต๊ะคราฟ 2 และ 3
+updateStatus("Upgrading Crafting Bench 2...")
+pcall(function() CraftEvent:InvokeServer("Crafting Bench 2") end)
+task.wait(0.5)
+updateStatus("Upgrading Crafting Bench 3...")
+pcall(function() CraftEvent:InvokeServer("Crafting Bench 3") end)
+task.wait(0.5)
+
+-- วางเตียง: หา blueprint nil แล้ว InvokeServer RequestPlaceStructure
+local PlaceEvent = ReplicatedStorage.RemoteEvents.RequestPlaceStructure
+local alecCircle = workspace.Map.Campground:FindFirstChild("alecCircle")
+
+local function getCirclePositions()
+    return {
+        Vector3.new(-20, 4, 10),
+        Vector3.new(-20, 4, 5),
+        Vector3.new(-20, 4, 0),
+    }
+end
+
+local function findBlueprint(name)
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local bpInv = inv and inv:FindFirstChild(name .. " Blueprint")
+    if bpInv then return bpInv end
+    if typeof(getnilinstances) ~= "function" then return nil end
+    for _, obj in ipairs(getnilinstances()) do
+        if obj.Name == name .. " Blueprint" then return obj end
+    end
+end
+
+local BED_ITEMS = {"Old Bed", "Regular Bed", "Good Bed"}
+local usedPositions = {}
+
+for _, bedName in ipairs(BED_ITEMS) do
+    updateStatus("Crafting " .. bedName .. "...")
+    pcall(function() CraftEvent:InvokeServer(bedName) end)
+    task.wait(0.5)
+
+    local bp = nil
+    local waited = 0
+    while not bp and waited < 5 do
+        bp = findBlueprint(bedName)
+        task.wait(0.2)
+        waited += 0.2
+    end
+
+    if bp then
+        local placed = false
+        local attempts = 0
+        while not placed do
+            attempts += 1
+            -- re-equip ทุกรอบเผื่อหลุด
+            Client.InventoryHandler.RequestEquipItem(bp)
+            task.wait(0.3)
+
+            -- เช็คว่า BP หายจาก Inventory = วางสำเร็จแล้ว
+            local inv2 = LocalPlayer:FindFirstChild("Inventory")
+            if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
+                placed = true
+                print("[Step 3.7] Placed " .. bedName .. " (BP gone)")
+                break
+            end
+
+            local positions = getCirclePositions()
+            for _, pos in ipairs(positions) do
+                local alreadyUsed = false
+                for _, used in ipairs(usedPositions) do
+                    if (pos - used).Magnitude < 3 then alreadyUsed = true break end
+                end
+                if not alreadyUsed then
+                    humanoidRootPart.CFrame = CFrame.lookAt(
+                        pos + Vector3.new(0, 2, 0),
+                        pos
+                    )
+                    task.wait(0.15)
+                    pcall(function()
+                        local center = alecCircle and select(1, alecCircle:GetBoundingBox()).Position or pos
+                        local placeCF = CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z))
+                        PlaceEvent:InvokeServer(bp, {
+                            Valid = true,
+                            CFrame = placeCF,
+                            Position = pos,
+                        }, placeCF, nil)
+                    end)
+                    task.wait(0.3)
+                    -- เช็ค BP หายไหม
+                    inv2 = LocalPlayer:FindFirstChild("Inventory")
+                    if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
+                        table.insert(usedPositions, pos)
+                        placed = true
+                        print("[Step 3.7] Placed " .. bedName .. " (BP gone)")
+                        break
+                    end
+                end
+            end
+
+            if not placed then
+                print(string.format("[Step 3.7] Attempt %d failed for %s - retrying...", attempts, bedName))
+                task.wait(0.2)
+            end
+        end
+
+        if not placed then
+            print("[Step 3.7] Could not place " .. bedName)
+        end
+    else
+        print("[Step 3.7] Blueprint not found for " .. bedName)
+    end
+    task.wait(0.3)
+end
+
+print("[Step 3.7] Crafting complete!")
+updateStatus("Crafting done!")
+
+-- platform ต้องอยู่ต่อ เพราะ STEP 3.5/4/5/6 ยังบินและต้องมีแท่นรองใต้เท้า
+
+-- ============================================
+-- Shared: Stronghold helpers
+-- ============================================
+
+local function getStrongholdRoot()
+    local map = workspace:FindFirstChild("Map")
+    local landmarks = map and map:FindFirstChild("Landmarks")
+    return landmarks and landmarks:FindFirstChild("Stronghold")
+end
+
+local function getStrongholdBuilding()
+    local sh = getStrongholdRoot()
+    return sh and sh:FindFirstChild("Building")
+end
+
+local function getStrongholdFunctional()
+    local sh = getStrongholdRoot()
+    return sh and sh:FindFirstChild("Functional")
+end
+
+-- คืน center + size ของ Floor (ใช้ GetBoundingBox เพราะ pivot อาจไม่อยู่กลางจริง)
+local function getFloorInfo()
+    local building = getStrongholdBuilding()
+    if not building then return nil end
+
+    local floor = building:FindFirstChild("Floor") or building:FindFirstChild("Floor", true)
+    if not floor then return nil end
+
+    if floor:IsA("Model") then
+        local cf, size = floor:GetBoundingBox()
+        return cf.Position, size
+    elseif floor:IsA("BasePart") then
+        return floor.Position, floor.Size
+    end
+    return nil
+end
+
+-- บินวนหา Stronghold ถ้ายังไม่ stream เข้ามา
+local function flySearchStronghold()
+    local searchRadius = 800
+    local searchSteps = 100
+    local searchDuration = (2 * math.pi * searchRadius) / 1000
+
+    for i = 0, searchSteps do
+        local angle = (i / searchSteps) * math.pi * 2
+        local searchPos = firePos + Vector3.new(
+            math.cos(angle) * searchRadius,
+            airHeight,
+            math.sin(angle) * searchRadius
+        )
+        humanoidRootPart.CFrame = CFrame.new(searchPos)
+        platform.Position = searchPos - Vector3.new(0, 3, 0)
+
+        if getStrongholdBuilding() then return true end
+        task.wait(searchDuration / searchSteps)
+    end
+    return getStrongholdBuilding() ~= nil
+end
+
+local strongholdFloorPos = nil
+
+local function warpToStrongholdFloor(holdSeconds)
+    local center, size = getFloorInfo()
+
+    if not center then
+        local building = getStrongholdBuilding()
+        if not building then
+            warn("[WARN] Stronghold Building not found - skipping warp")
+            return false
+        end
+        warn("⚠️ Floor not found. Children of Building:")
+        for _, child in ipairs(building:GetChildren()) do
+            print("   -", child.Name, "(" .. child.ClassName .. ")")
+        end
+        center, size = building:GetPivot().Position, Vector3.new(0, 0, 0)
+    end
+
+    local target = center + Vector3.new(0, size.Y / 2 + 5, 0)
+    strongholdFloorPos = target
+
+    if platform and platform.Parent then
+        platform.Size = Vector3.new(16, 1, 16)
+        platform.Position = target - Vector3.new(0, 4, 0)
+    end
+
+    local reps = math.max(1, math.floor((holdSeconds or 1) / 0.1))
+    for _ = 1, reps do
+        humanoidRootPart.CFrame = CFrame.new(target)
+        task.wait(0.1)
+    end
+
+    print(string.format("✅ Warped to Stronghold Floor: %.1f, %.1f, %.1f", target.X, target.Y, target.Z))
+    return true
+end
+
+local function getStrongholdTimeRemaining()
+    for _, sh in ipairs(CollectionService:GetTagged("Stronghold")) do
+        if sh.Name ~= "AlienMothership" then
+            local f = sh:FindFirstChild("Functional")
+            if f and f:GetAttribute("OpenTime") then
+                return f:GetAttribute("OpenTime") - workspace:GetServerTimeNow()
+            end
+        end
+    end
+    return nil
+end
+
+-- ============================================
+-- STEP 3.5: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
+-- ============================================
+
+print("\n[Step 3.5] Waiting 15s before warping to Stronghold...")
+updateStatus("Waiting 15s before Stronghold...")
+for i = 15, 1, -1 do
+    updateStatus(string.format("Warping to Stronghold in %ds...", i))
+    task.wait(1)
+end
+
+print("\n[Step 3.5] Warping to Stronghold Floor...")
+updateStatus("Warping to Stronghold Floor...")
+
+retryUntil("find Stronghold Building", function()
+    if getStrongholdBuilding() then return true end
+    updateStatus("Flying to Find Stronghold...")
+    flySearchStronghold()
+    return getStrongholdBuilding()
+end, 1)
+
+retryUntil("warp to Stronghold Floor", function()
+    return warpToStrongholdFloor(2)
+end, 1)
+
+-- ============================================
+-- STEP 3.6: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
+-- ============================================
+print("\n[Step 3.6] Boosting FPS (cleaning up map/lighting)...")
+updateStatus("Boosting FPS...")
+
+do
+    -- ลบทุกอย่างใต้ Lighting และ MaterialService ให้เหลือแค่ตัว service เอง
+    local lightingTargets = {
+        game:GetService("Lighting"),
+        game:GetService("MaterialService"),
+    }
+    for _, parent in ipairs(lightingTargets) do
+        pcall(function()
+            for _, child in ipairs(parent:GetChildren()) do
+                pcall(function() child:Destroy() end)
+            end
+        end)
+    end
+
+    -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        local mapFolderNames = {
+            "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+            "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+            "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+        }
+        for _, folderName in ipairs(mapFolderNames) do
+            local folder = map:FindFirstChild(folderName)
+            if folder then
+                pcall(function()
+                    for _, child in ipairs(folder:GetChildren()) do
+                        -- ห้ามลบ workspace.Map.Landmarks.Stronghold
+                        if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                            pcall(function() child:Destroy() end)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+
+    -- ลบทุกอย่างใต้ workspace.Characters
+    local chars = workspace:FindFirstChild("Characters")
+    if chars then
+        pcall(function()
+            for _, child in ipairs(chars:GetChildren()) do
+                pcall(function() child:Destroy() end)
+            end
+        end)
+    end
+
+    print("[OK] FPS boost cleanup done")
+end
+
+-- จับตำแหน่ง FinalGate ตอนเข้า Stronghold ครั้งแรก ถ้าค่าเปลี่ยน = เคลียร์แล้ว
+local function getFinalGatePos()
+    local map = workspace:FindFirstChild("Map")
+    local landmarks = map and map:FindFirstChild("Landmarks")
+    local sh = landmarks and landmarks:FindFirstChild("Stronghold")
+    local func = sh and sh:FindFirstChild("Functional")
+    local gate = func and func:FindFirstChild("FinalGate")
+    if not gate then return nil end
+
+    if gate:IsA("BasePart") then
+        return gate.Position
+    elseif gate:IsA("Model") then
+        return gate:GetPivot().Position
+    end
+
+    local part = gate:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.Position or nil
+end
+
+local finalGateBasePos = retryUntil("find FinalGate", getFinalGatePos, 0.2)
+
+print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
+    finalGateBasePos.X, finalGateBasePos.Y, finalGateBasePos.Z))
+
+-- ============================================
+-- STEP 4: Wait for Stronghold to Open (re-warp ที่ 15:00 / 10:00 / 5:00)
+-- ============================================
+
+print("\n[Step 4] Waiting for Stronghold to open...")
+updateStatus("Waiting for Stronghold...")
+
+local rewarpMarks = {
+    {t = 900, label = "15:00", done = false},
+    {t = 600, label = "10:00", done = false},
+    {t = 300, label = "5:00",  done = false},
+}
+
+while true do
+    local remaining = getStrongholdTimeRemaining()
+
+    if not remaining then
+        print("Stronghold timer not found - waiting...")
+        updateStatus("Stronghold Timer Not Found...")
+        task.wait(1)
+    elseif remaining <= 0 then
+        print("✅ Stronghold is OPEN!")
+        updateStatus("✅ Stronghold Open!")
+        break
+    else
+        local minutes = math.floor(remaining / 60)
+        local seconds = math.floor(remaining % 60)
+        --print(string.format("Stronghold opens in: %02d:%02d", minutes, seconds))
+        updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
+
+        local crossed = nil
+        for _, m in ipairs(rewarpMarks) do
+            if not m.done and remaining <= m.t then
+                m.done = true
+                crossed = m
+            end
+        end
+
+        if crossed then
+            print(string.format("[TIMER] Reached %s - re-warping to Stronghold Floor", crossed.label))
+            updateStatus("Re-warp (" .. crossed.label .. ")")
+            warpToStrongholdFloor(1)
+        end
+
+        task.wait(1)
+    end
+end
+
+-- ============================================
+-- STEP 5: Warp to Wave1 TriggerZone
+-- ============================================
+
+print("\n[Step 5] Warping to Wave1 TriggerZone...")
+updateStatus("Warping to TriggerZone...")
+
+-- กล่องล่องหน 6 ด้านคลุมตัวเรา กันมอนประชิดและกระสุน Crossbow
+local SHIELD_SIZE = 12
+local SHIELD_THICK = 1
+
+local shieldParts = {}
+local shieldFolder
+
+local function buildShield()
+    if shieldFolder then return end
+
+    shieldFolder = Instance.new("Folder")
+    shieldFolder.Name = "StrongholdShield"
+
+    local half = SHIELD_SIZE / 2
+    local t = SHIELD_THICK
+    local faces = {
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  half, 0)},  -- บน
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -half, 0)},  -- ล่าง
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new( half, 0, 0)},  -- ขวา
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new(-half, 0, 0)},  -- ซ้าย
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0,  half)},  -- หน้า
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0, -half)},  -- หลัง
+    }
+
+    for i, f in ipairs(faces) do
+        local p = Instance.new("Part")
+        p.Name = "Face" .. i
+        p.Size = f[1]
+        p.Anchored = true        -- ขับด้วย CFrame ทุก tick ไม่ให้ physics ลากตัวเรา
+        -- บน/ล่าง (offset.Y ~= 0) ไม่ทึบ กันชนพื้น Stronghold จนโดนดีดออกจาก TriggerZone
+        -- (กระสุน Crossbow Cultist ยิงแนวนอน ไม่จำเป็นต้องกันบน/ล่างอยู่แล้ว)
+        p.CanCollide = (f[2].Y == 0)
+        p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
+        p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
+        p.Transparency = 1
+        p.Massless = true
+        p.Material = Enum.Material.SmoothPlastic
+        p.Parent = shieldFolder
+        table.insert(shieldParts, {part = p, offset = f[2]})
+    end
+
+    shieldFolder.Parent = workspace
+end
+
+local function updateShield(hrp)
+    if not hrp then return end
+    local pos = hrp.Position
+    for _, entry in ipairs(shieldParts) do
+        entry.part.CFrame = CFrame.new(pos + entry.offset)
+    end
+end
+
+local function destroyShield()
+    if shieldFolder then
+        shieldFolder:Destroy()
+        shieldFolder = nil
+    end
+    shieldParts = {}
+end
+
+-- ล็อคตัวไม่ให้ตกตลอดเวลา (ดึง character สดทุก tick กัน respawn)
+local function getLiveParts()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then return nil, nil end
+    return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
+end
+
+local triggerZone = retryUntil("find Wave1 TriggerZone", function()
+    local functional = getStrongholdFunctional()
+    local tz = functional
+        and functional:FindFirstChild("EnemyWaves12")
+        and functional.EnemyWaves12:FindFirstChild("Wave1")
+        and functional.EnemyWaves12.Wave1:FindFirstChild("TriggerZone")
+    if tz and tz:IsA("BasePart") then return tz end
+    return nil
+end, 0.5)
+
+local tzPos = triggerZone.Position - Vector3.new(0, 3, 0)
+strongholdFloorPos = tzPos
+
+if platform and platform.Parent then
+    platform.Size = Vector3.new(16, 1, 16)
+    platform.Position = tzPos - Vector3.new(0, 4, 0)
+end
+
+local tzWaitPos = tzPos + Vector3.new(0, 3, 0) -- วาร์ปสูงกว่า TriggerZone 3 studs ตอนรอมอนเกิด ให้ตกลงมาโดน TriggerZone จริงๆ
+
+local function warpToTriggerZone()
+    local hrp = getLiveParts()
+    if hrp then
+        hrp.CFrame = CFrame.new(tzWaitPos)
+        updateShield(hrp)
+    end
+end
+
+warpToTriggerZone()
+task.wait(0.3)
+print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
+
+-- Equip Old Sack เพื่อ trigger TriggerZone แล้วกลับไปใช้ axe เดิม
+do
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local oldSack = inv and inv:FindFirstChild("Old Sack")
+    if oldSack then
+        Client.InventoryHandler.RequestEquipItem(oldSack)
+        task.wait(0.5)
+    end
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+end
+
+
+-- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
+do
+    local floorCenter = getFloorInfo()
+    local floorPos = floorCenter and (floorCenter + Vector3.new(0, 10, 0))
+
+    local function anyCultistSpawned()
+        local chars = workspace:FindFirstChild("Characters")
+        if not chars then return false end
+        local building = getStrongholdBuilding()
+        local bCF, bSize
+        if building then
+            bCF, bSize = building:GetBoundingBox()
+        end
+        for _, c in ipairs(chars:GetChildren()) do
+            if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+                if hum and hum.Health > 0 and root then
+                    if bCF and bSize then
+                        -- เช็คว่าอยู่ใน bounding box ของตึก Stronghold (+ margin 30 stud)
+                        local local_ = bCF:PointToObjectSpace(root.Position)
+                        local half = bSize / 2 + Vector3.new(30, 30, 30)
+                        if math.abs(local_.X) <= half.X
+                            and math.abs(local_.Y) <= half.Y
+                            and math.abs(local_.Z) <= half.Z
+                        then
+                            return true
+                        end
+                    else
+                        return true -- หา building ไม่เจอ ให้ผ่านไปก่อน
+                    end
+                end
+            end
+        end
+        return false
+    end
+
+    local waited = 0
+    local WAIT_STEP = 0.2
+    local SPAWN_TIMEOUT = 8 -- วิ ที่รอมอนเกิดก่อนจะวาร์ปไป Floor แล้ววาร์ปกลับ
+
+    while not anyCultistSpawned() do
+        task.wait(WAIT_STEP)
+        waited += WAIT_STEP
+
+        if waited >= SPAWN_TIMEOUT then
+            print("[Step 5] Cultist ยังไม่เกิด - วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone")
+            updateStatus("Re-warp waiting for spawn...")
+
+            if floorPos then
+                local hrp = getLiveParts()
+                if hrp then
+                    hrp.CFrame = CFrame.new(floorPos)
+                    updateShield(hrp)
+                end
+                task.wait(0.3)
+            end
+
+            warpToTriggerZone()
+            waited = 0
+        end
+    end
+
+    print("✅ Cultist spawned!")
+end
+
+
+-- ============================================
+-- STEP 6: Fight loop - ล็อคลอยตลอด, ตี Cultist จากด้านใต้ 15 studs, เช็คซ้ำเรื่อยๆ
+-- ============================================
+
+print("\n[Step 6] Fighting Cultists in Stronghold...")
+updateStatus("Fighting Cultists...")
+
+-- Re-equip axe ก่อนเริ่ม fight เผื่อถูก unequip ระหว่างรอ
+do
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    local waited = 0
+    while waited < 3 do
+        local char = LocalPlayer.Character
+        local th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then
+            axe = th.OriginalItem.Value
+            break
+        end
+        task.wait(0.1)
+        waited += 0.1
+    end
+end
+
+local combatCenter = strongholdFloorPos or humanoidRootPart.Position
+local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
+local ATTACK_INTERVAL = 0.18
+
+-- เช็คว่ามอนอยู่ "ภายในสิ่งก่อสร้างจริง" ของ workspace.Map.Landmarks.Stronghold.Building
+-- ตึกเป็นรูปทรงหยักๆ ไม่ใช่สี่เหลี่ยมเป๊ะ ใช้ bounding box กล่องเดียวไม่พอ
+-- เช็คแทนโดยดูว่าตำแหน่งมอนอยู่ในกรอบ (OBB) ของ part ใด part หนึ่งของตึกจริงๆ (บวก margin เล็กน้อยกันคลาดเคลื่อน)
+local strongholdParts = nil
+local PART_MARGIN = 4 -- studs กันคลาดเคลื่อนเล็กน้อยรอบ part แต่ละชิ้น (รัศมีตัวละคร/มอนประมาณนี้)
+
+local function refreshStrongholdParts()
+    local building = getStrongholdBuilding()
+    if not building then
+        strongholdParts = nil
+        return
+    end
+
+    local floorNames = { "Floor2", "Floor", "Floor3", "Interior" }
+    local parts = {}
+    for _, floorName in ipairs(floorNames) do
+        local floor = building:FindFirstChild(floorName)
+        if floor then
+            for _, inst in ipairs(floor:GetDescendants()) do
+                if inst:IsA("BasePart") then
+                    table.insert(parts, inst)
+                end
+            end
+        end
+    end
+
+    strongholdParts = parts
+end
+
+refreshStrongholdParts()
+
+local function isPointInPart(part, pos)
+    local local_ = part.CFrame:PointToObjectSpace(pos)
+    local half = part.Size / 2 + Vector3.new(PART_MARGIN, PART_MARGIN, PART_MARGIN)
+    return math.abs(local_.X) <= half.X
+        and math.abs(local_.Y) <= half.Y
+        and math.abs(local_.Z) <= half.Z
+end
+
+local function isInsideStronghold(cultistModel, pos)
+    local sh = getStrongholdRoot()
+    if sh and cultistModel:IsDescendantOf(sh) then
+        return true
+    end
+
+    if not strongholdParts then
+        refreshStrongholdParts()
+    end
+
+    if not strongholdParts then
+        return false
+    end
+
+    for _, part in ipairs(strongholdParts) do
+        if part.Parent and isPointInPart(part, pos) then
+            return true
         end
     end
 
     return false
 end
 
--- อัปเดต Quest Label ครั้งแรก
-task.spawn(function()
-    task.wait(2) -- รอให้ Event Data โหลดเสร็จ
+-- ชื่อมอนที่ให้ตีใน Stronghold
+local CULTIST_NAMES = {
+    ["Cultist"] = true,
+    ["Crossbow Cultist"] = true,
+}
 
-    -- อัปเดต Currency Labels ครั้งแรก
-    updateCurrencyLabels()
-
-    local attempts = 0
-    local maxAttempts = 10
-
-    while attempts < maxAttempts do
-        if updateQuestLabel() then
-            break
-        end
-        attempts = attempts + 1
-        task.wait(1)
-    end
-end)
-
--- Auto refresh ทุก 5 วินาที
-task.spawn(function()
-    while task.wait(5) do
-        updateQuestLabel()
-        updateCurrencyLabels()
-    end
-end)
-
--- Real-time Update - ดักจับ Event
-pcall(function()
-    local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-    local EventsFolder = Remotes:WaitForChild("Events")
-
-    for _, remote in ipairs(EventsFolder:GetChildren()) do
-        local questProgressed = remote:FindFirstChild("EventQuestProgressed")
-        if questProgressed then
-            questProgressed.OnClientEvent:Connect(function(questType, newProgress)
-                if questType == "Daily" then
-                    updateQuestLabel()
-                end
-            end)
-            break
-        end
-    end
-end)
-
--- Real-time Update สำหรับ Currency
-pcall(function()
-    local Inventory = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Inventory")
-    local inventoryChanged = Inventory:FindFirstChild("InventoryDataChanged")
-
-    if inventoryChanged then
-        inventoryChanged.Event:Connect(function(player, currencyName, newAmount)
-            if currencyName == "SummerKey2026" or currencyName == "Coins" then
-                updateCurrencyLabels()
+local function findCultists()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+    for _, c in ipairs(chars:GetChildren()) do
+        if CULTIST_NAMES[c.Name] then
+            local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+            local hum = c:FindFirstChildOfClass("Humanoid")
+            if root and hum and hum.Health > 0 and isInsideStronghold(c, root.Position) then
+                table.insert(list, c)
             end
-        end)
+        end
     end
-end)
-
--- Toggle GUI with N key
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local isGuiVisible = true
-
--- ถ้าเปิด ToggleRender3D ให้ปิด Render3D ตอนเริ่มต้น (เพราะ GUI เปิดอยู่)
-if Config.ToggleRender3D then
-    RunService:Set3dRenderingEnabled(false)
+    return list
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-
-    if input.KeyCode == Enum.KeyCode.N then
-        isGuiVisible = not isGuiVisible
-        mainFrame.Visible = isGuiVisible
-
-        -- ถ้าเปิด ToggleRender3D ให้เปิด/ปิด 3D Rendering ตาม GUI (กลับกัน)
-        if Config.ToggleRender3D then
-            RunService:Set3dRenderingEnabled(not isGuiVisible)
-        end
+local lockConn
+lockConn = RunService.Heartbeat:Connect(function()
+    local hrp, hum = getLiveParts()
+    if hum and hum.Health > 0 then
+        hum.PlatformStand = true
+        hum.Sit = false
     end
+    if not hrp then return end
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+    updateShield(hrp)
 end)
 
-print("✅ Quest Stats GUI Loaded - Press N to toggle")
+-- Stronghold เคลียร์แล้ว = ตำแหน่ง FinalGate เปลี่ยนจากที่จับไว้ตอนแรก
+local GATE_MOVE_THRESHOLD = 1     -- ขยับเกิน 1 stud ถือว่าเปลี่ยนจริง
+local CLEAR_CONFIRM_COUNT = 3     -- อ่านติดกัน 3 ครั้ง กันค่ากระพริบ
+local FIGHT_MIN_SECONDS = 10      -- 10 วิแรกไม่ตรวจ กันประตูขยับตอนเปิดด่าน
 
--- ฟังก์ชันเช็ค Quest Status (return questProgress, questTarget, questDone)
-local function checkQuestStatus()
-    local questProgress = 0
-    local questTarget = 960
-    local questDone = false
-
-    local success = pcall(function()
-        local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-        local EventInfoService = require(ReplicatedStorage:WaitForChild("SharedServices"):WaitForChild("EventInfoService"))
-
-        local eventInfo = EventInfoService:WaitForInitializedAsync()
-        local mainEvent = eventInfo:GetMainEvent()
-
-        if mainEvent then
-            local eventTitle = mainEvent.Title
-            local questsData = ProfileData[eventTitle] and ProfileData[eventTitle].Quests
-
-            if questsData then
-                local eventQuests = mainEvent.EventStartInfo.Quests
-                if eventQuests then
-                    -- หา Daily Quest จาก Title
-                    for questType, questConfig in pairs(eventQuests) do
-                        if questConfig.Title and string.find(questConfig.Title, "DAILY") then
-                            local playerProgress = questsData[questType]
-                            if playerProgress then
-                                questProgress = playerProgress.Progress or 0
-
-                                -- หา Quest Target สูงสุด
-                                if questConfig.Quests then
-                                    for _, quest in ipairs(questConfig.Quests) do
-                                        if quest.ChallengeAmount > questTarget then
-                                            questTarget = quest.ChallengeAmount
-                                        end
-                                    end
-                                end
-
-                                questDone = questProgress >= questTarget
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    if not success then
-        warn("[DEBUG] checkQuestStatus Error")
-        questProgress = 0
-        questTarget = 960
-        questDone = false
-    end
-
-    return questProgress, questTarget, questDone
-end
-
--- ฟังก์ชันส่ง Description
-local function sendDescription()
-    -- เช็คว่าเปิด Horst หรือไม่
-    if not Config.Horst then return end
-
-    -- เช็คว่ามีฟังก์ชัน Horst หรือไม่
-    if not _G.Horst_SetDescription then
-        warn("[DEBUG] Horst_SetDescription not found")
-        return
-    end
-
-    -- เช็ค Quest Progress
-    local questProgress, questTarget, questDone = checkQuestStatus()
-
-    -- เช็คจำนวน Summer Keys และ Coins
-    local summerKeys = 0
-    local coins = 0
-
-    pcall(function()
-        local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-        summerKeys = ProfileData.Materials.Owned["SummerKey2026"] or 0
-        coins = ProfileData.Materials.Owned["Coins"] or 0
-    end)
-
-    -- เก็บรายการไอเทม
-    local itemNames = {}
-    local playerGui = player:FindFirstChild("PlayerGui")
-
-    if playerGui then
-        local mainGUI = playerGui:FindFirstChild("MainGUI")
-        if mainGUI then
-            local gameUI = mainGUI:FindFirstChild("Game")
-            if gameUI then
-                local inventory = gameUI:FindFirstChild("Inventory")
-                if inventory then
-                    local main = inventory:FindFirstChild("Main")
-                    if main then
-                        local weapons = main:FindFirstChild("Weapons")
-                        if weapons then
-                            local items = weapons:FindFirstChild("Items")
-                            if items then
-                                local container = items:FindFirstChild("Container")
-                                if container then
-                                    local current = container:FindFirstChild("Current")
-                                    if current then
-                                        local currentContainer = current:FindFirstChild("Container")
-                                        if currentContainer then
-                                            for _, item in ipairs(currentContainer:GetChildren()) do
-                                                if item:IsA("Frame") or item:IsA("ImageLabel") then
-                                                    local itemName = item:FindFirstChild("ItemName")
-                                                    if itemName then
-                                                        local label = itemName:FindFirstChild("Label")
-                                                        if label and label.Text then
-                                                            local name = label.Text
-                                                            if name ~= "Default Gun" and name ~= "Default Knife" then
-                                                                -- เช็คจำนวนของจากทุก TextLabel/TextButton ใน item frame
-                                                                local amount = 1
-
-                                                                -- วิธีที่ 1: เช็คจาก NewItem > Container > Amount
-                                                                local newItem = item:FindFirstChild("NewItem")
-                                                                if newItem then
-                                                                    local newItemContainer = newItem:FindFirstChild("Container")
-                                                                    if newItemContainer then
-                                                                        local amountObj = newItemContainer:FindFirstChild("Amount")
-                                                                        if amountObj and amountObj.Text then
-                                                                            local numStr = string.match(amountObj.Text, "x?(%d+)")
-                                                                            if numStr then
-                                                                                amount = tonumber(numStr) or 1
-                                                                            end
-                                                                        end
-                                                                    end
-                                                                end
-
-                                                                -- วิธีที่ 2: สแกนหาทุก TextLabel ใน item frame ที่มี pattern x2, x3
-                                                                if amount == 1 then
-                                                                    for _, child in ipairs(item:GetDescendants()) do
-                                                                        if child:IsA("TextLabel") or child:IsA("TextButton") then
-                                                                            if child.Text and string.match(child.Text, "x%d+") then
-                                                                                local numStr = string.match(child.Text, "x(%d+)")
-                                                                                if numStr then
-                                                                                    amount = tonumber(numStr) or 1
-                                                                                    break
-                                                                                end
-                                                                            end
-                                                                        end
-                                                                    end
-                                                                end
-
-                                                                -- บันทึกพร้อมจำนวน
-                                                                if amount > 1 then
-                                                                    table.insert(itemNames, name .. " x" .. amount)
-                                                                else
-                                                                    table.insert(itemNames, name)
-                                                                end
-                                                            end
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- ถ้า Quest เสร็จและยังไม่ส่ง DONE
-    if questDone and not questCompleted then
-        -- เช็คข้อมูลใหม่ทั้งหมดก่อนส่ง DONE (ห้ามใช้ค่าเก่า)
-        local maxRetries = 10
-        local retryCount = 0
-
-        repeat
-            task.wait(0.5)
-            retryCount = retryCount + 1
-
-            -- เช็ค Quest Status ใหม่
-            questProgress, questTarget, questDone = checkQuestStatus()
-
-            -- เช็คจำนวน Summer Keys และ Coins ใหม่
-            summerKeys = 0
-            coins = 0
-            pcall(function()
-                local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-                summerKeys = ProfileData.Materials.Owned["SummerKey2026"] or 0
-                coins = ProfileData.Materials.Owned["Coins"] or 0
-            end)
-
-            -- เช็ค Inventory ใหม่
-            itemNames = {}
-            local playerGui = player:FindFirstChild("PlayerGui")
-            if playerGui then
-                local mainGUI = playerGui:FindFirstChild("MainGUI")
-                if mainGUI then
-                    local gameUI = mainGUI:FindFirstChild("Game")
-                    if gameUI then
-                        local inventory = gameUI:FindFirstChild("Inventory")
-                        if inventory then
-                            local main = inventory:FindFirstChild("Main")
-                            if main then
-                                local weapons = main:FindFirstChild("Weapons")
-                                if weapons then
-                                    local items = weapons:FindFirstChild("Items")
-                                    if items then
-                                        local container = items:FindFirstChild("Container")
-                                        if container then
-                                            local current = container:FindFirstChild("Current")
-                                            if current then
-                                                local currentContainer = current:FindFirstChild("Container")
-                                                if currentContainer then
-                                                    for _, item in ipairs(currentContainer:GetChildren()) do
-                                                        if item:IsA("Frame") or item:IsA("ImageLabel") then
-                                                            local itemName = item:FindFirstChild("ItemName")
-                                                            if itemName then
-                                                                local label = itemName:FindFirstChild("Label")
-                                                                if label and label.Text then
-                                                                    local name = label.Text
-                                                                    if name ~= "Default Gun" and name ~= "Default Knife" then
-                                                                        -- เช็คจำนวนของจากทุก TextLabel/TextButton ใน item frame
-                                                                        local amount = 1
-
-                                                                        -- วิธีที่ 1: เช็คจาก NewItem > Container > Amount
-                                                                        local newItem = item:FindFirstChild("NewItem")
-                                                                        if newItem then
-                                                                            local newItemContainer = newItem:FindFirstChild("Container")
-                                                                            if newItemContainer then
-                                                                                local amountObj = newItemContainer:FindFirstChild("Amount")
-                                                                                if amountObj and amountObj.Text then
-                                                                                    local numStr = string.match(amountObj.Text, "x?(%d+)")
-                                                                                    if numStr then
-                                                                                        amount = tonumber(numStr) or 1
-                                                                                    end
-                                                                                end
-                                                                            end
-                                                                        end
-
-                                                                        -- วิธีที่ 2: สแกนหาทุก TextLabel ใน item frame ที่มี pattern x2, x3
-                                                                        if amount == 1 then
-                                                                            for _, child in ipairs(item:GetDescendants()) do
-                                                                                if child:IsA("TextLabel") or child:IsA("TextButton") then
-                                                                                    if child.Text and string.match(child.Text, "x%d+") then
-                                                                                        local numStr = string.match(child.Text, "x(%d+)")
-                                                                                        if numStr then
-                                                                                            amount = tonumber(numStr) or 1
-                                                                                            break
-                                                                                        end
-                                                                                    end
-                                                                                end
-                                                                            end
-                                                                        end
-
-                                                                        -- บันทึกพร้อมจำนวน
-                                                                        if amount > 1 then
-                                                                            table.insert(itemNames, name .. " x" .. amount)
-                                                                        else
-                                                                            table.insert(itemNames, name)
-                                                                        end
-                                                                    end
-                                                                end
-                                                            end
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-
-        until (questDone and summerKeys > 0) or retryCount >= maxRetries
-
-        -- ส่ง Description ก่อนส่ง DONE
-        local currentDate = os.date("%d/%m/%y")
-        local description = string.format(
-            "🎮 MM2 • Summer Keys: %d • Coins: %d Coins • Daily : %d/%d (%s) ✅",
-            summerKeys,
-            coins,
-            questProgress,
-            questTarget,
-            currentDate
-        )
-
-        if #itemNames > 0 then
-            description = description .. " • Inv : " .. table.concat(itemNames, ", ")
-        end
-
-        -- ส่ง Description ก่อน
-        _G.Horst_SetDescription(description)
-
-        -- รอให้ Description ส่งเสร็จก่อนส่ง DONE
-        task.wait(7)
-
-        -- ส่ง DONE
-        _G.Horst_AccountChangeDone()
-        questCompleted = true
-
-        -- หลังส่ง DONE แล้ว ส่ง Description ทันทีและส่งต่อทุกๆ 3 วินาที (แยก thread)
-        task.spawn(function()
-            while true do
-                sendDescription()
-                task.wait(3)
-            end
-        end)
-
-        return
-    end
-
-    -- ส่ง Description ปกติ (ยังไม่เสร็จ)
-    local currentDate = os.date("%d/%m/%y")
-    local description = string.format(
-        "🎮 MM2 • Summer Keys: %d • Coins: %d Coins • Daily : %d/%d (%s)%s",
-        summerKeys,
-        coins,
-        questProgress,
-        questTarget,
-        currentDate,
-        questDone and " ✅" or ""
-    )
-
-    if #itemNames > 0 then
-        description = description .. " • Inv : " .. table.concat(itemNames, ", ")
-    end
-
-    -- ส่ง Description
-    if _G.Horst_SetDescription then
-        _G.Horst_SetDescription(description)
-    end
-end
-
--- ฟังก์ชัน Tween ไปยังตำแหน่ง
-local function tweenToPosition(targetPosition)
-    local distance = (humanoidRootPart.Position - targetPosition).Magnitude
-    local duration = distance / SPEED
-
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.InOut
-    )
-
-    local tween = TweenService:Create(
-        humanoidRootPart,
-        tweenInfo,
-        {CFrame = CFrame.new(targetPosition)}
-    )
-
-    tween:Play()
-    tween.Completed:Wait()
-end
-
--- ฟังก์ชันค้นหา CoinContainer ใน workspace
-local function findCoinContainer()
-    for _, parent in ipairs(workspace:GetChildren()) do
-        local coinContainer = parent:FindFirstChild("CoinContainer")
-        if coinContainer then
-            return coinContainer
-        end
+local function getFinalGatePart()
+    local gate = workspace:FindFirstChild("FinalGate", true)
+    if not gate then return nil end
+    if gate:IsA("BasePart") then return gate end
+    if gate:IsA("Model") then
+        return gate.PrimaryPart or gate:FindFirstChildWhichIsA("BasePart", true)
     end
     return nil
 end
 
--- ฟังก์ชันหาเหรียญที่ใกล้ที่สุด
-local function findNearestCoin(coins)
-    local nearestCoin = nil
-    local shortestDistance = math.huge
+local fightStart = os.clock()
+local clearHits = 0
+local gateOrigin = nil
 
-    for _, coin in ipairs(coins) do
-        if coin and coin.Parent and (coin:IsA("BasePart") or coin:IsA("Model")) then
-            -- เช็คว่ามี TouchInterest หรือไม่ (ถ้าไม่มี = เก็บไปแล้ว)
-            local hasTouchInterest = coin:FindFirstChild("TouchInterest") ~= nil
-
-            if hasTouchInterest then
-                local coinPos = coin:IsA("Model")
-                    and coin:GetPivot().Position
-                    or coin.Position
-
-                local distance = (humanoidRootPart.Position - coinPos).Magnitude
-
-                if distance < shortestDistance then
-                    shortestDistance = distance
-                    nearestCoin = coin
-                end
-            end
-        end
-    end
-
-    return nearestCoin, shortestDistance
+do
+    local part = getFinalGatePart()
+    if part then gateOrigin = part.Position end
 end
 
--- ฟังก์ชันเปิดกล่อง Summer
-local function openSummerBoxes()
-    local success, error = pcall(function()
-        local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-        local openCrate = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Shop"):WaitForChild("OpenCrate")
-
-        local boxesOpened = 0
-
-        while true do
-            -- เช็คจำนวน SummerKey2026 ปัจจุบัน
-            local summerKeys = ProfileData.Materials.Owned["SummerKey2026"] or 0
-
-            -- ถ้าน้อยกว่า 120 หยุดเปิด
-            if summerKeys < 120 then
-                break
-            end
-
-            -- เปิดกล่อง 1 รอบ (120 keys)
-            local boxSuccess, boxResult = pcall(function()
-                return openCrate:InvokeServer("Summer2026Box", "MysteryBox", "SummerKey2026")
-            end)
-
-            if boxSuccess and boxResult then
-                boxesOpened = boxesOpened + 1
-
-                -- อัปเดต GUI ทันที
-                updateCurrencyLabels()
-            else
-                break
-            end
-
-            -- รอเล็กน้อยก่อนเปิดรอบถัดไป
-            task.wait(1)
-        end
-
-        return boxesOpened
-    end)
-
-    if not success then
-        warn("[DEBUG] openSummerBoxes Error:", tostring(error))
+local function isStrongholdCleared()
+    if os.clock() - fightStart < FIGHT_MIN_SECONDS then
+        return false
     end
+
+    local part = getFinalGatePart()
+    if not part then
+        clearHits = 0
+        return false
+    end
+
+    -- ถ้าจับตำแหน่งแรกไม่ทัน (ประตู stream มาช้า) จับตอนนี้แล้วเริ่มนับใหม่
+    if not gateOrigin then
+        gateOrigin = part.Position
+        clearHits = 0
+        return false
+    end
+
+    if (part.Position - gateOrigin).Magnitude > GATE_MOVE_THRESHOLD then
+        clearHits = clearHits + 1
+    else
+        clearHits = 0
+    end
+
+    return clearHits >= CLEAR_CONFIRM_COUNT
 end
 
--- ฟังก์ชันเปิดกล่องด้วย Coins
-local function openCoinsBoxes()
-    if not Config.CoinsBox then return end
+local TOTAL_ROUNDS = 3
+local completedRounds = 0
 
-    local success, err = pcall(function()
-        local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-        local openCrate = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Shop"):WaitForChild("OpenCrate")
-
-        local boxesOpened = 0
-
-        while true do
-            -- เช็คจำนวน Coins ปัจจุบัน
-            local coins = ProfileData.Materials.Owned["Coins"] or 0
-
-            -- ถ้าน้อยกว่า 1000 หยุดเปิด
-            if coins < 1000 then
-                break
-            end
-
-            -- เปิดกล่อง 1 รอบ (1000 coins)
-            local boxSuccess, boxResult = pcall(function()
-                return openCrate:InvokeServer(Config.CoinsBox, "MysteryBox", "Coins")
-            end)
-
-            if boxSuccess and boxResult then
-                boxesOpened = boxesOpened + 1
-
-                -- อัปเดต GUI ทันที
-                updateCurrencyLabels()
-            else
-                break
-            end
-
-            -- รอเล็กน้อยก่อนเปิดรอบถัดไป
-            task.wait(1)
-        end
-
-        return boxesOpened
-    end)
-
-    if not success then
-        warn("[DEBUG] openCoinsBoxes Error:", tostring(err))
+local function doOneRound()
+    fightStart = os.clock()
+    clearHits = 0
+    gateOrigin = nil
+    do
+        local part = getFinalGatePart()
+        if part then gateOrigin = part.Position end
     end
-end
 
--- ฟังก์ชัน Hop Server
-local function hopServer()
-    local TeleportService = game:GetService("TeleportService")
+    -- รอ Cultist เกิด
+    do
+        local floorCenter2 = getFloorInfo()
+        local floorPos2 = floorCenter2 and (floorCenter2 + Vector3.new(0, 10, 0))
 
-    while true do
-        local success, result = pcall(function()
-            -- ใช้ TeleportService:Teleport() ธรรมดา จะสุ่มหาเซิร์ฟให้เอง
-            TeleportService:Teleport(game.PlaceId, player)
-        end)
-
-        if success then
-            break
-        else
-            warn("[DEBUG] Teleport failed:", tostring(result))
-            -- รอก่อนลองใหม่
-            task.wait(3)
-        end
-    end
-end
-
--- เช็คจำนวนคนในเซิร์ฟเวอร์ตลอดเวลา ถ้าน้อยกว่า 5 คนให้ hop server ทันที (แยก thread)
-task.spawn(function()
-    while true do
-        if #Players:GetPlayers() < 5 then
-            hopServer()
-            break
-        end
-        task.wait(1)
-    end
-end)
-
--- ส่ง Description ครั้งแรกก่อนเริ่มลูป
-sendDescription()
-lastDescriptionTime = tick()
-
--- ลูปหลัก
-while true do
-    local success, result = pcall(function()
-        -- เช็คและเปิดกล่อง Summer2026Box ถ้ามี SummerKey2026 >= 120
-        local openSuccess, openError = pcall(function()
-            local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-            local currentSummerKeys = ProfileData.Materials.Owned["SummerKey2026"] or 0
-
-            if currentSummerKeys >= 120 then
-                openSummerBoxes()
-            end
-        end)
-
-        if not openSuccess then
-            warn("[DEBUG] Box Opening Error:", tostring(openError))
-        end
-
-        -- เช็คและเปิดกล่องด้วย Coins ถ้า Config.CoinsBox ตั้งค่าไว้
-        if Config.CoinsBox then
-            local coinBoxSuccess, coinBoxError = pcall(function()
-                local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-                local currentCoins = ProfileData.Materials.Owned["Coins"] or 0
-
-                if currentCoins >= 1000 then
-                    openCoinsBoxes()
-                end
-            end)
-
-            if not coinBoxSuccess then
-                warn("[DEBUG] Coin Box Opening Error:", tostring(coinBoxError))
-            end
-        end
-
-
-        -- เช็ค Quest Status ทุกรอบ
-        local questProgress, questTarget, questDone = checkQuestStatus()
-
-        -- ถ้าเจอว่า Quest เสร็จและยังไม่ส่ง DONE
-        if questDone and not questCompleted then
-            sendDescription()  -- ส่ง Description + DONE
-        end
-
-        -- เช็คว่าถึงเวลาส่ง Description ตามปกติหรือยัง (ทุก 30 วิ)
-        -- ถ้าส่ง DONE ไปแล้ว ตัว task.spawn (ทุก 3 วิ) จะรับหน้าที่นี้ต่อ
-        if not questCompleted and tick() - lastDescriptionTime >= DESCRIPTION_INTERVAL then
-            sendDescription()
-            lastDescriptionTime = tick()
-        end
-
-        -- อัปเดต character และ humanoidRootPart ใหม่ทุกรอบ
-        character = player.Character or player.CharacterAdded:Wait()
-        humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
-        -- หา MainGUI ใหม่ทุกรอบ (เพราะถูกลบ/สร้างใหม่ตอน teleport)
-        local playerGui = player:WaitForChild("PlayerGui")
-        local mainGUI = playerGui:WaitForChild("MainGUI", 10)
-
-        if not mainGUI then
-            wait(1)
-            return
-        end
-
-        local gameUI = mainGUI:WaitForChild("Game", 10)
-        if not gameUI then
-            wait(1)
-            return
-        end
-
-        -- เช็คว่าอยู่ใน Lobby หรือแมพฟาร์ม - ดูจาก EarnedXP.Visible
-        local earnedXP = gameUI:WaitForChild("EarnedXP", 5)
-        if not earnedXP then
-            wait(1)
-            return
-        end
-
-        -- เช็คเพิ่มเติมจาก Timer.XPText ว่าเปลี่ยนแปลงหรือไม่
-        local timer = gameUI:FindFirstChild("Timer")
-        local xpText = timer and timer:FindFirstChild("XPText")
-        local lastXPText = xpText and xpText.Text or ""
-
-        task.wait(0.05)
-        local currentXPText = xpText and xpText.Text or ""
-        local xpTextChanged = (lastXPText ~= currentXPText)
-
-        local inGame = earnedXP.Visible or xpTextChanged
-
-        if not inGame then
-            character = player.Character or player.CharacterAdded:Wait()
-            humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-            task.wait(0.5)
-            return
-        end
-
-        character = player.Character or player.CharacterAdded:Wait()
-        humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
-        local coinBags = gameUI:FindFirstChild("CoinBags")
-        if not coinBags then task.wait(0.1) return end
-
-        local container = coinBags:FindFirstChild("Container")
-        if not container then task.wait(0.1) return end
-
-        local coin = container:FindFirstChild("Coin")
-        if not coin then task.wait(0.1) return end
-
-        local currencyFrame = coin:FindFirstChild("CurrencyFrame")
-        if not currencyFrame then task.wait(0.1) return end
-
-        local icon = currencyFrame:FindFirstChild("Icon")
-        if not icon then task.wait(0.1) return end
-
-        local coinsText = icon:FindFirstChild("Coins")
-        if not coinsText then task.wait(0.1) return end
-
-        local coinAmount = tonumber(coinsText.Text) or 0
-
-        if coinAmount >= 40 then
-                character:BreakJoints()
-                task.wait(1)
-                if Config.HopBagFull then
-                    hopServer()
-                end
-            else
-                -- ยังไม่เต็ม - ฟาร์มตามปกติ
-
-                -- หา CoinContainer
-                local coinContainer = findCoinContainer()
-
-                if coinContainer then
-                    local coins = coinContainer:GetChildren()
-
-                    if #coins > 0 then
-                        local nearestCoin, distance = findNearestCoin(coins)
-
-                        if nearestCoin and nearestCoin.Parent then
-                            local coinPos = nearestCoin:IsA("Model")
-                                and nearestCoin:GetPivot().Position
-                                or nearestCoin.Position
-
-                            tweenToPosition(coinPos)
+        local function anyCultistSpawned()
+            local chars = workspace:FindFirstChild("Characters")
+            if not chars then return false end
+            local building = getStrongholdBuilding()
+            local bCF, bSize
+            if building then bCF, bSize = building:GetBoundingBox() end
+            for _, c in ipairs(chars:GetChildren()) do
+                if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
+                    local hum = c:FindFirstChildOfClass("Humanoid")
+                    local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+                    if hum and hum.Health > 0 and root then
+                        if bCF and bSize then
+                            local local_ = bCF:PointToObjectSpace(root.Position)
+                            local half = bSize / 2 + Vector3.new(30, 30, 30)
+                            if math.abs(local_.X) <= half.X and math.abs(local_.Y) <= half.Y and math.abs(local_.Z) <= half.Z then
+                                return true
+                            end
+                        else
+                            return true
                         end
                     end
-                else
-                    task.wait(0.1)
                 end
             end
-    end)
+            return false
+        end
 
-    if not success then
-        warn("Error:", tostring(result))
-        task.wait(0.5)
+        local waited = 0
+        local WAIT_STEP = 0.2
+        local SPAWN_TIMEOUT = 8
+        while not anyCultistSpawned() do
+            task.wait(WAIT_STEP)
+            waited += WAIT_STEP
+            if waited >= SPAWN_TIMEOUT then
+                print("[Round " .. completedRounds+1 .. "] Cultist ยังไม่เกิด - วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone")
+                updateStatus("Re-warp waiting for spawn...")
+                if floorPos2 then
+                    local hrp = getLiveParts()
+                    if hrp then hrp.CFrame = CFrame.new(floorPos2) updateShield(hrp) end
+                    task.wait(0.3)
+                end
+                warpToTriggerZone()
+                waited = 0
+            end
+        end
+        print("✅ Cultist spawned! (round " .. completedRounds+1 .. ")")
     end
 
-    task.wait(0.01)
+    -- Fight loop
+    while true do
+        if isStrongholdCleared() then
+            print("[OK] FinalGate moved -> round " .. completedRounds+1 .. " cleared")
+            updateStatus("✅ Round " .. completedRounds+1 .. "/" .. TOTAL_ROUNDS .. " Cleared!")
+            break
+        end
+
+        local cultists = findCultists()
+
+        if #cultists == 0 then
+            local hrp = getLiveParts()
+            if hrp then hrp.CFrame = CFrame.new(combatCenter) end
+            updateStatus("Waiting for Cultists... (round " .. completedRounds+1 .. ")")
+            task.wait(1)
+        else
+            local hrp = getLiveParts()
+            if not hrp then task.wait(0.2) continue end
+
+            for _, cultist in ipairs(cultists) do
+                local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
+                if root then root.CFrame = CFrame.new(combatCenter + Vector3.new(0, 3, 0)) end
+            end
+
+            hrp.CFrame = CFrame.new(combatCenter - Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(90), 0, 0)
+
+            updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
+
+            for _, cultist in ipairs(cultists) do
+                if not cultist or not cultist.Parent then continue end
+                local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
+                if not cultistHum or cultistHum.Health <= 0 then continue end
+                pcall(function()
+                    Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+                end)
+            end
+
+            task.wait(ATTACK_INTERVAL)
+        end
+    end
 end
+
+-- ============================================
+-- STEP 6-7: วน 3 รอบ fight + เปิด chest + เก็บเพชร
+-- ============================================
+
+while completedRounds < TOTAL_ROUNDS do
+    print(string.format("\n[Step 6] Round %d/%d", completedRounds+1, TOTAL_ROUNDS))
+    updateStatus(string.format("Round %d/%d - Fighting...", completedRounds+1, TOTAL_ROUNDS))
+
+    -- Re-equip axe ทุกรอบ
+    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    do
+        local waited = 0
+        while waited < 3 do
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            if th and th:FindFirstChild("OriginalItem") then
+                axe = th.OriginalItem.Value
+                break
+            end
+            task.wait(0.1)
+            waited += 0.1
+        end
+    end
+
+    doOneRound()
+    completedRounds += 1
+
+    -- เปิด chest
+    print(string.format("\n[Step 7] Opening Diamond Chest (round %d)...", completedRounds))
+    updateStatus("Opening Diamond Chest...")
+
+    local chest = retryUntil("find Diamond Chest", function()
+        local items = workspace:FindFirstChild("Items")
+        return (items and items:FindFirstChild("Stronghold Diamond Chest"))
+            or workspace:FindFirstChild("Stronghold Diamond Chest", true)
+    end)
+
+    local chestPos = chest:IsA("Model") and chest:GetPivot().Position or chest.Position
+    if platform and platform.Parent then
+        platform.Size = Vector3.new(10, 1, 10)
+        platform.Position = chestPos - Vector3.new(0, 3, 0)
+    end
+    for _ = 1, 15 do
+        local hrp = getLiveParts()
+        if hrp then hrp.CFrame = CFrame.new(chestPos + Vector3.new(0, 3, 0)) end
+        task.wait(0.1)
+    end
+
+    local prompt = retryUntil("find chest ProximityPrompt", function()
+        local main = chest:FindFirstChild("Main")
+        local attachment = main and main:FindFirstChild("ProximityAttachment")
+        local p = attachment and attachment:FindFirstChild("ProximityInteraction")
+        if p and p:IsA("ProximityPrompt") then return p end
+        return chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+    end, 0.3)
+
+    local fires = 0
+    retryUntil("fire prompt to open chest", function()
+        if not prompt.Parent then return true end
+        if not prompt.Enabled then
+            if fires > 0 then return true end
+            return nil
+        end
+        if typeof(fireproximityprompt) == "function" then
+            fireproximityprompt(prompt, 0, true)
+        else
+            pcall(function() prompt.HoldDuration = 0 end)
+            prompt:InputHoldBegin() task.wait(0.1) prompt:InputHoldEnd()
+        end
+        fires += 1
+        return true
+    end, 0.3)
+    for _ = 1, 7 do
+        if not (prompt.Parent and prompt.Enabled) then break end
+        if typeof(fireproximityprompt) == "function" then
+            if pcall(function() fireproximityprompt(prompt, 0, true) end) then fires += 1 end
+        else
+            pcall(function() prompt.HoldDuration = 0 end)
+            prompt:InputHoldBegin() task.wait(0.1) prompt:InputHoldEnd()
+            fires += 1
+        end
+        task.wait(0.25)
+    end
+    print(("✅ Opened chest (%d interactions)"):format(fires))
+    updateStatus("✅ Chest Opened!")
+
+    -- เก็บเพชร
+    print(string.format("\n[Step 7.5] Collecting diamonds (round %d)...", completedRounds))
+    updateStatus("Collecting Diamonds...")
+    local COLLECT_RADIUS = 150
+    local COLLECT_EMPTY_STOP = 4
+    local DIAMOND_ITEM_NAME = "Diamond"
+    local TakeDiamondsEvent = ReplicatedStorage.RemoteEvents.RequestTakeDiamonds
+
+    local function getItemPart(item)
+        local ok, part = pcall(function()
+            if item:IsA("BasePart") then return item end
+            if item:IsA("Model") then
+                return item.PrimaryPart or item:FindFirstChild("Main") or item:FindFirstChildWhichIsA("BasePart", true)
+            end
+        end)
+        if ok then return part end
+    end
+
+    local function findDiamonds(origin)
+        local found = {}
+        pcall(function()
+            local items = workspace:FindFirstChild("Items")
+            if not items then return end
+            for _, item in ipairs(items:GetChildren()) do
+                if item.Name == DIAMOND_ITEM_NAME then
+                    local owner = item:GetAttribute("Owner")
+                    if owner == nil or owner == LocalPlayer.UserId then
+                        local part = getItemPart(item)
+                        if part then
+                            local ok2, dist = pcall(function() return (part.Position - origin).Magnitude end)
+                            if ok2 and dist <= COLLECT_RADIUS then
+                                table.insert(found, {model = item, part = part})
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+        return found
+    end
+
+    local origin = chestPos
+    local collected = 0
+    local emptyStreak = 0
+    local collectRound = 0
+    while emptyStreak < COLLECT_EMPTY_STOP do
+        collectRound += 1
+        local diamonds = findDiamonds(origin)
+        if #diamonds == 0 then
+            emptyStreak += 1
+            print(("  round %d: no items (%d/%d)"):format(collectRound, emptyStreak, COLLECT_EMPTY_STOP))
+        else
+            emptyStreak = 0
+            for _, d in ipairs(diamonds) do
+                if d.model and d.model.Parent then
+                    local startDiamonds = LocalPlayer:GetAttribute("Diamonds")
+                    local tries = 0
+                    local gotIt = false
+                    while not gotIt do
+                        tries += 1
+                        local hrp = getLiveParts()
+                        if hrp and d.part and d.part.Parent then
+                            pcall(function()
+                                for _ = 1, 5 do hrp.CFrame = CFrame.new(d.part.Position + Vector3.new(0,2,0)) task.wait(0.05) end
+                            end)
+                        end
+                        pcall(function() TakeDiamondsEvent:FireServer(d.model) end)
+                        task.wait(0.2)
+                        if LocalPlayer:GetAttribute("Diamonds") ~= startDiamonds then gotIt = true end
+                        if not gotIt and tries % 20 == 0 then
+                            updateStatus(("Collecting Diamond... (%d)"):format(tries))
+                        end
+                    end
+                    collected += 1
+                    task.wait(0.15)
+                end
+            end
+        end
+        updateStatus(("Collecting Diamonds... (%d)"):format(collected))
+        task.wait(0.2)
+    end
+    print(("[OK] Collected %d diamonds (round %d)"):format(collected, completedRounds))
+    updateStatus(("✅ Collected %d Diamonds"):format(collected))
+
+    -- ถ้ายังไม่ครบ 3 รอบ วาร์ปกลับรอรอบถัดไป
+    if completedRounds < TOTAL_ROUNDS then
+        print(string.format("[Round %d done] Warping back to TriggerZone...", completedRounds))
+        updateStatus(string.format("Round %d done - waiting next round...", completedRounds))
+        warpToTriggerZone()
+        task.wait(1)
+    end
+end
+
+if lockConn then lockConn:Disconnect() end
+destroyShield()
+local _, myHum = getLiveParts()
+if myHum then myHum.PlatformStand = false end
+
+print("\n=== Sugar Hub Complete ===")
+print("✅ Stronghold sequence finished! (3 rounds)")
+sendHorstDescription()
+checkDiamondsGoalAndSendDone()
+
+-- รอจนครบ 100 วัน ก่อนรีเซ็ต
+local function getCurrentDay()
+    return LocalPlayer:GetAttribute("Day") or 0
+end
+
+local MIN_DAY = 100
+updateStatus(string.format("Waiting Day %d+ (now: %d)...", MIN_DAY, getCurrentDay()))
+while getCurrentDay() < MIN_DAY do
+    updateStatus(string.format("Day %d/%d - waiting...", getCurrentDay(), MIN_DAY))
+    task.wait(5)
+end
+
+print(string.format("✅ Day %d reached - resetting!", getCurrentDay()))
+updateStatus("✅ Done! Resetting...")
+task.wait(0.3)
+pcall(function()
+    LocalPlayer.Character:BreakJoints()
+end)
+
