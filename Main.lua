@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.0 / 12.53")
+print("Version 1.1.0 / 3.24")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2247,6 +2247,19 @@ local function doOneRound()
             local hrp = getLiveParts()
             if not hrp then task.wait(0.2) continue end
 
+            -- re-equip axe ก่อนตีทุก tick
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            if not (th and th:FindFirstChild("OriginalItem")) then
+                Client.InventoryHandler.RequestEquipItem(bestAxe)
+                task.wait(0.1)
+                char = LocalPlayer.Character
+                th = char and char:FindFirstChild("ToolHandle")
+                if th and th:FindFirstChild("OriginalItem") then
+                    axe = th.OriginalItem.Value
+                end
+            end
+
             for _, cultist in ipairs(cultists) do
                 local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
                 if root then root.CFrame = CFrame.new(combatCenter + Vector3.new(0, 3, 0)) end
@@ -2443,22 +2456,27 @@ while completedRounds < TOTAL_ROUNDS do
 
     -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
     if completedRounds < TOTAL_ROUNDS then
-        print(string.format("[Round %d done] Waiting for Stronghold to reopen...", completedRounds))
+        print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
         warpToStrongholdFloor(1)
+        -- นับ 20 นาทีเองแทนการอ่าน timer
+        local WAIT_SECONDS = 20 * 60
+        for i = WAIT_SECONDS, 1, -1 do
+            local mins = math.floor(i / 60)
+            local secs = i % 60
+            updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
+            task.wait(1)
+        end
+        -- หลังนับครบ เช็คว่าเปิดจริงไหม ถ้าไม่ให้รอต่อ
         while true do
             local remaining = getStrongholdTimeRemaining()
-            if not remaining then
-                updateStatus("Stronghold Timer Not Found...")
-                task.wait(1)
-            elseif remaining <= 0 then
+            if not remaining or remaining <= 0 then
                 print("✅ Stronghold reopened!")
                 break
-            else
-                local mins = math.floor(remaining / 60)
-                local secs = math.floor(remaining % 60)
-                updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
-                task.wait(1)
             end
+            local mins = math.floor(remaining / 60)
+            local secs = math.floor(remaining % 60)
+            updateStatus(string.format("Waiting... %02d:%02d", mins, secs))
+            task.wait(1)
         end
         warpToTriggerZone()
         task.wait(1)
