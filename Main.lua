@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.0 / 3.24")
+print("Version 1.1.2")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -25,6 +25,7 @@ local Config = _G.Config
 -- Defaults: if not set externally, use false / leave unset
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
+Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"Camper", "Medic"}
 -- Config.Diamonds: no default (if not set externally = nil = never send DONE)
 
 -- If Horst is enabled, load the Horst script
@@ -32,7 +33,123 @@ if Config.Horst then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
 end
 
-local diamondsGoalReached = false -- track whether DONE was already sent (prevent duplicates)
+-- ============================================
+-- Check if goals are met (check real-time values from game)
+-- ============================================
+local function CheckGoals()
+    if not Config.Horst then return end
+
+    local diamondsGoal = Config.Diamonds ~= nil
+    local classesGoal = Config.BuyClass and #Config.BuyClass > 0
+    local isLobby = game.PlaceId == 79546208627805
+
+    -- Check real-time diamonds from game
+    local diamondsMet = true
+    if diamondsGoal then
+        local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+        diamondsMet = currentDiamonds >= Config.Diamonds
+    end
+
+    -- Check real-time classes from game (only in Lobby)
+    local classesMet = true
+    if classesGoal and isLobby then
+        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+        if ClassProgress then
+            for _, className in ipairs(Config.BuyClass) do
+                if not ClassProgress:FindFirstChild(className) then
+                    classesMet = false
+                    break
+                end
+            end
+        else
+            classesMet = false
+        end
+    end
+
+    -- In farm map: ignore BuyClass goal
+    if not isLobby and classesGoal then
+        return
+    end
+
+    -- Send DONE only if all goals met
+    if diamondsMet and classesMet then
+        if _G.Horst_AccountChangeDone then
+            _G.Horst_AccountChangeDone()
+        end
+    end
+end
+
+-- ============================================
+-- Auto-Buy Class (Lobby Only)
+-- ============================================
+if game.PlaceId == 79546208627805 and Config.BuyClass and #Config.BuyClass > 0 then
+    task.spawn(function()
+        repeat task.wait(1) until LocalPlayer:GetAttribute("DataHasLoaded")
+        task.wait(2)
+
+        pcall(function()
+            local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+            if not ClassProgress then return end
+
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local Shop = ReplicatedStorage:FindFirstChild("Shop")
+            if not Shop then return end
+
+            local Classes = Shop:FindFirstChild("Classes")
+            if not Classes then return end
+
+            local Client = require(LocalPlayer.PlayerScripts.Client)
+
+            statusValueLabel.Text = "Buying Classes..."
+
+            local totalClasses = #Config.BuyClass
+            local ownedCount = 0
+            local outOfStock = {}
+
+            for _, className in ipairs(Config.BuyClass) do
+                if not ClassProgress:FindFirstChild(className) then
+                    -- Check if class is in stock
+                    local classFolder = Classes:FindFirstChild(className)
+                    if classFolder then
+                        local inStock = classFolder:GetAttribute("InStock")
+                        if inStock then
+                            statusValueLabel.Text = string.format("Buying: %s", className)
+                            Client.Events.RequestPurchaseClass:FireServer(className)
+                            task.wait(0.5)
+                        else
+                            table.insert(outOfStock, className)
+                        end
+                    end
+                else
+                    ownedCount = ownedCount + 1
+                end
+            end
+
+            task.wait(2)
+
+            -- Count owned classes after purchase
+            ownedCount = 0
+            for _, className in ipairs(Config.BuyClass) do
+                if ClassProgress:FindFirstChild(className) then
+                    ownedCount = ownedCount + 1
+                end
+            end
+
+            statusValueLabel.Text = string.format("Classes: %d/%d", ownedCount, totalClasses)
+
+            -- Check if all classes are now owned
+            local allOwned = ownedCount == totalClasses
+
+            if allOwned then
+                statusValueLabel.Text = "All Classes Owned"
+                CheckGoals()
+            elseif #outOfStock > 0 then
+                statusValueLabel.Text = "Out of Stock"
+                task.wait(2)
+            end
+        end)
+    end)
+end
 
 -- ============================================
 -- Anti-AFK (prevent Roblox from kicking for inactivity)
@@ -216,47 +333,37 @@ local function updateDiamondsLabel()
     diamondsValueLabel.Text = diamonds and formatNumber(diamonds) or "..."
 end
 
--- ส่ง Description และ DONE ให้ Horst เมื่อ Diamonds ถึงจำนวนที่ตั้งใน Config.Diamonds
--- ถ้าไม่ได้ตั้ง Config.Diamonds (เป็น nil) จะไม่มีการส่ง DONE เลย
+-- ส่ง Description ให้ Horst
 local function sendHorstDescription()
     if not Config.Horst then return end
-    if not _G.Horst_SetDescription then
-        warn("[DEBUG] Horst_SetDescription not found")
-        return
-    end
+    if not _G.Horst_SetDescription then return end
+
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local description = string.format(
-        "🌲 99 Nights • Diamonds: %d%s",
-        diamonds,
-        diamondsGoalReached and " ✅" or ""
-    )
+    local ownedClasses = {}
+
+    if Config.BuyClass and #Config.BuyClass > 0 then
+        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+        if ClassProgress then
+            for _, className in ipairs(Config.BuyClass) do
+                if ClassProgress:FindFirstChild(className) then
+                    table.insert(ownedClasses, className)
+                end
+            end
+        end
+    end
+
+    local classText = #ownedClasses > 0 and table.concat(ownedClasses, ", ") or "None"
+    local description = string.format("🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText)
     _G.Horst_SetDescription(description)
 end
 
 local function checkDiamondsGoalAndSendDone()
-    if not Config.Horst then return end
-    if diamondsGoalReached then return end
-    if Config.Diamonds == nil then return end -- ไม่ได้ตั้ง Config.Diamonds = ไม่ส่ง DONE
-
-    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    if diamonds >= Config.Diamonds then
-        diamondsGoalReached = true
-        sendHorstDescription()
-
-        task.spawn(function()
-            task.wait(7) -- รอ Description ส่งเสร็จก่อนส่ง DONE
-            if _G.Horst_AccountChangeDone then
-                _G.Horst_AccountChangeDone()
-            else
-                warn("[DEBUG] Horst_AccountChangeDone not found")
-            end
-        end)
-    end
+    sendHorstDescription()
+    CheckGoals()
 end
 
 LocalPlayer:GetAttributeChangedSignal("Diamonds"):Connect(function()
     updateDiamondsLabel()
-    sendHorstDescription()
     checkDiamondsGoalAndSendDone()
 end)
 updateDiamondsLabel()
@@ -1048,17 +1155,49 @@ end
 local function dropAllLostChildren()
     local inv = LocalPlayer:FindFirstChild("Inventory")
     local oldSack = inv and inv:FindFirstChild("Old Sack")
-    if not oldSack then return end
-    -- วาร์ปไปกองไฟก่อนปล่อย
-    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(0, 3, 0))
-    task.wait(0.3)
+    if not oldSack then
+        warn("Cannot drop children: Old Sack not found in inventory")
+        return
+    end
+
+    -- วาร์ปไปกองไฟด้วย pcall ป้องกัน error
+    local targetPos = firePos + Vector3.new(0, 3, 0)
+    local warpSuccess, warpErr = pcall(function()
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+    end)
+
+    if not warpSuccess then
+        warn("Failed to warp to campfire:", warpErr)
+        return
+    end
+
+    task.wait(0.1)
+
+    -- ตรวจสอบว่าวาร์ปสำเร็จจริง
+    local currentPos = humanoidRootPart.Position
+    local distance = (currentPos - targetPos).Magnitude
+    if distance > 10 then
+        warn("Warp to campfire failed! Distance from target:", distance)
+        return
+    end
+
+    -- เพิ่มเวลารอให้เซิร์ฟเวอร์อัพเดทตำแหน่ง
+    task.wait(1.5)
+
     -- equip sack ก่อนปล่อย
     Client.InventoryHandler.RequestEquipItem(oldSack)
     task.wait(0.3)
     inv = LocalPlayer:FindFirstChild("Inventory")
     oldSack = inv and inv:FindFirstChild("Old Sack")
-    if not oldSack then return end
+    if not oldSack then
+        warn("Old Sack disappeared after equip attempt")
+        return
+    end
+
     local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
+    local droppedCount = 0
+
+    -- ปล่อยเด็กทีละตัวด้วยดีเลย์
     for name in pairs(collectedChildren) do
         local bag = LocalPlayer:FindFirstChild("ItemBag")
         local bagChild = bag and bag:FindFirstChild(name)
@@ -1066,9 +1205,32 @@ local function dropAllLostChildren()
             pcall(function()
                 BagDrop:FireServer(oldSack, bagChild, false)
             end)
+            droppedCount = droppedCount + 1
+            task.wait(0.2) -- ดีเลย์ป้องกัน rate-limiting
         end
     end
-    collectedChildren = {}
+
+    -- รอให้เซิร์ฟเวอร์ประมวลผลการปล่อย
+    task.wait(1)
+
+    -- ตรวจสอบว่ากระเป๋าว่างจริงก่อนล้างตาราง
+    local bag = LocalPlayer:FindFirstChild("ItemBag")
+    local remainingChildren = 0
+    if bag then
+        for _, child in pairs(bag:GetChildren()) do
+            if child:IsA("Model") and table.find(LOST_CHILD_NAMES, child.Name) then
+                remainingChildren = remainingChildren + 1
+            end
+        end
+    end
+
+    if remainingChildren == 0 then
+        collectedChildren = {}
+        print("Successfully dropped all", droppedCount, "children at campfire")
+    else
+        warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
+    end
+
     -- re-equip axe หลังปล่อย
     Client.InventoryHandler.RequestEquipItem(bestAxe)
 end
@@ -1080,6 +1242,69 @@ platform.CanCollide = true
 platform.Transparency = 1
 platform.Parent = workspace
 
+-- กำแพงป้องกันรอบตัวขณะตัดไม้ (6 ด้าน รวมบน/ล่าง)
+local function createProtectionWalls()
+    local walls = {}
+    local wallSize = Vector3.new(1, 10, 10)
+
+    -- 4 ด้านข้าง
+    for i = 1, 4 do
+        local wall = Instance.new("Part")
+        wall.Name = "ProtectionWall" .. i
+        wall.Size = wallSize
+        wall.Anchored = true
+        wall.CanCollide = true
+        wall.Transparency = 1
+        wall.Parent = workspace
+        table.insert(walls, wall)
+    end
+
+    -- ฝาบน (กันหัว)
+    local topWall = Instance.new("Part")
+    topWall.Name = "ProtectionWallTop"
+    topWall.Size = Vector3.new(12, 1, 12)
+    topWall.Anchored = true
+    topWall.CanCollide = true
+    topWall.Transparency = 1
+    topWall.Parent = workspace
+    table.insert(walls, topWall)
+
+    -- ฝาล่าง
+    local bottomWall = Instance.new("Part")
+    bottomWall.Name = "ProtectionWallBottom"
+    bottomWall.Size = Vector3.new(12, 1, 12)
+    bottomWall.Anchored = true
+    bottomWall.CanCollide = true
+    bottomWall.Transparency = 1
+    bottomWall.Parent = workspace
+    table.insert(walls, bottomWall)
+
+    return walls
+end
+
+local function updateProtectionWalls(walls, centerPos)
+    if not walls or #walls ~= 6 then return end
+    local distance = 6
+
+    -- หน้า/หลัง/ซ้าย/ขวา
+    walls[1].CFrame = CFrame.new(centerPos + Vector3.new(distance, 0, 0))
+    walls[2].CFrame = CFrame.new(centerPos + Vector3.new(-distance, 0, 0))
+    walls[3].CFrame = CFrame.new(centerPos + Vector3.new(0, 0, distance)) * CFrame.Angles(0, math.rad(90), 0)
+    walls[4].CFrame = CFrame.new(centerPos + Vector3.new(0, 0, -distance)) * CFrame.Angles(0, math.rad(90), 0)
+    -- บน (กันหัว)
+    walls[5].CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0))
+    -- ล่าง
+    walls[6].CFrame = CFrame.new(centerPos + Vector3.new(0, -6, 0))
+end
+
+local function destroyProtectionWalls(walls)
+    if not walls then return end
+    for _, wall in ipairs(walls) do
+        pcall(function() wall:Destroy() end)
+    end
+end
+
+local protectionWalls = createProtectionWalls()
 local airHeight = 20
 local treeIndex = 1
 
@@ -1286,30 +1511,67 @@ while currentLevel < maxLevel and not isTimerExceeded() do
             local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
 
             print(string.format("[%d/%d] Cutting tree...", treeIndex, #trees))
-            humanoidRootPart.CFrame = CFrame.new(treePos + Vector3.new(0, 0, 5))
-            platform.Position = humanoidRootPart.Position - Vector3.new(0, 3, 0)
+
+            -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
+            local cutPos = treePos + Vector3.new(5, 0, 0)
+            humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
+            platform.Position = cutPos - Vector3.new(0, 3, 0)
+
+            -- อัพเดทกำแพงป้องกันรอบตัว
+            updateProtectionWalls(protectionWalls, cutPos)
+
             task.wait(0.1)
 
             local hitCount = 0
             while tree.Parent do
                 if getCurrentLevel() >= maxLevel then
                     print("✅ Max level reached")
-                    updateStatus("✅ Fire Complete!")
+                    pcall(updateStatus, "✅ Fire Complete!")
                     humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                     break
                 end
 
                 if isTimerExceeded() then
                     print("⏰ Timer exceeded 20:00! (stopped mid-tree)")
-                    updateStatus("✅ Fire Complete!")
+                    pcall(updateStatus, "✅ Fire Complete!")
                     humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                     break
                 end
 
-                pcall(function()
-                    Event:InvokeServer(tree, axe, ownerId, humanoidRootPart.CFrame, false)
+                -- อัพเดท axe ทุกครั้งก่อนตี
+                local char = LocalPlayer.Character
+                local th = char and char:FindFirstChild("ToolHandle")
+                local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+
+                if not currentAxe then
+                    print("[WARN] Axe lost, re-equipping...")
+                    Client.InventoryHandler.RequestEquipItem(bestAxe)
+                    task.wait(0.3)
+                    char = LocalPlayer.Character
+                    th = char and char:FindFirstChild("ToolHandle")
+                    currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                    if not currentAxe then
+                        print("[ERROR] Cannot equip axe")
+                        break
+                    end
+                end
+
+                -- ใช้ remote event อย่างเดียว
+                local success, err = pcall(function()
+                    Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
                 end)
-                task.wait(0.05)
+
+                if not success then
+                    if hitCount == 0 then
+                        print("[ERROR] First hit failed:", err)
+                    end
+                    -- ถ้าตีไม่ได้ 5 ครั้งติดต่อกัน ให้ข้ามต้นนี้
+                    if hitCount > 5 and not tree.Parent then
+                        break
+                    end
+                end
+
+                task.wait(0.18)
                 hitCount = hitCount + 1
             end
 
@@ -1333,14 +1595,10 @@ updateStatus("✅ Fire Complete!")
 dropAllLostChildren()
 
 -- ============================================
--- STEP 3.7: Wait 15s, check Wood/Scrap, craft bench upgrade + beds
+-- STEP 3.7: Check Wood/Scrap, craft bench upgrade + beds
 -- ============================================
 
-print("\n[Step 3.7] Waiting 15s before crafting check...")
-for i = 15, 1, -1 do
-    updateStatus(string.format("Crafting check in %ds...", i))
-    task.wait(1)
-end
+print("\n[Step 3.7] Checking resources for crafting...")
 
 local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
 local campground = workspace.Map.Campground
@@ -1364,21 +1622,63 @@ if getTotalWood() < NEED_WOOD then
         local tree = trees[tIdx]
         if not tree or not tree.Parent then tIdx += 1 continue end
         local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            print("[Step 3.7] HumanoidRootPart not found - waiting...")
+            task.wait(1)
+            continue
+        end
+
         Client.InventoryHandler.RequestEquipItem(bestAxe)
-        task.wait(0.2)
-        humanoidRootPart.CFrame = CFrame.new(treePos + Vector3.new(0, 3, 0))
+        task.wait(0.3)
+
+        -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
+        local cutPos = treePos + Vector3.new(5, 0, 0)
+        hrp.CFrame = CFrame.lookAt(cutPos, treePos)
+        platform.Position = cutPos - Vector3.new(0, 3, 0)
+
+        -- อัพเดทกำแพงป้องกันรอบตัว
+        updateProtectionWalls(protectionWalls, cutPos)
+
         task.wait(0.1)
+
+        local treeDestroyed = false
         while tree.Parent do
             local char = LocalPlayer.Character
             local th = char and char:FindFirstChild("ToolHandle")
             local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
-            if not currentAxe then break end
-            pcall(function()
-                Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
+            if not currentAxe then
+                print("[Step 3.7] Axe lost - re-equipping...")
+                Client.InventoryHandler.RequestEquipItem(bestAxe)
+                task.wait(0.3)
+                char = LocalPlayer.Character
+                th = char and char:FindFirstChild("ToolHandle")
+                currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                if not currentAxe then break end
+            end
+
+            hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then break end
+
+            local success = pcall(function()
+                Event:InvokeServer(tree, currentAxe, ownerId, hrp.CFrame, false)
             end)
-            updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
-            task.wait(0.15)
+
+            if not success then
+                print("[Step 3.7] Hit failed - tree may be invalid")
+            end
+
+            pcall(updateStatus, string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+            task.wait(0.2)
+
+            if not tree.Parent then
+                treeDestroyed = true
+                break
+            end
         end
+
+        hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ
         if craftPos then
             for _, item in ipairs(workspace.Items:GetChildren()) do
@@ -1658,13 +1958,6 @@ end
 -- STEP 3.5: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
 -- ============================================
 
-print("\n[Step 3.5] Waiting 15s before warping to Stronghold...")
-updateStatus("Waiting 15s before Stronghold...")
-for i = 15, 1, -1 do
-    updateStatus(string.format("Warping to Stronghold in %ds...", i))
-    task.wait(1)
-end
-
 print("\n[Step 3.5] Warping to Stronghold Floor...")
 updateStatus("Warping to Stronghold Floor...")
 
@@ -1760,17 +2053,11 @@ print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
     finalGateBasePos.X, finalGateBasePos.Y, finalGateBasePos.Z))
 
 -- ============================================
--- STEP 4: Wait for Stronghold to Open (re-warp ที่ 15:00 / 10:00 / 5:00)
+-- STEP 4: Wait for Stronghold to Open
 -- ============================================
 
 print("\n[Step 4] Waiting for Stronghold to open...")
 updateStatus("Waiting for Stronghold...")
-
-local rewarpMarks = {
-    {t = 900, label = "15:00", done = false},
-    {t = 600, label = "10:00", done = false},
-    {t = 300, label = "5:00",  done = false},
-}
 
 while true do
     local remaining = getStrongholdTimeRemaining()
@@ -1786,23 +2073,7 @@ while true do
     else
         local minutes = math.floor(remaining / 60)
         local seconds = math.floor(remaining % 60)
-        --print(string.format("Stronghold opens in: %02d:%02d", minutes, seconds))
         updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
-
-        local crossed = nil
-        for _, m in ipairs(rewarpMarks) do
-            if not m.done and remaining <= m.t then
-                m.done = true
-                crossed = m
-            end
-        end
-
-        if crossed then
-            print(string.format("[TIMER] Reached %s - re-warping to Stronghold Floor", crossed.label))
-            updateStatus("Re-warp (" .. crossed.label .. ")")
-            warpToStrongholdFloor(1)
-        end
-
         task.wait(1)
     end
 end
@@ -2085,6 +2356,7 @@ end
 local CULTIST_NAMES = {
     ["Cultist"] = true,
     ["Crossbow Cultist"] = true,
+    ["Juggernaut Cultist"] = true,
 }
 
 local function findCultists()
@@ -2511,4 +2783,3 @@ task.wait(0.3)
 pcall(function()
     LocalPlayer.Character:BreakJoints()
 end)
-
