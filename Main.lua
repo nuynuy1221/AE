@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.2 / 8.30")
+print("Version 1.1.2 / 8.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -37,7 +37,7 @@ end
 -- Check if goals are met (check real-time values from game)
 -- ============================================
 local function CheckGoals()
-    if not Config.Horst then return end
+    if not Config.Horst then return false end
 
     local diamondsGoal = Config.Diamonds ~= nil
     local classesGoal = Config.BuyClass and #Config.BuyClass > 0
@@ -68,7 +68,7 @@ local function CheckGoals()
 
     -- In farm map: ignore BuyClass goal
     if not isLobby and classesGoal then
-        return
+        return false
     end
 
     -- Send DONE only if all goals met
@@ -76,7 +76,10 @@ local function CheckGoals()
         if _G.Horst_AccountChangeDone then
             _G.Horst_AccountChangeDone()
         end
+        return true  -- Goals met
     end
+
+    return false  -- Goals not met
 end
 
 
@@ -641,7 +644,10 @@ if isLobby() then
 
                     if allOwned then
                         updateStatus("All Classes Owned")
-                        CheckGoals()
+                        if CheckGoals() then
+                            updateStatus("Goals Complete - DONE Sent")
+                            return  -- หยุดทันที ไม่สร้างห้อง
+                        end
                     elseif #outOfStock > 0 then
                         updateStatus("Out of Stock")
                         task.wait(2)
@@ -655,6 +661,12 @@ if isLobby() then
         else
             warn("Auto-Buy: ClassProgress not found")
         end
+    end
+
+    -- Check if goals are already met before entering farm map
+    if CheckGoals() then
+        updateStatus("Goals Complete - DONE Sent")
+        return  -- หยุดทันที ไม่สร้างห้อง
     end
 
     -- Solo Teleport Logic
