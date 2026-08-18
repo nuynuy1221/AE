@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.2")
+print("Version 1.1.2 / 8.13")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -83,22 +83,34 @@ end
 -- Auto-Buy Class (Lobby Only)
 -- ============================================
 if game.PlaceId == 79546208627805 and Config.BuyClass and #Config.BuyClass > 0 then
+    warn("Auto-Buy: Starting...")
     task.spawn(function()
         repeat task.wait(1) until LocalPlayer:GetAttribute("DataHasLoaded")
+        warn("Auto-Buy: DataHasLoaded = true")
         task.wait(2)
 
         pcall(function()
             local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
-            if not ClassProgress then return end
+            if not ClassProgress then
+                warn("Auto-Buy: ClassProgress not found")
+                return
+            end
 
             local ReplicatedStorage = game:GetService("ReplicatedStorage")
             local Shop = ReplicatedStorage:FindFirstChild("Shop")
-            if not Shop then return end
+            if not Shop then
+                warn("Auto-Buy: Shop not found")
+                return
+            end
 
             local Classes = Shop:FindFirstChild("Classes")
-            if not Classes then return end
+            if not Classes then
+                warn("Auto-Buy: Classes folder not found")
+                return
+            end
 
             local Client = require(LocalPlayer.PlayerScripts.Client)
+            warn("Auto-Buy: Client loaded")
 
             statusValueLabel.Text = "Buying Classes..."
 
@@ -112,16 +124,21 @@ if game.PlaceId == 79546208627805 and Config.BuyClass and #Config.BuyClass > 0 t
                     local classFolder = Classes:FindFirstChild(className)
                     if classFolder then
                         local inStock = classFolder:GetAttribute("InStock")
+                        warn(string.format("Auto-Buy: %s InStock = %s", className, tostring(inStock)))
                         if inStock then
                             statusValueLabel.Text = string.format("Buying: %s", className)
                             Client.Events.RequestPurchaseClass:FireServer(className)
+                            warn(string.format("Auto-Buy: Sent purchase request for %s", className))
                             task.wait(0.5)
                         else
                             table.insert(outOfStock, className)
                         end
+                    else
+                        warn(string.format("Auto-Buy: Class folder not found: %s", className))
                     end
                 else
                     ownedCount = ownedCount + 1
+                    warn(string.format("Auto-Buy: Already owned: %s", className))
                 end
             end
 
@@ -136,19 +153,30 @@ if game.PlaceId == 79546208627805 and Config.BuyClass and #Config.BuyClass > 0 t
             end
 
             statusValueLabel.Text = string.format("Classes: %d/%d", ownedCount, totalClasses)
+            warn(string.format("Auto-Buy: Result = %d/%d owned", ownedCount, totalClasses))
 
             -- Check if all classes are now owned
             local allOwned = ownedCount == totalClasses
 
             if allOwned then
                 statusValueLabel.Text = "All Classes Owned"
+                warn("Auto-Buy: All classes owned, calling CheckGoals()")
                 CheckGoals()
             elseif #outOfStock > 0 then
                 statusValueLabel.Text = "Out of Stock"
+                warn(string.format("Auto-Buy: Out of stock classes: %s", table.concat(outOfStock, ", ")))
                 task.wait(2)
             end
         end)
     end)
+else
+    if game.PlaceId ~= 79546208627805 then
+        warn("Auto-Buy: Not in Lobby (PlaceId = " .. tostring(game.PlaceId) .. ")")
+    elseif not Config.BuyClass then
+        warn("Auto-Buy: BuyClass not set")
+    elseif #Config.BuyClass == 0 then
+        warn("Auto-Buy: BuyClass is empty")
+    end
 end
 
 -- ============================================
