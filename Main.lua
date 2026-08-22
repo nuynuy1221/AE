@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.2 / 8.42")
+print("Version 1.1.2")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -271,20 +271,27 @@ local function sendHorstDescription()
     if not _G.Horst_SetDescription then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local ownedClasses = {}
+    local classText = "None"
+
+    local isLobby = game.PlaceId == 79546208627805
 
     if Config.BuyClass and #Config.BuyClass > 0 then
-        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
-        if ClassProgress then
-            for _, className in ipairs(Config.BuyClass) do
-                if ClassProgress:FindFirstChild(className) then
-                    table.insert(ownedClasses, className)
+        if isLobby then
+            local ownedClasses = {}
+            local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+            if ClassProgress then
+                for _, className in ipairs(Config.BuyClass) do
+                    if ClassProgress:FindFirstChild(className) then
+                        table.insert(ownedClasses, className)
+                    end
                 end
             end
+            classText = #ownedClasses > 0 and table.concat(ownedClasses, ", ") or "None"
+        else
+            classText = "Can't check during farming"
         end
     end
 
-    local classText = #ownedClasses > 0 and table.concat(ownedClasses, ", ") or "None"
     local description = string.format("🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText)
     _G.Horst_SetDescription(description)
 end
@@ -2559,7 +2566,13 @@ local function doOneRound()
             for _, cultist in ipairs(cultists) do
                 if not cultist or not cultist.Parent then continue end
                 local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
-                if not cultistHum or cultistHum.Health <= 0 then continue end
+
+                -- เซ็ต HP เป็น 0 ทันทีที่เจอ ก่อนตี (Cultist.Humanoid.Health = 0)
+                if cultistHum and cultistHum.Health > 0 then
+                    pcall(function() cultistHum.Health = 0 end)
+                end
+
+                if not cultistHum then continue end
                 pcall(function()
                     Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
                 end)
@@ -2780,7 +2793,11 @@ sendHorstDescription()
 checkDiamondsGoalAndSendDone()
 
 -- รอจนครบ 100 วัน ก่อนรีเซ็ต
+-- อ่านวันจาก workspace.StoryDayCounter (แบบเดียวกับ NextDayUI ที่ decompile ได้)
 local function getCurrentDay()
+    local storyDay = workspace:GetAttribute("StoryDayCounter")
+    if storyDay then return storyDay end
+    -- สำรอง: ถ้าแมพไม่มี StoryDayCounter ค่อยใช้ attribute ของผู้เล่น
     return LocalPlayer:GetAttribute("Day") or 0
 end
 
