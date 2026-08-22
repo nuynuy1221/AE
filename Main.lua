@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.1.2")
+print("Version 1.2.0")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -26,6 +26,10 @@ local Config = _G.Config
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
 Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"Camper", "Medic"}
+-- RerollShop: สุ่มหน้าร้าน class จนเจอตัวที่อยู่ใน BuyClass (เปิดได้เมื่อมี BuyClass เท่านั้น)
+Config.RerollShop = Config.RerollShop == true
+-- MaxRerollPrice: ราคาสุ่มสูงสุดที่ยอมรับ เช่น 50 (ราคา 51+ = เลิกสุ่ม) - มีผลเมื่อ RerollShop = true เท่านั้น
+Config.MaxRerollPrice = tonumber(Config.MaxRerollPrice)
 -- Config.Diamonds: no default (if not set externally = nil = never send DONE)
 
 -- If Horst is enabled, load the Horst script
@@ -609,6 +613,135 @@ if isLobby() then
                 if Classes then
                     local Client = require(LocalPlayer.PlayerScripts.Client)
 
+                    -- เช็ค stock แบบเดียวกับ UI (decompile ClassesClient): InStock<UserId> ทับ InStock
+                    local function isInStock(clsFolder)
+                        local s = clsFolder:GetAttribute("InStock")
+                        local mine = clsFolder:GetAttribute("InStock" .. LocalPlayer.UserId)
+                        if mine ~= nil then s = mine end
+                        return s == true
+                    end
+
+                    -- คืนรายชื่อ class ที่ยังขาด = ไม่ owned และไม่อยู่ใน stock
+                    local function wantedStillNeeded()
+                        local need = {}
+                        for _, className in ipairs(Config.BuyClass) do
+                            if not ClassProgress:FindFirstChild(className) then
+                                local folder = Classes:FindFirstChild(className)
+                                if not (folder and isInStock(folder)) then
+                                    table.insert(need, className)
+                                end
+                            end
+                        end
+                        return need
+                    end
+
+                    -- ============================================
+                    -- Auto-Reroll Shop (Config.RerollShop + Config.MaxRerollPrice)
+                    -- เปิดได้เมื่อ: RerollShop = true "และ" มี BuyClass เท่านั้น
+                    -- ถ้าของครบแล้ว (owned/อยู่ใน stock) = ไม่สุ่มเลย
+                    -- สุ่มเจอของก่อนถึงลิมิตราคา = หยุดสุ่มแล้วไปซื้อทันที
+                    -- ============================================
+                    if Config.RerollShop then
+                        local need = wantedStillNeeded()
+                        if #need == 0 then
+                            print("[Reroll] ทุก class ที่ต้องการมีอยู่แล้ว/อยู่ใน stock - ไม่ต้องสุ่ม")
+                        else
+                            print("[Reroll] ยังขาด: " .. table.concat(need, ", ") .. " - เริ่มสุ่ม...")
+                            updateStatus("Rerolling Shop...")
+                            if not Config.MaxRerollPrice then
+                                print("[Reroll] WARN: ไม่ได้ตั้ง MaxRerollPrice - จะสุ่มจนเจอโดยไม่จำกัดราคา")
+                            end
+
+                            local rerollRemote = ReplicatedStorage.RemoteEvents
+                                and ReplicatedStorage.RemoteEvents:FindFirstChild("RerollShop")
+
+                            if not rerollRemote then
+                                warn("[Reroll] ไม่พบ RemoteEvents.RerollShop - ข้ามการสุ่ม")
+                            else
+                                -- จับ event ที่ server ปฏิเสธ (สุ่มใกล้รอบ rotate)
+                                local cantReroll = false
+                                pcall(function()
+                                    Client.Events.CantRerollNow:Connect(function()
+                                        cantReroll = true
+                                    end)
+                                end)
+
+                                local function snapEqual(a, b)
+                                    for k, v in pairs(a) do if b[k] ~= v then return false end end
+                                    for k in pairs(b) do if a[k] == nil then return false end end
+                                    return true
+                                end
+
+                                while #wantedStillNeeded() > 0 do
+                                    -- เช็คราคา: เกินลิมิต = เลิกสุ่มทันที
+                                    local price = LocalPlayer:GetAttribute("RerollPrice")
+                                    if type(price) ~= "number" then
+                                        task.wait(0.5)
+                                        price = LocalPlayer:GetAttribute("RerollPrice")
+                                    end
+                                    if type(Config.MaxRerollPrice) == "number" and type(price) == "number"
+                                        and price > Config.MaxRerollPrice then
+                                        print(string.format("[Reroll] ราคาสุ่ม %s > ลิมิต %d - เลิกสุ่ม",
+                                            tostring(price), Config.MaxRerollPrice))
+                                        updateStatus(string.format("Reroll %s > %d - Stop",
+                                            tostring(price), Config.MaxRerollPrice))
+                                        break
+                                    end
+
+                                    -- snapshot stock ก่อนยิง
+                                    local before = {}
+                                    for _, cls in ipairs(Classes:GetChildren()) do
+                                        before[cls.Name] = tostring(isInStock(cls))
+                                    end
+
+                                    cantReroll = false
+                                    local ok = pcall(function() rerollRemote:FireServer() end)
+                                    if not ok then
+                                        print("[Reroll] ยิง RerollShop ไม่สำเร็จ - ข้ามการสุ่ม")
+                                        break
+                                    end
+
+                                    -- รอผล: stock เปลี่ยน / โดน block / timeout 6 วิ
+                                    local settled = false
+                                    local waited = 0
+                                    while waited < 6 do
+                                        task.wait(0.25)
+                                        waited += 0.25
+                                        local after = {}
+                                        for _, cls in ipairs(Classes:GetChildren()) do
+                                            after[cls.Name] = tostring(isInStock(cls))
+                                        end
+                                        if not snapEqual(before, after) then
+                                            settled = true
+                                            break
+                                        end
+                                        if cantReroll then
+                                            print("[Reroll] Server block (ใกล้รอบ rotate) - รอ 5 วิ แล้วลองใหม่")
+                                            updateStatus("Can't Reroll Now - waiting...")
+                                            task.wait(5)
+                                            settled = true
+                                            break
+                                        end
+                                    end
+                                    if not settled then
+                                        print("[Reroll] ไม่เห็น stock เปลี่ยน (timeout) - ลอง roll ใหม่")
+                                    else
+                                        local stillNeed = wantedStillNeeded()
+                                        if #stillNeed == 0 then
+                                            print("[Reroll] ✅ ได้ของครบใน stock แล้ว - หยุดสุ่มแล้วไปซื้อ")
+                                            updateStatus("✅ Reroll Success!")
+                                        else
+                                            print(string.format("[Reroll] Roll แล้วยังขาด: %s",
+                                                table.concat(stillNeed, ", ")))
+                                            updateStatus(("Rerolling... need %d"):format(#stillNeed))
+                                        end
+                                    end
+                                    task.wait(0.3)
+                                end
+                            end
+                        end
+                    end
+
                     updateStatus("Buying Classes...")
 
                     local totalClasses = #Config.BuyClass
@@ -619,7 +752,7 @@ if isLobby() then
                         if not ClassProgress:FindFirstChild(className) then
                             local classFolder = Classes:FindFirstChild(className)
                             if classFolder then
-                                local inStock = classFolder:GetAttribute("InStock")
+                                local inStock = isInStock(classFolder)
                                 if inStock then
                                     updateStatus(string.format("Buying: %s", className))
                                     Client.Events.RequestPurchaseClass:FireServer(className)
@@ -915,6 +1048,38 @@ task.spawn(function()
 end)
 
 print("✅ Death Watcher Running")
+
+-- ============================================
+-- HP ZERO WATCHER: เซ็ตเลือดมอนเป็น 0 ตลอดเวลา (ไม่ต้องรอ fight loop)
+-- เลือด 0 = ตายปลอม fight loop จะตีต่อ 1 รอบให้ตายจริง
+-- ============================================
+
+task.spawn(function()
+    local MONSTER_NAMES = {
+        ["Cultist"] = true,
+        ["Crossbow Cultist"] = true,
+        ["Juggernaut Cultist"] = true,
+    }
+
+    while true do
+        pcall(function()
+            local chars = workspace:FindFirstChild("Characters")
+            if chars then
+                for _, c in ipairs(chars:GetChildren()) do
+                    if MONSTER_NAMES[c.Name] then
+                        local hum = c:FindFirstChildOfClass("Humanoid")
+                        if hum and hum.Health > 0 then
+                            hum.Health = 0   -- เซ็ตใหม่ตลอด ถ้า server ดันเลือดกลับก็โดนเซ็ตซ้ำ
+                        end
+                    end
+                end
+            end
+        end)
+        task.wait(0.2)
+    end
+end)
+
+print("✅ HP Zero Watcher Running")
 
 -- ============================================
 -- STEP 3: Farm Trees and Upgrade Fire
@@ -2234,7 +2399,7 @@ do
             if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
                 local hum = c:FindFirstChildOfClass("Humanoid")
                 local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
-                if hum and hum.Health > 0 and root then
+                if hum and root then
                     if bCF and bSize then
                         -- เช็คว่าอยู่ใน bounding box ของตึก Stronghold (+ margin 30 stud)
                         local local_ = bCF:PointToObjectSpace(root.Position)
@@ -2388,7 +2553,9 @@ local function findCultists()
         if CULTIST_NAMES[c.Name] then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
-            if root and hum and hum.Health > 0 and isInsideStronghold(c, root.Position) then
+            -- ไม่กรอง Health > 0: เลือด 0 = ตายปลอม ต้องตีต่ออีก 1 รอบถึงตายจริง
+            -- (รวมถึงเคสรัน HPZeroAll.lua ควบคู่ เลือดโดนเซ็ต 0 ก่อนสคริปต์หลักจะเจอ)
+            if root and hum and isInsideStronghold(c, root.Position) then
                 table.insert(list, c)
             end
         end
@@ -2484,7 +2651,7 @@ local function doOneRound()
                 if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
                     local hum = c:FindFirstChildOfClass("Humanoid")
                     local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
-                    if hum and hum.Health > 0 and root then
+                    if hum and root then
                         if bCF and bSize then
                             local local_ = bCF:PointToObjectSpace(root.Position)
                             local half = bSize / 2 + Vector3.new(30, 30, 30)
@@ -2567,7 +2734,7 @@ local function doOneRound()
                 if not cultist or not cultist.Parent then continue end
                 local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
 
-                -- เซ็ต HP เป็น 0 ทันทีที่เจอ ก่อนตี (Cultist.Humanoid.Health = 0)
+                -- เซ็ต HP = 0 ทันทีที่เจอ (ตายปลอม) แล้วตีต่อทันที - server ต้องได้ hit อีก 1 รอบถึงตายจริง
                 if cultistHum and cultistHum.Health > 0 then
                     pcall(function() cultistHum.Health = 0 end)
                 end
