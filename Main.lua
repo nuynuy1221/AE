@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0")
+print("Version 1.2.0 / 5.04")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1553,8 +1553,9 @@ local function dropAllLostChildren()
         return
     end
 
-    -- วาร์ปไปกองไฟด้วย pcall ป้องกัน error
-    local targetPos = firePos + Vector3.new(0, 3, 0)
+    -- วาร์ปไปยืน "ด้านหน้ากองไฟ" (+5 stud = จุดยืนมาตรฐานเดียวกับที่ใช้ทั่วสคริปต์)
+    -- แล้วค่อยปล่อยเด็ก (เดิมไปยืนทับกองไฟ +0)
+    local targetPos = firePos + Vector3.new(5, 3, 0)
     local warpSuccess, warpErr = pcall(function()
         humanoidRootPart.CFrame = CFrame.new(targetPos)
     end)
@@ -2194,11 +2195,7 @@ for _, bedName in ipairs(BED_ITEMS) do
                     if (pos - used).Magnitude < 3 then alreadyUsed = true break end
                 end
                 if not alreadyUsed then
-                    humanoidRootPart.CFrame = CFrame.lookAt(
-                        pos + Vector3.new(0, 2, 0),
-                        pos
-                    )
-                    task.wait(0.15)
+                    -- ไม่ต้องวาร์ปตัวเองไปหน้ากองไฟก่อนวางแล้ว - PlaceEvent ส่งพิกัด CFrame ไปเอง
                     pcall(function()
                         local center = alecCircle and select(1, alecCircle:GetBoundingBox()).Position or pos
                         local placeCF = CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z))
