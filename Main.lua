@@ -638,25 +638,118 @@ if isLobby() then
                     -- ============================================
                     -- Auto-Reroll Shop (Config.RerollShop + Config.MaxRerollPrice)
                     -- เปิดได้เมื่อ: RerollShop = true "และ" มี BuyClass เท่านั้น
-                    -- ถ้าของครบแล้ว (owned/อยู่ใน stock) = ไม่สุ่มเลย
-                    -- สุ่มเจอของก่อนถึงลิมิตราคา = หยุดสุ่มแล้วไปซื้อทันที
+                    -- - เช็คราคา class ที่ต้องการจาก ClassesDatabase ก่อน (เช่น Cyborg=600, Vampire=500)
+                    -- - ถ้าของครบแล้ว (owned/อยู่ใน stock) = ไม่สุ่มเลย
+                    -- - สุ่มแล้วเจอตัวที่ต้องการ = ซื้อทันที แล้วค่อยสุ่มหาตัวที่เหลือต่อ
+                    -- - หยุดสุ่มเมื่อ: ราคาสุ่ม > MaxRerollPrice หรือ
+                    --   หักราคาสุ่มแล้วเพชรไม่พอซื้อตัวถูกสุดที่ยังขาด
+                    --   (= สุ่มไปก็ซื้อไม่ได้ ให้ไปฟาร์มต่อ)
                     -- ============================================
                     if Config.RerollShop then
+                        -- ราคา class ที่ต้องการจาก ClassesDatabase (ClassList[ชื่อ].Price)
+                        local classPrices = {}
+                        do
+                            local db = Client.Databases and Client.Databases.ClassesDatabase
+                            local list = db and db.ClassList
+                            if list then
+                                for _, className in ipairs(Config.BuyClass) do
+                                    local entry = list[className]
+                                    local p = entry and tonumber(entry.Price)
+                                    if p then
+                                        classPrices[className] = p
+                                    else
+                                        print("[Reroll] No price for " .. className .. " in ClassesDatabase")
+                                    end
+                                end
+                            else
+                                warn("[Reroll] ClassesDatabase not found - skipping reroll")
+                            end
+                        end
+
+                        -- ราคาหลังส่วนลด (attribute Discount บน folder class - ตาม decompile AttemptPurchase)
+                        local function effectivePrice(className)
+                            local base = classPrices[className]
+                            if not base then return nil end
+                            local folder = Classes:FindFirstChild(className)
+                            local disc = (folder and folder:GetAttribute("Discount")) or 0
+                            if disc > 0 then
+                                return math.max(math.round(base - base * (disc / 100)), 1)
+                            end
+                            return base
+                        end
+
+                        -- ซื้อทันทีทุกตัวที่อยู่ใน stock และมีเพชรพอ
+                        -- (เตือน "เพชรไม่พอ" แค่ครั้งเดียวต่อ class กันสแปมทุกรอบ)
+                        local lowDiamondWarned = {}
+
+                        local function buyInStockNow()
+                            for _, className in ipairs(Config.BuyClass) do
+                                if not ClassProgress:FindFirstChild(className) then
+                                    local folder = Classes:FindFirstChild(className)
+                                    if folder and isInStock(folder) then
+                                        local p = effectivePrice(className)
+                                        local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                        if p == nil or diamonds >= p then
+                                            print(string.format("[Reroll] %s in stock (%s) - buying",
+                                                className, tostring(p)))
+                                            updateStatus("Buying: " .. className)
+                                            Client.Events.RequestPurchaseClass:FireServer(className)
+                                            -- รอยืนยันว่า owned จริง (กันยิงซ้ำเสียเพชร)
+                                            local vt = 0
+                                            while vt < 2 and not ClassProgress:FindFirstChild(className) do
+                                                task.wait(0.1)
+                                                vt += 0.1
+                                            end
+                                        elseif not lowDiamondWarned[className] then
+                                            lowDiamondWarned[className] = true
+                                            print(string.format("[Reroll] %s in stock but low diamonds (%d/%s)",
+                                                className, diamonds, tostring(p)))
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        -- ราคาถูกสุดของตัวที่ยังขาด (ไม่ owned ไม่ใน stock) - nil ถ้าไม่รู้ราคาตัวไหนเลย
+                        local function minMissingPrice()
+                            local minP
+                            for _, className in ipairs(Config.BuyClass) do
+                                if not ClassProgress:FindFirstChild(className) then
+                                    local folder = Classes:FindFirstChild(className)
+                                    if not (folder and isInStock(folder)) then
+                                        local p = effectivePrice(className)
+                                        if p and (not minP or p < minP) then
+                                            minP = p
+                                        end
+                                    end
+                                end
+                            end
+                            return minP
+                        end
+
                         local need = wantedStillNeeded()
                         if #need == 0 then
-                            print("[Reroll] ทุก class ที่ต้องการมีอยู่แล้ว/อยู่ใน stock - ไม่ต้องสุ่ม")
+                            print("[Reroll] All wanted classes owned/in stock - no rolls needed")
+                        elseif next(classPrices) == nil then
+                            print("[Reroll] No prices known for wanted classes - skipping reroll")
                         else
-                            print("[Reroll] ยังขาด: " .. table.concat(need, ", ") .. " - เริ่มสุ่ม...")
+                            -- สรุปราคา + ตัวที่ยังขาดในบรรทัดเดียว
+                            local pricesStr = {}
+                            for _, className in ipairs(Config.BuyClass) do
+                                table.insert(pricesStr, className .. "=" .. tostring(classPrices[className] or "?"))
+                            end
+                            print("[Reroll] Starting | missing: " .. table.concat(need, ", ")
+                                .. " | prices: " .. table.concat(pricesStr, ", "))
                             updateStatus("Rerolling Shop...")
                             if not Config.MaxRerollPrice then
-                                print("[Reroll] WARN: ไม่ได้ตั้ง MaxRerollPrice - จะสุ่มจนเจอโดยไม่จำกัดราคา")
+                                print("[Reroll] WARN: MaxRerollPrice not set - limited only by diamonds")
                             end
 
                             local rerollRemote = ReplicatedStorage.RemoteEvents
                                 and ReplicatedStorage.RemoteEvents:FindFirstChild("RerollShop")
 
                             if not rerollRemote then
-                                warn("[Reroll] ไม่พบ RemoteEvents.RerollShop - ข้ามการสุ่ม")
+                                warn("[Reroll] RerollShop remote not found - skipping")
                             else
                                 -- จับ event ที่ server ปฏิเสธ (สุ่มใกล้รอบ rotate)
                                 local cantReroll = false
@@ -672,23 +765,62 @@ if isLobby() then
                                     return true
                                 end
 
-                                while #wantedStillNeeded() > 0 do
-                                    -- เช็คราคา: เกินลิมิต = เลิกสุ่มทันที
+                                -- นับ roll ติดกันที่ stock ไม่เปลี่ยน (3 ครั้ง = เลิกสุ่ม)
+                                local timeoutStreak = 0
+                                -- นับครั้งที่โดน server block ติดกัน (6 ครั้ง = เลิกสุ่ม)
+                                local blockStreak = 0
+
+                                while true do
+                                    -- 1) ซื้อทันทีทุกตัวที่อยู่ใน stock และเพชรพอ (เช่นสุ่มได้ Vampire ก็ซื้อ Vampire ก่อน)
+                                    buyInStockNow()
+
+                                    -- 2) ยังขาดอยู่ไหม
+                                    local stillNeed = wantedStillNeeded()
+                                    if #stillNeed == 0 then
+                                        print("[Reroll] ✅ All wanted classes obtained - done")
+                                        updateStatus("✅ Reroll Success!")
+                                        break
+                                    end
+
+                                    -- 3) ราคาสุ่มรอบนี้
                                     local price = LocalPlayer:GetAttribute("RerollPrice")
                                     if type(price) ~= "number" then
                                         task.wait(0.5)
                                         price = LocalPlayer:GetAttribute("RerollPrice")
                                     end
-                                    if type(Config.MaxRerollPrice) == "number" and type(price) == "number"
-                                        and price > Config.MaxRerollPrice then
-                                        print(string.format("[Reroll] ราคาสุ่ม %s > ลิมิต %d - เลิกสุ่ม",
-                                            tostring(price), Config.MaxRerollPrice))
-                                        updateStatus(string.format("Reroll %s > %d - Stop",
-                                            tostring(price), Config.MaxRerollPrice))
+                                    if type(price) ~= "number" then
+                                        print("[Reroll] Cannot read RerollPrice - stopping")
                                         break
                                     end
 
-                                    -- snapshot stock ก่อนยิง
+                                    -- 4) ลิมิตราคาสุ่มจาก Config
+                                    if type(Config.MaxRerollPrice) == "number" and price > Config.MaxRerollPrice then
+                                        print(string.format("[Reroll] Roll price %d > limit %d - stopping",
+                                            price, Config.MaxRerollPrice))
+                                        updateStatus(string.format("Reroll %d > %d - Stop",
+                                            price, Config.MaxRerollPrice))
+                                        break
+                                    end
+
+                                    -- 5) เช็คว่าสุ่มแล้วคุ้มไหม: เพชร - ค่าสุ่ม ต้อง >= ราคาตัวถูกสุดที่ยังขาด
+                                    --    (เช่น มี 510 ค่าสุ่ม 15 => เหลือ 495 < ราคา Vampire 500 = สุ่มไปก็ซื้อไม่ได้ ไปฟาร์มต่อ)
+                                    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                    if diamonds < price then
+                                        print(string.format("[Reroll] Diamonds %d < roll cost %d - farming instead",
+                                            diamonds, price))
+                                        updateStatus("No diamonds for reroll - farming...")
+                                        break
+                                    end
+                                    local minNeed = minMissingPrice()
+                                    if minNeed and (diamonds - price) < minNeed then
+                                        print(string.format(
+                                            "[Reroll] After roll cost: %d left < cheapest needed (%d) - farming instead",
+                                            diamonds - price, minNeed))
+                                        updateStatus("Can't afford after roll - farming...")
+                                        break
+                                    end
+
+                                    -- 6) snapshot stock ก่อนยิง
                                     local before = {}
                                     for _, cls in ipairs(Classes:GetChildren()) do
                                         before[cls.Name] = tostring(isInStock(cls))
@@ -697,11 +829,11 @@ if isLobby() then
                                     cantReroll = false
                                     local ok = pcall(function() rerollRemote:FireServer() end)
                                     if not ok then
-                                        print("[Reroll] ยิง RerollShop ไม่สำเร็จ - ข้ามการสุ่ม")
+                                        print("[Reroll] FireServer failed - stopping")
                                         break
                                     end
 
-                                    -- รอผล: stock เปลี่ยน / โดน block / timeout 6 วิ
+                                    -- 7) รอผล: stock เปลี่ยน / โดน block / timeout 6 วิ
                                     local settled = false
                                     local waited = 0
                                     while waited < 6 do
@@ -716,7 +848,14 @@ if isLobby() then
                                             break
                                         end
                                         if cantReroll then
-                                            print("[Reroll] Server block (ใกล้รอบ rotate) - รอ 5 วิ แล้วลองใหม่")
+                                            blockStreak += 1
+                                            if blockStreak >= 6 then
+                                                print("[Reroll] Still blocked after 6 tries - stopping")
+                                                updateStatus("Can't Reroll Now - stopping")
+                                                settled = true
+                                                break
+                                            end
+                                            print("[Reroll] Blocked near rotate - waiting 5s")
                                             updateStatus("Can't Reroll Now - waiting...")
                                             task.wait(5)
                                             settled = true
@@ -724,17 +863,15 @@ if isLobby() then
                                         end
                                     end
                                     if not settled then
-                                        print("[Reroll] ไม่เห็น stock เปลี่ยน (timeout) - ลอง roll ใหม่")
-                                    else
-                                        local stillNeed = wantedStillNeeded()
-                                        if #stillNeed == 0 then
-                                            print("[Reroll] ✅ ได้ของครบใน stock แล้ว - หยุดสุ่มแล้วไปซื้อ")
-                                            updateStatus("✅ Reroll Success!")
-                                        else
-                                            print(string.format("[Reroll] Roll แล้วยังขาด: %s",
-                                                table.concat(stillNeed, ", ")))
-                                            updateStatus(("Rerolling... need %d"):format(#stillNeed))
+                                        timeoutStreak += 1
+                                        if timeoutStreak >= 3 then
+                                            print("[Reroll] Stock not changing after 3 rolls - stopping")
+                                            break
                                         end
+                                    else
+                                        timeoutStreak = 0
+                                        blockStreak = 0
+                                        updateStatus("Rerolling...")
                                     end
                                     task.wait(0.3)
                                 end
@@ -1050,31 +1187,62 @@ end)
 print("✅ Death Watcher Running")
 
 -- ============================================
--- HP ZERO WATCHER: เซ็ตเลือดมอนเป็น 0 ตลอดเวลา (ไม่ต้องรอ fight loop)
+-- HP ZERO WATCHER: เซ็ตเลือดทุกตัวที่มี Humanoid เป็น 0 ตลอดเวลา (ไม่จำกัดชื่อมอน)
+-- ยกเว้น: ผู้เล่นทุกคน + NPC ฝ่ายเรา (blocklist ด้านล่าง - เพิ่มชื่อได้)
 -- เลือด 0 = ตายปลอม fight loop จะตีต่อ 1 รอบให้ตายจริง
 -- ============================================
 
 task.spawn(function()
-    local MONSTER_NAMES = {
-        ["Cultist"] = true,
-        ["Crossbow Cultist"] = true,
-        ["Juggernaut Cultist"] = true,
+    -- ชื่อ (หรือ prefix) ของ NPC ฝ่ายเราที่ห้ามเซ็ตเลือด
+    local BLOCKLIST_PREFIXES = {
+        "Lost Child",
+        "ClassNPC",
     }
 
+    local function isBlocked(name)
+        for _, prefix in ipairs(BLOCKLIST_PREFIXES) do
+            if name:sub(1, #prefix) == prefix then return true end
+        end
+        return false
+    end
+
+    -- ติดตาม humanoid ทั้งหมด (weak key กัน memory ค้างเมื่อตัวตายหายไป)
+    local tracked = {}
+
+    local function trackModel(model)
+        if typeof(model) ~= "Instance" or not model.Parent then return end
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        -- ข้ามผู้เล่น (ตัวเรา + คนอื่นทั้งหมด)
+        if Players:GetPlayerFromCharacter(model) then return end
+        -- ข้าม NPC ฝ่ายเรา
+        if isBlocked(model.Name) then return end
+        tracked[hum] = model
+    end
+
+    -- 1) ไล่ตัวที่มีอยู่แล้วทั้ง workspace
+    for _, inst in ipairs(workspace:GetDescendants()) do
+        if inst:IsA("Humanoid") and inst.Parent then
+            trackModel(inst.Parent)
+        end
+    end
+
+    -- 2) ตัวใหม่ที่เกิดขึ้นตลอดเวลา (Humanoid โผล่มาเมื่อไหร่จับทันที)
+    workspace.DescendantAdded:Connect(function(inst)
+        if inst:IsA("Humanoid") then
+            task.defer(trackModel, inst.Parent)
+        end
+    end)
+
+    -- 3) วนเซ็ตเลือดเป็น 0 ตลอด - server ดันกลับก็โดนเซ็ตซ้ำ
     while true do
-        pcall(function()
-            local chars = workspace:FindFirstChild("Characters")
-            if chars then
-                for _, c in ipairs(chars:GetChildren()) do
-                    if MONSTER_NAMES[c.Name] then
-                        local hum = c:FindFirstChildOfClass("Humanoid")
-                        if hum and hum.Health > 0 then
-                            hum.Health = 0   -- เซ็ตใหม่ตลอด ถ้า server ดันเลือดกลับก็โดนเซ็ตซ้ำ
-                        end
-                    end
-                end
+        for hum, model in pairs(tracked) do
+            if not hum.Parent or not model.Parent then
+                tracked[hum] = nil   -- ตาย/หายไปแล้ว เอาออกจากการติดตาม
+            elseif hum.Health > 0 then
+                pcall(function() hum.Health = 0 end)
             end
-        end)
+        end
         task.wait(0.2)
     end
 end)
@@ -2249,7 +2417,6 @@ while true do
     local remaining = getStrongholdTimeRemaining()
 
     if not remaining then
-        print("Stronghold timer not found - waiting...")
         updateStatus("Stronghold Timer Not Found...")
         task.wait(1)
     elseif remaining <= 0 then
@@ -2733,13 +2900,17 @@ local function doOneRound()
             for _, cultist in ipairs(cultists) do
                 if not cultist or not cultist.Parent then continue end
                 local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
+                if not cultistHum then continue end
 
-                -- เซ็ต HP = 0 ทันทีที่เจอ (ตายปลอม) แล้วตีต่อทันที - server ต้องได้ hit อีก 1 รอบถึงตายจริง
-                if cultistHum and cultistHum.Health > 0 then
+                -- บังคับ HP = 0 ก่อนตีทุกครั้ง (ตายปลอม) -
+                -- ถ้า server ดันเลือดกลับมาไม่เป็น 0 ให้ตั้งใหม่จนเป็น 0 ก่อนถึงจะตี (สูงสุด 4 ครั้ง)
+                local zeroTries = 0
+                while cultistHum.Health ~= 0 and zeroTries < 4 do
                     pcall(function() cultistHum.Health = 0 end)
+                    task.wait()
+                    zeroTries += 1
                 end
 
-                if not cultistHum then continue end
                 pcall(function()
                     Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
                 end)
