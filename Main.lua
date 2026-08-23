@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0")
+print("Version 1.2.0 / 11.10")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -949,12 +949,17 @@ if isLobby() then
     -- Solo Teleport Logic
     updateStatus("Entering Solo Map...")
 
-    local function hasPlayersInBeam(teleporter)
-        local beamPart = teleporter:FindFirstChild("BeamPart")
-        if not beamPart then return true end
+    -- นับผู้เล่น "อื่น" ที่ยืนอยู่ในวง BeamPart ของ Teleporter หมายเลข num
+    -- คืน math.huge ถ้าหา BeamPart ไม่เจอ = ถือว่าไม่ปลอดภัย (ไม่ใช้วงนั้น)
+    local function countPlayersInBeam(num)
+        local tp = workspace:FindFirstChild("Teleporter" .. num)
+        local beamPart = tp and tp:FindFirstChild("BeamPart")
+        if not beamPart then return math.huge end
 
+        -- รัศมีวงจากขนาด part (เทียบเฉพาะแกน X, Z - ไม่สนความสูง)
         local radius = math.max(beamPart.Size.X, beamPart.Size.Z) / 2
 
+        local count = 0
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 local hrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -963,11 +968,11 @@ if isLobby() then
                         (hrp.Position.X - beamPart.Position.X)^2 +
                         (hrp.Position.Z - beamPart.Position.Z)^2
                     )
-                    if distance <= radius then return true end
+                    if distance <= radius then count += 1 end
                 end
             end
         end
-        return false
+        return count
     end
 
     task.wait(1)
@@ -987,7 +992,7 @@ if isLobby() then
         local selectedTeleporter = nil
         while not selectedTeleporter do
             for _, tp in ipairs(teleporters) do
-                if tp.obj and not hasPlayersInBeam(tp.obj) then
+                if tp.obj and countPlayersInBeam(tp.num) == 0 then
                     selectedTeleporter = tp.num
                     print("Found empty Teleporter:", selectedTeleporter)
                     break
@@ -1008,11 +1013,17 @@ if isLobby() then
         print("Entering Solo map...")
         updateStatus("Loading Map...")
 
-        -- รอสูงสุด 20 วิ ถ้ายังอยู่ Lobby อยู่ = teleport ล้มเหลว ให้ลองใหม่
+        -- รอสูงสุด 20 วิ - เฝ้าตลอดว่ามีคนอื่นเดินเข้าวง Teleporter ที่เราจองไหม
+        -- ถ้ามี = Remove ทิ้งทันทีแล้วไปเลือกวงใหม่ (กันถูกรวมห้องกับคนอื่น)
         local waited = 0
         local TELEPORT_TIMEOUT = 20
+        local someoneJoined = false
         while isLobby() and waited < TELEPORT_TIMEOUT do
             waited = waited + 0.1
+            if countPlayersInBeam(selectedTeleporter) > 0 then
+                someoneJoined = true
+                break
+            end
             if math.floor(waited) % 5 == 0 and math.abs(waited - math.floor(waited)) < 0.05 then
                 print(("Still in Lobby... (%ds)"):format(math.floor(waited)))
             end
@@ -1020,7 +1031,13 @@ if isLobby() then
             task.wait(0.1)
         end
 
-        if isLobby() then
+        if someoneJoined and isLobby() then
+            print(string.format("Someone entered OUR Teleporter%d (%d player) - re-picking",
+                selectedTeleporter, countPlayersInBeam(selectedTeleporter)))
+            updateStatus("Teleporter Occupied - Re-picking...")
+            Client.Events.TeleportEvent:FireServer("Remove")
+            task.wait(1)
+        elseif isLobby() then
             print("Teleport failed or room was taken - retrying...")
             updateStatus("Retrying Teleport...")
             task.wait(0.5)
@@ -1034,6 +1051,38 @@ else
 end
 
 task.wait(0.3)
+
+-- ============================================
+-- Anti-Share: เช็คผู้เล่นอื่นในแมพฟาร์มตลอดเวลา
+-- ถ้ามีคนอื่นอยู่แมพเดียวกับเรา = Teleport กลับ Lobby ทันที
+-- (สคริปต์จะถูกรันใหม่ที่ Lobby แล้วสร้างห้องโซโล่ขึ้นมาเอง)
+-- ============================================
+if game.PlaceId ~= 79546208627805 then
+    task.spawn(function()
+        local TeleportService = game:GetService("TeleportService")
+        task.wait(5) -- ให้แมพโหลดนิ่งๆ ก่อนเช็คครั้งแรก
+
+        while true do
+            local others = 0
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character and plr.Character.Parent then
+                    others += 1
+                end
+            end
+
+            if others > 0 then
+                print("[Anti-Share] " .. others .. " other player(s) in farm map - hopping back to lobby")
+                updateStatus("Player Detected - Hopping...")
+                pcall(function()
+                    TeleportService:Teleport(79546208627805, LocalPlayer)
+                end)
+                task.wait(10) -- กันยิง teleport ซ้ำรัวๆ ตอนยังไม่ย้ายเซิร์ฟ
+            end
+
+            task.wait(3)
+        end
+    end)
+end
 
 -- ============================================
 -- STEP 2: Start Auto-Eat Food (Continuous Background)
@@ -2643,6 +2692,10 @@ local combatCenter = strongholdFloorPos or humanoidRootPart.Position
 local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
 local ATTACK_INTERVAL = 0.18
 
+-- นับว่าตี Cultist ตัวไหนไปแล้วกี่ tick ที่ยังไม่ตาย (weak key กัน memory leak)
+-- ครบ 2 = ถือว่า "ตีไม่ผ่าน" จากระยะ ต้องวาร์ปเข้าไปตีใกล้ๆ
+local failCounts = setmetatable({}, {__mode = "k"})
+
 -- เช็คว่ามอนอยู่ "ภายในสิ่งก่อสร้างจริง" ของ workspace.Map.Landmarks.Stronghold.Building
 -- ตึกเป็นรูปทรงหยักๆ ไม่ใช่สี่เหลี่ยมเป๊ะ ใช้ bounding box กล่องเดียวไม่พอ
 -- เช็คแทนโดยดูว่าตำแหน่งมอนอยู่ในกรอบ (OBB) ของ part ใด part หนึ่งของตึกจริงๆ (บวก margin เล็กน้อยกันคลาดเคลื่อน)
@@ -2887,16 +2940,14 @@ local function doOneRound()
                 end
             end
 
-            for _, cultist in ipairs(cultists) do
-                local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
-                if root then root.CFrame = CFrame.new(combatCenter + Vector3.new(0, 3, 0)) end
-            end
-
+            -- ไม่ดึงมอนมาที่จุดเดิมแล้ว - ลอยเที่ยงที่ combatCenter แล้วตีทุกตัวจากระยะเลย
             hrp.CFrame = CFrame.new(combatCenter - Vector3.new(0, HOVER_HEIGHT, 0))
                 * CFrame.Angles(math.rad(90), 0, 0)
 
             updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
 
+            -- รอบแรก: ตีทุกตัวพร้อมกันจากจุดที่ลอยอยู่ แล้วค่อยดูว่าตัวไหนตีไม่ผ่าน
+            local stubborn = {}
             for _, cultist in ipairs(cultists) do
                 if not cultist or not cultist.Parent then continue end
                 local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
@@ -2911,10 +2962,56 @@ local function doOneRound()
                     zeroTries += 1
                 end
 
-                pcall(function()
-                    Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+                -- server คืน false หรือ error = ตีไม่ผ่านชัดเจน (โดน range check ปัด)
+                local hitFailed = false
+                local invokeOk = pcall(function()
+                    local res = Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+                    if res == false then hitFailed = true end
                 end)
+                if not invokeOk then hitFailed = true end
+
+                failCounts[cultist] = (failCounts[cultist] or 0) + (hitFailed and 2 or 1)
+                if failCounts[cultist] >= 2 then
+                    table.insert(stubborn, cultist)
+                end
             end
+
+            -- ตัวที่ตีไม่ผ่าน = วาร์ปไปใต้ตัวมันทีละตัว - แล้วตี "ทุกตัว" จากจุดใหม่นี้เลย
+            -- (ตัวอื่นที่อยู่ในระยะของจุดวาร์ปจะโดนตีไปด้วยในตาเดียวกัน)
+            for _, cultist in ipairs(stubborn) do
+                if not cultist.Parent then continue end
+                local root = cultist:FindFirstChild("HumanoidRootPart")
+                    or cultist.PrimaryPart
+                if not root then continue end
+
+                hrp.CFrame = CFrame.new(root.Position - Vector3.new(0, HOVER_HEIGHT, 0))
+                    * CFrame.Angles(math.rad(90), 0, 0)
+                task.wait()
+
+                -- จากจุดที่วาร์ปมา: บังคับ HP=0 + ตีทุกตัวที่ยังมีชีวิต
+                for _, target in ipairs(cultists) do
+                    if target and target.Parent then
+                        local thum = target:FindFirstChildOfClass("Humanoid")
+                        if thum then
+                            local tries = 0
+                            while thum.Health ~= 0 and tries < 2 do
+                                pcall(function() thum.Health = 0 end)
+                                task.wait()
+                                tries += 1
+                            end
+                            pcall(function()
+                                Event:InvokeServer(target, axe, ownerId, hrp.CFrame, false)
+                            end)
+                        end
+                    end
+                end
+
+                failCounts[cultist] = 0 -- รีเซ็ตหลังเพิ่งลองแบบเข้าไปใกล้
+            end
+
+            -- กลับไปลอยจุดเดิมรอ tick ถัดไป
+            hrp.CFrame = CFrame.new(combatCenter - Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(90), 0, 0)
 
             task.wait(ATTACK_INTERVAL)
         end
