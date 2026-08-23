@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0 / 5.49")
+print("Version 1.2.0 / 7.35")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -416,6 +416,84 @@ local function retryUntil(label, fn, interval)
         task.wait(interval)
     end
 end
+
+-- ============================================
+-- GLOBAL SHIELD: กล่องล่องหน 6 ด้านคลุมตัวเรา "ตลอดเวลา" (ตั้งแต่เริ่มฟาร์มจนจบ)
+-- หุ้ม 4 ด้านข้าง + บน + ล่าง กันมอนประชิดและกระสุน
+-- สร้างแบบ WELD ติดกับ HumanoidRootPart => ขยับตาม "ทันที" ในระดับ physics
+-- (แม้ FPS เหลือ 5 ก็ตามสนิท เพราะเป็นชิ้นส่วนเดียวกันกับตัวละคร ไม่ต้องรอ loop ขยับ)
+-- ============================================
+local SHIELD_SIZE = 12
+local SHIELD_THICK = 1
+-- SHIELD_SOLID = true จะเปิดกายภาพ (ดันมอน/กันชนจริง) แต่ "ห้ามเปิดตอนทำ Stronghold"
+-- เพราะจะไปชนพื้น/ต้นไม้/แท่น และขวางการตกลง TriggerZone ตอนรอมอนเกิด
+-- ค่าเริ่มต้น false = ดักเฉพาะ raycast กระสุน (CanQuery) ไม่รบกวนการเคลื่อนไหวของสคริปต์
+local SHIELD_SOLID = false
+
+local shieldFolder = nil
+
+local function destroyShield()
+    if shieldFolder then
+        pcall(function() shieldFolder:Destroy() end)
+        shieldFolder = nil
+    end
+end
+
+local function buildShield()
+    destroyShield()
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (char and hrp) then return end
+
+    shieldFolder = Instance.new("Folder")
+    shieldFolder.Name = "SugarHubShield"
+
+    local half = SHIELD_SIZE / 2
+    local t = SHIELD_THICK
+    -- แผงด้านข้างสูง 8 เอียงขึ้น (Y offset +2) = พื้นที่คลุม -2..+6 รอบ HRP
+    -- ไม่แหย่พื้นด้านล่าง กัน physics ดีดตัวออกจาก Floor/TriggerZone
+    local faces = {
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  6, 0), false}, -- บน
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -6, 0), false}, -- ล่าง
+        {Vector3.new(t, 8, SHIELD_SIZE), Vector3.new( half, 2, 0), true},         -- ขวา
+        {Vector3.new(t, 8, SHIELD_SIZE), Vector3.new(-half, 2, 0), true},         -- ซ้าย
+        {Vector3.new(SHIELD_SIZE, 8, t), Vector3.new(0, 2,  half), true},         -- หน้า
+        {Vector3.new(SHIELD_SIZE, 8, t), Vector3.new(0, 2, -half), true},         -- หลัง
+    }
+
+    for i, f in ipairs(faces) do
+        local p = Instance.new("Part")
+        p.Name = "ShieldFace" .. i
+        p.Size = f[1]
+        p.Anchored = false       -- ห้าม anchor - weld กับ HRP เพื่อให้ตามทันทีทุกเฟรม
+        p.CanCollide = SHIELD_SOLID and f[3]
+        p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
+        p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
+        p.Transparency = 1
+        p.Massless = true        -- ไม่เพิ่มน้ำหนัก/แรงกระทบต่อตัวละคร
+        p.Material = Enum.Material.SmoothPlastic
+        p.CFrame = hrp.CFrame * CFrame.new(f[2])
+        p.Parent = shieldFolder
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = hrp
+        weld.Part1 = p
+        weld.Parent = p
+    end
+
+    -- เก็บไว้ในตัวละคร: ตาย/เกิดใหม่ถูกลบไปด้วย ไม่ค้างใน workspace
+    shieldFolder.Parent = char
+end
+
+-- ตายเกิดใหม่ = สร้างโล่ใหม่ให้อัตโนมัติ
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 10)
+    if hrp then
+        task.wait(0.2) -- รอ character ตั้งค่าเสร็จก่อน
+        buildShield()
+    end
+end)
 
 print("✅ GUI Loaded")
 
@@ -1205,32 +1283,85 @@ print("✅ Auto-Eat Running")
 
 -- ============================================
 -- DEATH WATCHER: ตายแล้วรอ 5 วิ กดเล่นใหม่
+-- เดิมฟังแค่ Humanoid.Died ซึ่งตอนตาย "ระหว่าง Stronghold" ไม่ยอมฟิง
+-- (เกมใช้ระบบเลือด custom - เหมือนมอนที่อ่านเลือดจาก attribute "Health")
+-- จึงเช็คหลายสัญญาณพร้อมกันแบบ poll ตลอด:
+--   1) Humanoid.Health <= 0          (ตายแบบปกติ)
+--   2) attribute "Health" <= 0       บนโมเดลตัวละคร (ระบบเลือด custom)
+--   3) attribute "Dead" == true      flag ตายของเกม
+--   4) อยู่แมพฟาร์มแต่ Character หายค้าง > 2 วิ (ค้างหน้าจอเลือกเล่นใหม่)
 -- ============================================
 
-local suppressPlayAgain = false   -- true = เป็นการ reset ที่เราสั่งเอง ไม่ต้องกดเล่นใหม่
+local suppressPlayAgain = false   -- ปกติทิ้ง false เสมอ: จบรอบ/reset ตัวเองก็ต้องกดเล่นใหม่ต่อ (true = งดกดชั่วคราวเท่านั้น)
 
 task.spawn(function()
     local AcceptPlayAgain = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("AcceptPlayAgain")
     local handling = false
 
-    local function onDied()
+    -- รอ character แรกก่อน กัน false positive ตอนสคริปต์เพิ่งเริ่ม/เพิ่งเข้าแมพ
+    if not (LocalPlayer.Character and LocalPlayer.Character.Parent) then
+        LocalPlayer.CharacterAdded:Wait()
+    end
+
+    -- เช็คว่า "ตาย" จากหลายสัญญาณ (สัญญาณไหนเจอก่อนก็ถือว่าตาย)
+    local function isDeadNow()
+        local char = LocalPlayer.Character
+        if not (char and char.Parent) then return false end -- เคสนี้จับใน loop หลักด้วย timer
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health <= 0 then return true end
+
+        local attrHP = char:GetAttribute("Health")
+        if type(attrHP) == "number" and attrHP <= 0 then return true end
+
+        if char:GetAttribute("Dead") == true then return true end
+
+        return false
+    end
+
+    local function clickPlayAgain()
         if suppressPlayAgain or handling then return end
         handling = true
         print("[DEATH] Character died - waiting 5s then respawning")
         pcall(updateStatus, "Died - Play Again in 5s...")
         task.wait(5)
+
+        -- กดซ้ำจนกว่าจะเกิดใหม่จริง (กันกดครั้งเดียวแล้วหลุด)
         print("Clicking Play Again...")
-        pcall(function() AcceptPlayAgain:FireServer() end)
+        for _ = 1, 15 do
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if char and char.Parent and hum and hum.Health > 0 then
+                print("[DEATH] Respawned!")
+                break
+            end
+            pcall(updateStatus, "Died - Clicking Play Again...")
+            pcall(function() AcceptPlayAgain:FireServer() end)
+            task.wait(1)
+        end
         handling = false
     end
 
-    local function bindDeath(char)
-        local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 10)
-        if hum then hum.Died:Connect(onDied) end
+    -- poll เร็วๆ ตลอดเวลา - จับตายทุกรูปแบบ รวมตอนอยู่ Stronghold
+    local missingSince = nil
+    while true do
+        local char = LocalPlayer.Character
+        if char and char.Parent then
+            missingSince = nil
+            if not handling and isDeadNow() then
+                clickPlayAgain()
+            end
+        elseif game.PlaceId ~= 79546208627805 then
+            -- อยู่แมพฟาร์มแต่ Character หายไป = ตายค้างหน้าจอเล่นใหม่
+            missingSince = missingSince or os.clock()
+            if not handling and os.clock() - missingSince >= 2 then
+                missingSince = nil
+                print("[DEATH] Character missing in farm map - treating as death")
+                clickPlayAgain()
+            end
+        end
+        task.wait(0.25)
     end
-
-    if LocalPlayer.Character then bindDeath(LocalPlayer.Character) end
-    LocalPlayer.CharacterAdded:Connect(bindDeath)   -- re-bind ทุก respawn
 end)
 
 print("✅ Death Watcher Running")
@@ -1306,6 +1437,9 @@ player.CharacterAdded:Connect(function(char)
     humanoidRootPart = char:WaitForChild("HumanoidRootPart", 10)
     humanoid = char:WaitForChild("Humanoid", 10)
 end)
+
+-- เปิดโล่รอบตัวตั้งแต่เริ่มฟาร์ม (weld ติดตัว ตามเราทันทีจนจบเกม)
+buildShield()
 
 local mainFire = retryUntil("find MainFire", function()
     local map = workspace:FindFirstChild("Map")
@@ -1636,69 +1770,7 @@ platform.CanCollide = true
 platform.Transparency = 1
 platform.Parent = workspace
 
--- กำแพงป้องกันรอบตัวขณะตัดไม้ (6 ด้าน รวมบน/ล่าง)
-local function createProtectionWalls()
-    local walls = {}
-    local wallSize = Vector3.new(1, 10, 10)
-
-    -- 4 ด้านข้าง
-    for i = 1, 4 do
-        local wall = Instance.new("Part")
-        wall.Name = "ProtectionWall" .. i
-        wall.Size = wallSize
-        wall.Anchored = true
-        wall.CanCollide = true
-        wall.Transparency = 1
-        wall.Parent = workspace
-        table.insert(walls, wall)
-    end
-
-    -- ฝาบน (กันหัว)
-    local topWall = Instance.new("Part")
-    topWall.Name = "ProtectionWallTop"
-    topWall.Size = Vector3.new(12, 1, 12)
-    topWall.Anchored = true
-    topWall.CanCollide = true
-    topWall.Transparency = 1
-    topWall.Parent = workspace
-    table.insert(walls, topWall)
-
-    -- ฝาล่าง
-    local bottomWall = Instance.new("Part")
-    bottomWall.Name = "ProtectionWallBottom"
-    bottomWall.Size = Vector3.new(12, 1, 12)
-    bottomWall.Anchored = true
-    bottomWall.CanCollide = true
-    bottomWall.Transparency = 1
-    bottomWall.Parent = workspace
-    table.insert(walls, bottomWall)
-
-    return walls
-end
-
-local function updateProtectionWalls(walls, centerPos)
-    if not walls or #walls ~= 6 then return end
-    local distance = 6
-
-    -- หน้า/หลัง/ซ้าย/ขวา
-    walls[1].CFrame = CFrame.new(centerPos + Vector3.new(distance, 0, 0))
-    walls[2].CFrame = CFrame.new(centerPos + Vector3.new(-distance, 0, 0))
-    walls[3].CFrame = CFrame.new(centerPos + Vector3.new(0, 0, distance)) * CFrame.Angles(0, math.rad(90), 0)
-    walls[4].CFrame = CFrame.new(centerPos + Vector3.new(0, 0, -distance)) * CFrame.Angles(0, math.rad(90), 0)
-    -- บน (กันหัว)
-    walls[5].CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0))
-    -- ล่าง
-    walls[6].CFrame = CFrame.new(centerPos + Vector3.new(0, -6, 0))
-end
-
-local function destroyProtectionWalls(walls)
-    if not walls then return end
-    for _, wall in ipairs(walls) do
-        pcall(function() wall:Destroy() end)
-    end
-end
-
-local protectionWalls = createProtectionWalls()
+-- (กำแพงป้องกันเดิมถูกแทนด้วย GLOBAL SHIELD แบบ weld ติดตัวด้านบนแล้ว)
 local airHeight = 20
 local treeIndex = 1
 
@@ -1911,9 +1983,6 @@ while currentLevel < maxLevel and not isTimerExceeded() do
             humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
             platform.Position = cutPos - Vector3.new(0, 3, 0)
 
-            -- อัพเดทกำแพงป้องกันรอบตัว
-            updateProtectionWalls(protectionWalls, cutPos)
-
             task.wait(0.1)
 
             local hitCount = 0
@@ -2031,9 +2100,6 @@ if getTotalWood() < NEED_WOOD then
         local cutPos = treePos + Vector3.new(5, 0, 0)
         hrp.CFrame = CFrame.lookAt(cutPos, treePos)
         platform.Position = cutPos - Vector3.new(0, 3, 0)
-
-        -- อัพเดทกำแพงป้องกันรอบตัว
-        updateProtectionWalls(protectionWalls, cutPos)
 
         task.wait(0.1)
 
@@ -2474,65 +2540,8 @@ end
 print("\n[Step 5] Warping to Wave1 TriggerZone...")
 updateStatus("Warping to TriggerZone...")
 
--- กล่องล่องหน 6 ด้านคลุมตัวเรา กันมอนประชิดและกระสุน Crossbow
-local SHIELD_SIZE = 12
-local SHIELD_THICK = 1
-
-local shieldParts = {}
-local shieldFolder
-
-local function buildShield()
-    if shieldFolder then return end
-
-    shieldFolder = Instance.new("Folder")
-    shieldFolder.Name = "StrongholdShield"
-
-    local half = SHIELD_SIZE / 2
-    local t = SHIELD_THICK
-    local faces = {
-        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  half, 0)},  -- บน
-        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -half, 0)},  -- ล่าง
-        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new( half, 0, 0)},  -- ขวา
-        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new(-half, 0, 0)},  -- ซ้าย
-        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0,  half)},  -- หน้า
-        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0, -half)},  -- หลัง
-    }
-
-    for i, f in ipairs(faces) do
-        local p = Instance.new("Part")
-        p.Name = "Face" .. i
-        p.Size = f[1]
-        p.Anchored = true        -- ขับด้วย CFrame ทุก tick ไม่ให้ physics ลากตัวเรา
-        -- บน/ล่าง (offset.Y ~= 0) ไม่ทึบ กันชนพื้น Stronghold จนโดนดีดออกจาก TriggerZone
-        -- (กระสุน Crossbow Cultist ยิงแนวนอน ไม่จำเป็นต้องกันบน/ล่างอยู่แล้ว)
-        p.CanCollide = (f[2].Y == 0)
-        p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
-        p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
-        p.Transparency = 1
-        p.Massless = true
-        p.Material = Enum.Material.SmoothPlastic
-        p.Parent = shieldFolder
-        table.insert(shieldParts, {part = p, offset = f[2]})
-    end
-
-    shieldFolder.Parent = workspace
-end
-
-local function updateShield(hrp)
-    if not hrp then return end
-    local pos = hrp.Position
-    for _, entry in ipairs(shieldParts) do
-        entry.part.CFrame = CFrame.new(pos + entry.offset)
-    end
-end
-
-local function destroyShield()
-    if shieldFolder then
-        shieldFolder:Destroy()
-        shieldFolder = nil
-    end
-    shieldParts = {}
-end
+-- (โล่ Stronghold แบบเดิมถูกยกเลิก - ใช้ GLOBAL SHIELD แบบ weld ติดตัว
+--  ที่สร้างไว้ตอนต้นสคริปต์แทน ซึ่งเปิดตลอดและตามตัวทันทีทุก FPS)
 
 -- ล็อคตัวไม่ให้ตกตลอดเวลา (ดึง character สดทุก tick กัน respawn)
 local function getLiveParts()
@@ -2565,7 +2574,6 @@ local function warpToTriggerZone()
     local hrp = getLiveParts()
     if hrp then
         hrp.CFrame = CFrame.new(tzWaitPos)
-        updateShield(hrp)
     end
 end
 
@@ -2618,7 +2626,6 @@ do
                 local hrp = getLiveParts()
                 if hrp then
                     hrp.CFrame = CFrame.new(floorPos)
-                    updateShield(hrp)
                 end
                 task.wait(0.3)
             end
@@ -2711,7 +2718,6 @@ local lockConn
 lockConn = RunService.Heartbeat:Connect(function()
     local hrp = getLiveParts()
     ensureFlyBody(hrp)
-    updateShield(hrp)
 end)
 
 -- Stronghold เคลียร์แล้ว = ตำแหน่ง FinalGate เปลี่ยนจากที่จับไว้ตอนแรก
@@ -2802,7 +2808,7 @@ local function doOneRound()
                 updateStatus("Re-warp waiting for spawn...")
                 if floorPos2 then
                     local hrp = getLiveParts()
-                    if hrp then hrp.CFrame = CFrame.new(floorPos2) updateShield(hrp) end
+                    if hrp then hrp.CFrame = CFrame.new(floorPos2) end
                     task.wait(0.3)
                 end
                 warpToTriggerZone()
@@ -3158,5 +3164,6 @@ print(string.format("✅ Day %d reached - resetting!", getCurrentDay()))
 updateStatus("✅ Done! Resetting...")
 task.wait(0.3)
 pcall(function()
+    -- ฆ่าตัวเองจบรอบ - ปล่อยให้ Death Watcher จับแล้วกดเล่นใหม่ต่อได้เลย (จบรอบ = เริ่มรอบใหม่)
     LocalPlayer.Character:BreakJoints()
 end)
