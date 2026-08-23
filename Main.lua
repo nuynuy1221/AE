@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0 / 7.35")
+print("Version 1.2.0 / 8.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -423,7 +423,7 @@ end
 -- สร้างแบบ WELD ติดกับ HumanoidRootPart => ขยับตาม "ทันที" ในระดับ physics
 -- (แม้ FPS เหลือ 5 ก็ตามสนิท เพราะเป็นชิ้นส่วนเดียวกันกับตัวละคร ไม่ต้องรอ loop ขยับ)
 -- ============================================
-local SHIELD_SIZE = 12
+local SHIELD_SIZE = 8     -- ครึ่งรัศมี 4 รอบ HRP = พอดีคลุมหัวถึงเท้า
 local SHIELD_THICK = 1
 -- SHIELD_SOLID = true จะเปิดกายภาพ (ดันมอน/กันชนจริง) แต่ "ห้ามเปิดตอนทำ Stronghold"
 -- เพราะจะไปชนพื้น/ต้นไม้/แท่น และขวางการตกลง TriggerZone ตอนรอมอนเกิด
@@ -451,15 +451,14 @@ local function buildShield()
 
     local half = SHIELD_SIZE / 2
     local t = SHIELD_THICK
-    -- แผงด้านข้างสูง 8 เอียงขึ้น (Y offset +2) = พื้นที่คลุม -2..+6 รอบ HRP
-    -- ไม่แหย่พื้นด้านล่าง กัน physics ดีดตัวออกจาก Floor/TriggerZone
+    -- กล่องสมมาตรครบ 6 ด้านรอบ HRP: คลุม -4..+4 = หัวจดเท้า (HRP อยู่กลางตัวละคร)
     local faces = {
-        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  6, 0), false}, -- บน
-        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -6, 0), false}, -- ล่าง
-        {Vector3.new(t, 8, SHIELD_SIZE), Vector3.new( half, 2, 0), true},         -- ขวา
-        {Vector3.new(t, 8, SHIELD_SIZE), Vector3.new(-half, 2, 0), true},         -- ซ้าย
-        {Vector3.new(SHIELD_SIZE, 8, t), Vector3.new(0, 2,  half), true},         -- หน้า
-        {Vector3.new(SHIELD_SIZE, 8, t), Vector3.new(0, 2, -half), true},         -- หลัง
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  half, 0), false}, -- บน
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -half, 0), false}, -- ล่าง
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new( half, 0, 0), true},  -- ขวา
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new(-half, 0, 0), true},  -- ซ้าย
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0,  half), true},  -- หน้า
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0, -half), true},  -- หลัง
     }
 
     for i, f in ipairs(faces) do
@@ -2640,7 +2639,7 @@ end
 
 
 -- ============================================
--- STEP 6: Fight loop - ล็อคลอยตลอด, ตี Cultist จากด้านใต้ 15 studs, เช็คซ้ำเรื่อยๆ
+-- STEP 6: Fight loop - ตี Cultist ทีละตัว: บินไปหา -> ลดเลือด -> ตีจนตาย -> ตัวต่อไป
 -- ============================================
 
 print("\n[Step 6] Fighting Cultists in Stronghold...")
@@ -2665,10 +2664,6 @@ end
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
 local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ป "ด้านบน" ของมอน 10 studs (หันหน้าลง)
 local ATTACK_INTERVAL = 0.18
-
--- นับว่าตี Cultist ตัวไหนไปแล้วกี่ tick ที่ยังไม่ตาย (weak key กัน memory leak)
--- ครบ 2 = ถือว่า "ตีไม่ผ่าน" จากระยะ ต้องวาร์ปเข้าไปตีใกล้ๆ
-local failCounts = setmetatable({}, {__mode = "k"})
 
 -- เช็คมอนที่จะตี: ดูจาก attribute "StrongholdEnemy" บนโมเดลใน workspace.Characters โดยตรง
 -- (ยกเลิกการเช็คชื่อ/ระยะ/Floor เดิมทั้งหมด - เชื่อ flag ที่เกม stamp ไว้บนตัวโมเดลเอง)
@@ -2771,6 +2766,88 @@ local function isStrongholdCleared()
     return clearHits >= CLEAR_CONFIRM_COUNT
 end
 
+-- ============================================
+-- ตีมอนทีละตัว: บินไปหา -> ลดเลือด -> ตีจนตาย -> เสร็จแล้วค่อยไปตัวต่อไป
+-- (ยกเลิกการตีจากระยะไกล/หลายระยะแล้ว - ทุกตัวจัดการเหนือหัวมันเท่านั้น)
+-- ============================================
+local MAX_HITS_PER_TARGET = 50 -- กันลูปค้าง: ตีเกินนี้ = ข้ามไปตัวอื่นก่อน วนมาแก้ใหม่รอบถัดไป
+
+local function killSingleCultist(cultist)
+    -- re-equip axe ก่อนเริ่มตัวนี้เผื่อหลุด
+    local char = LocalPlayer.Character
+    local th = char and char:FindFirstChild("ToolHandle")
+    if not (th and th:FindFirstChild("OriginalItem")) then
+        Client.InventoryHandler.RequestEquipItem(bestAxe)
+        task.wait(0.1)
+        char = LocalPlayer.Character
+        th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then
+            axe = th.OriginalItem.Value
+        end
+    end
+
+    local function getRoot()
+        if not cultist.Parent then return nil end
+        return cultist:FindFirstChild("HumanoidRootPart")
+            or cultist.PrimaryPart
+            or cultist:FindFirstChildWhichIsA("BasePart")
+    end
+
+    -- 1) บินไปหามอน: ลอยเหนือหัวมัน HOVER_HEIGHT studs (หันหน้าลง)
+    local root = getRoot()
+    local hrp = getLiveParts()
+    if not (root and hrp) then return false end
+    hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+        * CFrame.Angles(math.rad(-90), 0, 0)
+    task.wait()
+    task.wait() -- รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
+
+    -- 2) ลดเลือดก่อนตี (attribute "Health" + Humanoid.Health) - ลองสูงสุด 3 รอบ
+    for _ = 1, 3 do
+        pcall(function() zeroEnemyHealth(cultist) end)
+        task.wait(0.2)
+        local cultHum = cultist:FindFirstChildOfClass("Humanoid")
+            or cultist:FindFirstChildWhichIsA("Humanoid", true)
+        local attrZero = cultist:GetAttribute("Health") == 0
+        local humZero = cultHum and cultHum.Parent ~= nil and cultHum.Health == 0
+        if attrZero or humZero then break end
+    end
+
+    -- 3) ตี "ตัวนี้ตัวเดียว" จนหายไปจาก workspace
+    --    (เลือด 0 = ตายปลอม ต้องตีต่ออีก 1 รอบถึงตายจริง)
+    local hits = 0
+    while cultist.Parent do
+        if isStrongholdCleared() then return false end
+        if hits >= MAX_HITS_PER_TARGET then
+            print("[Fight] Target not dying after " .. hits .. " hits - skip to next")
+            return false
+        end
+
+        hrp = getLiveParts()
+        if not hrp then
+            task.wait(0.5)
+            continue
+        end
+
+        root = getRoot()
+        if not root then break end
+
+        -- ตามมอนที่เดินหนี: ลอยเหนือหัวมันตลอดระหว่างตี
+        hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+            * CFrame.Angles(math.rad(-90), 0, 0)
+
+        pcall(function()
+            Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+        end)
+
+        hits += 1
+        task.wait(ATTACK_INTERVAL)
+    end
+
+    print("[Fight] Cultist down (" .. hits .. " hits)")
+    return true
+end
+
 local TOTAL_ROUNDS = 3
 local completedRounds = 0
 
@@ -2834,104 +2911,15 @@ local function doOneRound()
             updateStatus("Waiting for Cultists... (round " .. completedRounds+1 .. ")")
             task.wait(1)
         else
-            local hrp = getLiveParts()
-            if not hrp then task.wait(0.2) continue end
-
-            -- re-equip axe ก่อนตีทุก tick
-            local char = LocalPlayer.Character
-            local th = char and char:FindFirstChild("ToolHandle")
-            if not (th and th:FindFirstChild("OriginalItem")) then
-                Client.InventoryHandler.RequestEquipItem(bestAxe)
-                task.wait(0.1)
-                char = LocalPlayer.Character
-                th = char and char:FindFirstChild("ToolHandle")
-                if th and th:FindFirstChild("OriginalItem") then
-                    axe = th.OriginalItem.Value
-                end
-            end
-
-            -- ไม่ดึงมอนมาที่จุดเดิมแล้ว - ลอยเหนือจุดกลางห้องตี 10 studs (หันหน้าลง) แล้วตีทุกตัว
-            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
-                * CFrame.Angles(math.rad(-90), 0, 0)
-
             updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
 
-            -- รอบแรก: ตีทุกตัวพร้อมกันจากจุดที่ลอยอยู่ แล้วค่อยดูว่าตัวไหนตีไม่ผ่าน
-            local stubborn = {}
+            -- ตีทีละตัว: บินไปหามอน -> ลดเลือด -> ตีจนตาย -> ค่อยไปตัวต่อไป
             for _, cultist in ipairs(cultists) do
-                if not cultist or not cultist.Parent then continue end
-                local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
-                    or cultist:FindFirstChildWhichIsA("Humanoid", true)
-                if not cultistHum then continue end
-
-                -- ตั้งเลือด -> "รอ 0.2 วิ" ให้ค่า settle -> ค่อยตี (ลองได้สูงสุด 3 รอบ)
-                -- ตั้งทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health ผ่าน zeroEnemyHealth
-                -- ถ้าครบ 3 รอบ server ยังดันเลือดคืนไม่เป็น 0 = ตีตัวนั้นแบบปกติเลย
-                local zeroed = false
-                for _ = 1, 3 do
-                    pcall(function() zeroEnemyHealth(cultist) end)
-                    task.wait(0.2)
-                    local attrZero = cultist:GetAttribute("Health") == 0
-                    local humZero = cultistHum.Parent ~= nil and cultistHum.Health == 0
-                    if attrZero or humZero then
-                        zeroed = true
-                        break
-                    end
-                end
-
-                -- server คืน false หรือ error = ตีไม่ผ่านชัดเจน (โดน range check ปัด)
-                local hitFailed = false
-                local invokeOk = pcall(function()
-                    local res = Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
-                    if res == false then hitFailed = true end
-                end)
-                if not invokeOk then hitFailed = true end
-
-                -- ตีแล้วเลือดไม่เป็น 0 = นับเป็นตัวดื้อ (วาร์ปเข้าไปจัดการใกล้ๆ)
-                failCounts[cultist] = (failCounts[cultist] or 0)
-                    + ((hitFailed or not zeroed) and 2 or 1)
-                if failCounts[cultist] >= 2 then
-                    table.insert(stubborn, cultist)
+                if isStrongholdCleared() then break end
+                if cultist and cultist.Parent then
+                    killSingleCultist(cultist)
                 end
             end
-
-            -- ตัวที่ตีไม่ผ่าน = วาร์ปเข้าไปใกล้ๆ ทีละตัว - แล้วตี "ทุกตัว" จากจุดใหม่นี้เลย
-            -- สำคัญ: พอวาร์ปถึงต้อง "เคลียร์เลือดใหม่ 1 รอบก่อนตี" (server เคยดันเลือดคืน
-            -- ตอนตีระยะไกลไม่ผ่าน) - ถ้ายังไม่ตาย เคลียร์เลือดอีกรอบแล้วตีซ้ำอีกครั้ง
-            for _, cultist in ipairs(stubborn) do
-                if not cultist.Parent then continue end
-                local root = cultist:FindFirstChild("HumanoidRootPart")
-                    or cultist.PrimaryPart
-                if not root then continue end
-
-                -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
-                hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
-                    * CFrame.Angles(math.rad(-90), 0, 0)
-                task.wait()
-                task.wait()
-
-                -- 2 รอบ: [ตั้งเลือด (attribute+Humanoid) -> รอ 0.2 วิ -> ตี] x2 กับทุกตัว
-                for _ = 1, 2 do
-                    for _, target in ipairs(cultists) do
-                        if target and target.Parent then
-                            pcall(function() zeroEnemyHealth(target) end)
-                            task.wait(0.2)
-                            pcall(function()
-                                Event:InvokeServer(target, axe, ownerId, hrp.CFrame, false)
-                            end)
-                        end
-                    end
-                    task.wait(0.1) -- พักนิดให้ server ประมวลผลรอบแรกก่อนรอบสอง
-                end
-
-                failCounts[cultist] = 0 -- รีเซ็ตหลังเพิ่งลองแบบเข้าไปใกล้
-            end
-
-            -- กลับไปลอยจุดเดิม (เหนือจุดกลาง 10 studs) รอ tick ถัดไป
-            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
-                * CFrame.Angles(math.rad(-90), 0, 0)
-
-            task.wait(ATTACK_INTERVAL)
         end
     end
 end
