@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0 / 5.04")
+print("Version 1.2.0 / 5.49")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2656,7 +2656,7 @@ do
 end
 
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
-local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ปห่างจากตัวมอนแค่ 10 studs เท่านั้น
+local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ป "ด้านบน" ของมอน 10 studs (หันหน้าลง)
 local ATTACK_INTERVAL = 0.18
 
 -- นับว่าตี Cultist ตัวไหนไปแล้วกี่ tick ที่ยังไม่ตาย (weak key กัน memory leak)
@@ -2683,16 +2683,34 @@ local function findCultists()
     return list
 end
 
+-- ลอยแบบ IY Fly (ไม่ hard-lock): ติด BodyVelocity บน HRP คนเดียวพอ
+-- ตัวละครยังเป็น "ปกติ" - มี animation ฟิสิกส์ทำงาน แค่ลอยนิ่งไม่ตก
+-- (เดิมใช้ PlatformStand + เคลียร์ velocity ทุกเฟรม = แข็งค้างเป็นหุ่น)
+local flyBodyVelocity
+
+local function ensureFlyBody(hrp)
+    if not hrp then return end
+    -- HRP เปลี่ยนไหม (ตายเกิดใหม่) ถ้าเปลี่ยนสร้างติดใหม่อัตโนมัติ
+    if not flyBodyVelocity or not flyBodyVelocity.Parent then
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.Name = "SugarHubHover"
+        flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        flyBodyVelocity.Velocity = Vector3.zero -- ลอยนิ่ง - แรงนี้สู้แรงโน้มถ่วงเอง
+        flyBodyVelocity.Parent = hrp
+    end
+end
+
+local function destroyFlyBody()
+    if flyBodyVelocity then
+        flyBodyVelocity:Destroy()
+        flyBodyVelocity = nil
+    end
+end
+
 local lockConn
 lockConn = RunService.Heartbeat:Connect(function()
-    local hrp, hum = getLiveParts()
-    if hum and hum.Health > 0 then
-        hum.PlatformStand = true
-        hum.Sit = false
-    end
-    if not hrp then return end
-    hrp.AssemblyLinearVelocity = Vector3.zero
-    hrp.AssemblyAngularVelocity = Vector3.zero
+    local hrp = getLiveParts()
+    ensureFlyBody(hrp)
     updateShield(hrp)
 end)
 
@@ -2826,9 +2844,9 @@ local function doOneRound()
                 end
             end
 
-            -- ไม่ดึงมอนมาที่จุดเดิมแล้ว - ลอยเที่ยงที่ combatCenter แล้วตีทุกตัวจากระยะเลย
-            hrp.CFrame = CFrame.new(combatCenter - Vector3.new(0, HOVER_HEIGHT, 0))
-                * CFrame.Angles(math.rad(90), 0, 0)
+            -- ไม่ดึงมอนมาที่จุดเดิมแล้ว - ลอยเหนือจุดกลางห้องตี 10 studs (หันหน้าลง) แล้วตีทุกตัว
+            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
 
             updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
 
@@ -2880,9 +2898,9 @@ local function doOneRound()
                     or cultist.PrimaryPart
                 if not root then continue end
 
-                -- วาร์ปไปใต้ตัวมันห่าง 10 studs + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
-                hrp.CFrame = CFrame.new(root.Position - Vector3.new(0, HOVER_HEIGHT, 0))
-                    * CFrame.Angles(math.rad(90), 0, 0)
+                -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
+                hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                    * CFrame.Angles(math.rad(-90), 0, 0)
                 task.wait()
                 task.wait()
 
@@ -2903,9 +2921,9 @@ local function doOneRound()
                 failCounts[cultist] = 0 -- รีเซ็ตหลังเพิ่งลองแบบเข้าไปใกล้
             end
 
-            -- กลับไปลอยจุดเดิมรอ tick ถัดไป
-            hrp.CFrame = CFrame.new(combatCenter - Vector3.new(0, HOVER_HEIGHT, 0))
-                * CFrame.Angles(math.rad(90), 0, 0)
+            -- กลับไปลอยจุดเดิม (เหนือจุดกลาง 10 studs) รอ tick ถัดไป
+            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
 
             task.wait(ATTACK_INTERVAL)
         end
@@ -3113,8 +3131,7 @@ end
 
 if lockConn then lockConn:Disconnect() end
 destroyShield()
-local _, myHum = getLiveParts()
-if myHum then myHum.PlatformStand = false end
+destroyFlyBody() -- ถอน BodyVelocity คืนการควบคุมตัวละครปกติ (ไม่มี PlatformStand ให้ปลดแล้ว)
 
 print("\n=== Sugar Hub Complete ===")
 print("✅ Stronghold sequence finished! (3 rounds)")
