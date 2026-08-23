@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0 / 11.10")
+print("Version 1.2.0")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1236,60 +1236,50 @@ end)
 print("✅ Death Watcher Running")
 
 -- ============================================
--- HP ZERO WATCHER: เซ็ตเลือดทุกตัวที่มี Humanoid เป็น 0 ตลอดเวลา (ไม่จำกัดชื่อมอน)
--- ยกเว้น: ผู้เล่นทุกคน + NPC ฝ่ายเรา (blocklist ด้านล่าง - เพิ่มชื่อได้)
+-- HP ZERO WATCHER: เซ็ตเลือดเป็น 0 เฉพาะ "มอน StrongholdEnemy" ตลอดเวลา
+-- เช็คจาก attribute "StrongholdEnemy" บนตัวโมเดลใน workspace.Characters
+-- (ไม่กรองด้วยชื่อ/ระยะแล้ว - Juggernaut Cultist ฯลฯ มี flag นี้ = true)
+-- สำคัญ: บางตัวระบบอ่านเลือดจาก attribute "Health" บนโมเดลหลักเอง ไม่ใช่ Humanoid
 -- เลือด 0 = ตายปลอม fight loop จะตีต่อ 1 รอบให้ตายจริง
 -- ============================================
 
+-- เช็คว่าโมเดลนี้เป็นมอน Stronghold หรือไม่ (จาก attribute บนโมเดลโดยตรง)
+local function isStrongholdEnemy(model)
+    if typeof(model) ~= "Instance" or not model.Parent then return false end
+    if model:GetAttribute("StrongholdEnemy") ~= true then return false end
+    if Players:GetPlayerFromCharacter(model) then return false end
+    return true
+end
+
+-- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
+-- (Humanoid บางตัวอาจอยู่ลึกในโมเดล ใช้ recursive fallback) - คืน true ถ้าช่องทางไหนเป็น 0
+local function zeroEnemyHealth(model)
+    pcall(function() model:SetAttribute("Health", 0) end)
+
+    local zeroed = model:GetAttribute("Health") == 0
+    local hum = model:FindFirstChildOfClass("Humanoid")
+        or model:FindFirstChildWhichIsA("Humanoid", true)
+    if hum then
+        pcall(function() hum.Health = 0 end)
+        if hum.Health == 0 then zeroed = true end
+    end
+    return zeroed
+end
+
 task.spawn(function()
-    -- ชื่อ (หรือ prefix) ของ NPC ฝ่ายเราที่ห้ามเซ็ตเลือด
-    local BLOCKLIST_PREFIXES = {
-        "Lost Child",
-        "ClassNPC",
-    }
-
-    local function isBlocked(name)
-        for _, prefix in ipairs(BLOCKLIST_PREFIXES) do
-            if name:sub(1, #prefix) == prefix then return true end
-        end
-        return false
-    end
-
-    -- ติดตาม humanoid ทั้งหมด (weak key กัน memory ค้างเมื่อตัวตายหายไป)
-    local tracked = {}
-
-    local function trackModel(model)
-        if typeof(model) ~= "Instance" or not model.Parent then return end
-        local hum = model:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-        -- ข้ามผู้เล่น (ตัวเรา + คนอื่นทั้งหมด)
-        if Players:GetPlayerFromCharacter(model) then return end
-        -- ข้าม NPC ฝ่ายเรา
-        if isBlocked(model.Name) then return end
-        tracked[hum] = model
-    end
-
-    -- 1) ไล่ตัวที่มีอยู่แล้วทั้ง workspace
-    for _, inst in ipairs(workspace:GetDescendants()) do
-        if inst:IsA("Humanoid") and inst.Parent then
-            trackModel(inst.Parent)
-        end
-    end
-
-    -- 2) ตัวใหม่ที่เกิดขึ้นตลอดเวลา (Humanoid โผล่มาเมื่อไหร่จับทันที)
-    workspace.DescendantAdded:Connect(function(inst)
-        if inst:IsA("Humanoid") then
-            task.defer(trackModel, inst.Parent)
-        end
-    end)
-
-    -- 3) วนเซ็ตเลือดเป็น 0 ตลอด - server ดันกลับก็โดนเซ็ตซ้ำ
     while true do
-        for hum, model in pairs(tracked) do
-            if not hum.Parent or not model.Parent then
-                tracked[hum] = nil   -- ตาย/หายไปแล้ว เอาออกจากการติดตาม
-            elseif hum.Health > 0 then
-                pcall(function() hum.Health = 0 end)
+        local chars = workspace:FindFirstChild("Characters")
+        if chars then
+            for _, model in ipairs(chars:GetChildren()) do
+                if isStrongholdEnemy(model) then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                    local attrHealth = model:GetAttribute("Health")
+                    local needsZero = (hum ~= nil and hum.Health > 0)
+                        or (attrHealth ~= nil and attrHealth > 0)
+                    if needsZero then
+                        zeroEnemyHealth(model)
+                    end
+                end
             end
         end
         task.wait(0.2)
@@ -2606,30 +2596,10 @@ do
     local function anyCultistSpawned()
         local chars = workspace:FindFirstChild("Characters")
         if not chars then return false end
-        local building = getStrongholdBuilding()
-        local bCF, bSize
-        if building then
-            bCF, bSize = building:GetBoundingBox()
-        end
         for _, c in ipairs(chars:GetChildren()) do
-            if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
-                local hum = c:FindFirstChildOfClass("Humanoid")
-                local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
-                if hum and root then
-                    if bCF and bSize then
-                        -- เช็คว่าอยู่ใน bounding box ของตึก Stronghold (+ margin 30 stud)
-                        local local_ = bCF:PointToObjectSpace(root.Position)
-                        local half = bSize / 2 + Vector3.new(30, 30, 30)
-                        if math.abs(local_.X) <= half.X
-                            and math.abs(local_.Y) <= half.Y
-                            and math.abs(local_.Z) <= half.Z
-                        then
-                            return true
-                        end
-                    else
-                        return true -- หา building ไม่เจอ ให้ผ่านไปก่อน
-                    end
-                end
+            -- เช็คจาก attribute StrongholdEnemy บนโมเดล (ไม่ใช้ชื่อ/ตำแหน่งแล้ว)
+            if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+                return true
             end
         end
         return false
@@ -2689,93 +2659,26 @@ do
 end
 
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
-local HOVER_HEIGHT = 20      -- ลอยใต้ตัวมอน 20 studs แล้วตีขึ้นไป
+local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ปห่างจากตัวมอนแค่ 10 studs เท่านั้น
 local ATTACK_INTERVAL = 0.18
 
 -- นับว่าตี Cultist ตัวไหนไปแล้วกี่ tick ที่ยังไม่ตาย (weak key กัน memory leak)
 -- ครบ 2 = ถือว่า "ตีไม่ผ่าน" จากระยะ ต้องวาร์ปเข้าไปตีใกล้ๆ
 local failCounts = setmetatable({}, {__mode = "k"})
 
--- เช็คว่ามอนอยู่ "ภายในสิ่งก่อสร้างจริง" ของ workspace.Map.Landmarks.Stronghold.Building
--- ตึกเป็นรูปทรงหยักๆ ไม่ใช่สี่เหลี่ยมเป๊ะ ใช้ bounding box กล่องเดียวไม่พอ
--- เช็คแทนโดยดูว่าตำแหน่งมอนอยู่ในกรอบ (OBB) ของ part ใด part หนึ่งของตึกจริงๆ (บวก margin เล็กน้อยกันคลาดเคลื่อน)
-local strongholdParts = nil
-local PART_MARGIN = 4 -- studs กันคลาดเคลื่อนเล็กน้อยรอบ part แต่ละชิ้น (รัศมีตัวละคร/มอนประมาณนี้)
-
-local function refreshStrongholdParts()
-    local building = getStrongholdBuilding()
-    if not building then
-        strongholdParts = nil
-        return
-    end
-
-    local floorNames = { "Floor2", "Floor", "Floor3", "Interior" }
-    local parts = {}
-    for _, floorName in ipairs(floorNames) do
-        local floor = building:FindFirstChild(floorName)
-        if floor then
-            for _, inst in ipairs(floor:GetDescendants()) do
-                if inst:IsA("BasePart") then
-                    table.insert(parts, inst)
-                end
-            end
-        end
-    end
-
-    strongholdParts = parts
-end
-
-refreshStrongholdParts()
-
-local function isPointInPart(part, pos)
-    local local_ = part.CFrame:PointToObjectSpace(pos)
-    local half = part.Size / 2 + Vector3.new(PART_MARGIN, PART_MARGIN, PART_MARGIN)
-    return math.abs(local_.X) <= half.X
-        and math.abs(local_.Y) <= half.Y
-        and math.abs(local_.Z) <= half.Z
-end
-
-local function isInsideStronghold(cultistModel, pos)
-    local sh = getStrongholdRoot()
-    if sh and cultistModel:IsDescendantOf(sh) then
-        return true
-    end
-
-    if not strongholdParts then
-        refreshStrongholdParts()
-    end
-
-    if not strongholdParts then
-        return false
-    end
-
-    for _, part in ipairs(strongholdParts) do
-        if part.Parent and isPointInPart(part, pos) then
-            return true
-        end
-    end
-
-    return false
-end
-
--- ชื่อมอนที่ให้ตีใน Stronghold
-local CULTIST_NAMES = {
-    ["Cultist"] = true,
-    ["Crossbow Cultist"] = true,
-    ["Juggernaut Cultist"] = true,
-}
-
+-- เช็คมอนที่จะตี: ดูจาก attribute "StrongholdEnemy" บนโมเดลใน workspace.Characters โดยตรง
+-- (ยกเลิกการเช็คชื่อ/ระยะ/Floor เดิมทั้งหมด - เชื่อ flag ที่เกม stamp ไว้บนตัวโมเดลเอง)
 local function findCultists()
     local list = {}
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return list end
     for _, c in ipairs(chars:GetChildren()) do
-        if CULTIST_NAMES[c.Name] then
+        if isStrongholdEnemy(c) then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
+                or c:FindFirstChildWhichIsA("Humanoid", true)
             -- ไม่กรอง Health > 0: เลือด 0 = ตายปลอม ต้องตีต่ออีก 1 รอบถึงตายจริง
-            -- (รวมถึงเคสรัน HPZeroAll.lua ควบคู่ เลือดโดนเซ็ต 0 ก่อนสคริปต์หลักจะเจอ)
-            if root and hum and isInsideStronghold(c, root.Position) then
+            if root and hum then
                 table.insert(list, c)
             end
         end
@@ -2864,24 +2767,10 @@ local function doOneRound()
         local function anyCultistSpawned()
             local chars = workspace:FindFirstChild("Characters")
             if not chars then return false end
-            local building = getStrongholdBuilding()
-            local bCF, bSize
-            if building then bCF, bSize = building:GetBoundingBox() end
             for _, c in ipairs(chars:GetChildren()) do
-                if c.Name == "Cultist" or c.Name == "Crossbow Cultist" then
-                    local hum = c:FindFirstChildOfClass("Humanoid")
-                    local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
-                    if hum and root then
-                        if bCF and bSize then
-                            local local_ = bCF:PointToObjectSpace(root.Position)
-                            local half = bSize / 2 + Vector3.new(30, 30, 30)
-                            if math.abs(local_.X) <= half.X and math.abs(local_.Y) <= half.Y and math.abs(local_.Z) <= half.Z then
-                                return true
-                            end
-                        else
-                            return true
-                        end
-                    end
+                -- เช็คจาก attribute StrongholdEnemy บนโมเดล (ไม่ใช้ชื่อ/ตำแหน่งแล้ว)
+                if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+                    return true
                 end
             end
             return false
@@ -2951,15 +2840,22 @@ local function doOneRound()
             for _, cultist in ipairs(cultists) do
                 if not cultist or not cultist.Parent then continue end
                 local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
+                    or cultist:FindFirstChildWhichIsA("Humanoid", true)
                 if not cultistHum then continue end
 
-                -- บังคับ HP = 0 ก่อนตีทุกครั้ง (ตายปลอม) -
-                -- ถ้า server ดันเลือดกลับมาไม่เป็น 0 ให้ตั้งใหม่จนเป็น 0 ก่อนถึงจะตี (สูงสุด 4 ครั้ง)
-                local zeroTries = 0
-                while cultistHum.Health ~= 0 and zeroTries < 4 do
-                    pcall(function() cultistHum.Health = 0 end)
-                    task.wait()
-                    zeroTries += 1
+                -- ตั้งเลือด -> "รอ 0.2 วิ" ให้ค่า settle -> ค่อยตี (ลองได้สูงสุด 3 รอบ)
+                -- ตั้งทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health ผ่าน zeroEnemyHealth
+                -- ถ้าครบ 3 รอบ server ยังดันเลือดคืนไม่เป็น 0 = ตีตัวนั้นแบบปกติเลย
+                local zeroed = false
+                for _ = 1, 3 do
+                    pcall(function() zeroEnemyHealth(cultist) end)
+                    task.wait(0.2)
+                    local attrZero = cultist:GetAttribute("Health") == 0
+                    local humZero = cultistHum.Parent ~= nil and cultistHum.Health == 0
+                    if attrZero or humZero then
+                        zeroed = true
+                        break
+                    end
                 end
 
                 -- server คืน false หรือ error = ตีไม่ผ่านชัดเจน (โดน range check ปัด)
@@ -2970,40 +2866,41 @@ local function doOneRound()
                 end)
                 if not invokeOk then hitFailed = true end
 
-                failCounts[cultist] = (failCounts[cultist] or 0) + (hitFailed and 2 or 1)
+                -- ตีแล้วเลือดไม่เป็น 0 = นับเป็นตัวดื้อ (วาร์ปเข้าไปจัดการใกล้ๆ)
+                failCounts[cultist] = (failCounts[cultist] or 0)
+                    + ((hitFailed or not zeroed) and 2 or 1)
                 if failCounts[cultist] >= 2 then
                     table.insert(stubborn, cultist)
                 end
             end
 
-            -- ตัวที่ตีไม่ผ่าน = วาร์ปไปใต้ตัวมันทีละตัว - แล้วตี "ทุกตัว" จากจุดใหม่นี้เลย
-            -- (ตัวอื่นที่อยู่ในระยะของจุดวาร์ปจะโดนตีไปด้วยในตาเดียวกัน)
+            -- ตัวที่ตีไม่ผ่าน = วาร์ปเข้าไปใกล้ๆ ทีละตัว - แล้วตี "ทุกตัว" จากจุดใหม่นี้เลย
+            -- สำคัญ: พอวาร์ปถึงต้อง "เคลียร์เลือดใหม่ 1 รอบก่อนตี" (server เคยดันเลือดคืน
+            -- ตอนตีระยะไกลไม่ผ่าน) - ถ้ายังไม่ตาย เคลียร์เลือดอีกรอบแล้วตีซ้ำอีกครั้ง
             for _, cultist in ipairs(stubborn) do
                 if not cultist.Parent then continue end
                 local root = cultist:FindFirstChild("HumanoidRootPart")
                     or cultist.PrimaryPart
                 if not root then continue end
 
+                -- วาร์ปไปใต้ตัวมันห่าง 10 studs + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
                 hrp.CFrame = CFrame.new(root.Position - Vector3.new(0, HOVER_HEIGHT, 0))
                     * CFrame.Angles(math.rad(90), 0, 0)
                 task.wait()
+                task.wait()
 
-                -- จากจุดที่วาร์ปมา: บังคับ HP=0 + ตีทุกตัวที่ยังมีชีวิต
-                for _, target in ipairs(cultists) do
-                    if target and target.Parent then
-                        local thum = target:FindFirstChildOfClass("Humanoid")
-                        if thum then
-                            local tries = 0
-                            while thum.Health ~= 0 and tries < 2 do
-                                pcall(function() thum.Health = 0 end)
-                                task.wait()
-                                tries += 1
-                            end
+                -- 2 รอบ: [ตั้งเลือด (attribute+Humanoid) -> รอ 0.2 วิ -> ตี] x2 กับทุกตัว
+                for _ = 1, 2 do
+                    for _, target in ipairs(cultists) do
+                        if target and target.Parent then
+                            pcall(function() zeroEnemyHealth(target) end)
+                            task.wait(0.2)
                             pcall(function()
                                 Event:InvokeServer(target, axe, ownerId, hrp.CFrame, false)
                             end)
                         end
                     end
+                    task.wait(0.1) -- พักนิดให้ server ประมวลผลรอบแรกก่อนรอบสอง
                 end
 
                 failCounts[cultist] = 0 -- รีเซ็ตหลังเพิ่งลองแบบเข้าไปใกล้
