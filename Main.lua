@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.0 / 8.30")
+print("Version 1.2.2")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -425,10 +425,12 @@ end
 -- ============================================
 local SHIELD_SIZE = 8     -- ครึ่งรัศมี 4 รอบ HRP = พอดีคลุมหัวถึงเท้า
 local SHIELD_THICK = 1
--- SHIELD_SOLID = true จะเปิดกายภาพ (ดันมอน/กันชนจริง) แต่ "ห้ามเปิดตอนทำ Stronghold"
--- เพราะจะไปชนพื้น/ต้นไม้/แท่น และขวางการตกลง TriggerZone ตอนรอมอนเกิด
--- ค่าเริ่มต้น false = ดักเฉพาะ raycast กระสุน (CanQuery) ไม่รบกวนการเคลื่อนไหวของสคริปต์
-local SHIELD_SOLID = false
+-- shieldSolid = true เปิดกายภาพ 4 ด้านข้าง = "กันมอนเดินเข้ามาหาเรา" (ดันมอนออกนอกโล่)
+-- ใช้ตอนอยู่นอก Stronghold (แมพฟาร์ม/แถวกองไฟ) - พอเข้า Stronghold (Step 3.6)
+-- สคริปต์จะเรียก setShieldSolid(false) สลับเป็นโหมดโปร่งเอง = ไม่ชนมอน/พื้นห้อง/แท่น
+-- กันโล่ไปติดพื้นตอนรอมอนเกิดที่ TriggerZone
+-- ทุกโหมด: ด้านบน/ล่างโปร่งเสมอ + ดัก raycast กระสุนได้ (CanQuery = true เสมอ)
+local shieldSolid = true
 
 local shieldFolder = nil
 
@@ -466,7 +468,7 @@ local function buildShield()
         p.Name = "ShieldFace" .. i
         p.Size = f[1]
         p.Anchored = false       -- ห้าม anchor - weld กับ HRP เพื่อให้ตามทันทีทุกเฟรม
-        p.CanCollide = SHIELD_SOLID and f[3]
+        p.CanCollide = shieldSolid and f[3]
         p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
         p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
         p.Transparency = 1
@@ -483,6 +485,17 @@ local function buildShield()
 
     -- เก็บไว้ในตัวละคร: ตาย/เกิดใหม่ถูกลบไปด้วย ไม่ค้างใน workspace
     shieldFolder.Parent = char
+end
+
+-- สลับโหมดโล่: true = ชนมอนได้ (กันมอนเดินเข้ามา), false = โปร่ง (ไม่ชนอะไรเลย แค่ดักกระสุน)
+-- เรียกแล้ว rebuild โล่ทันทีถ้ากำลังสร้างอยู่ (ตายเกิดใหม่ก็จะได้โหมดล่าสุดเสมอ)
+local function setShieldSolid(enabled)
+    if shieldSolid == enabled then return end
+    shieldSolid = enabled
+    if shieldFolder then
+        print("[Shield] Switch mode -> " .. (enabled and "SOLID (block monsters)" or "PHASE (no collision)"))
+        buildShield()
+    end
 end
 
 -- ตายเกิดใหม่ = สร้างโล่ใหม่ให้อัตโนมัติ
@@ -866,7 +879,7 @@ if isLobby() then
                                         price = LocalPlayer:GetAttribute("RerollPrice")
                                     end
                                     if type(price) ~= "number" then
-                                        print("[Reroll] Cannot read RerollPrice - stopping")
+                                        warn("[Reroll] Cannot read RerollPrice - stopping")
                                         break
                                     end
 
@@ -906,7 +919,7 @@ if isLobby() then
                                     cantReroll = false
                                     local ok = pcall(function() rerollRemote:FireServer() end)
                                     if not ok then
-                                        print("[Reroll] FireServer failed - stopping")
+                                        warn("[Reroll] FireServer failed - stopping")
                                         break
                                     end
 
@@ -1115,7 +1128,7 @@ if isLobby() then
             Client.Events.TeleportEvent:FireServer("Remove")
             task.wait(1)
         elseif isLobby() then
-            print("Teleport failed or room was taken - retrying...")
+            warn("Teleport failed or room was taken - retrying...")
             updateStatus("Retrying Teleport...")
             task.wait(0.5)
         end
@@ -1253,8 +1266,12 @@ task.spawn(function()
         local parent = item.Parent
         item.Parent = ReplicatedStorage.TempStorage
 
-        local result = Client.Events.RequestConsumeItem:InvokeServer(item)
-        if not (result and result.Success) then
+        -- pcall กัน invoke throw (ไอเทมหาย/ย้ายระหว่าง pull): เดิม error ฆ่า coroutine ของ auto-eat ถาวร
+        -- และไอเทมค้างใน TempStorage - คืนกลับทุกกรณี
+        local ok, result = pcall(function()
+            return Client.Events.RequestConsumeItem:InvokeServer(item)
+        end)
+        if not ok or not (result and result.Success) then
             item.Parent = parent
             return false
         end
@@ -1291,8 +1308,6 @@ print("✅ Auto-Eat Running")
 --   4) อยู่แมพฟาร์มแต่ Character หายค้าง > 2 วิ (ค้างหน้าจอเลือกเล่นใหม่)
 -- ============================================
 
-local suppressPlayAgain = false   -- ปกติทิ้ง false เสมอ: จบรอบ/reset ตัวเองก็ต้องกดเล่นใหม่ต่อ (true = งดกดชั่วคราวเท่านั้น)
-
 task.spawn(function()
     local AcceptPlayAgain = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("AcceptPlayAgain")
     local handling = false
@@ -1319,7 +1334,7 @@ task.spawn(function()
     end
 
     local function clickPlayAgain()
-        if suppressPlayAgain or handling then return end
+        if handling then return end
         handling = true
         print("[DEATH] Character died - waiting 5s then respawning")
         pcall(updateStatus, "Died - Play Again in 5s...")
@@ -1383,7 +1398,9 @@ end
 
 -- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
 -- (Humanoid บางตัวอาจอยู่ลึกในโมเดล ใช้ recursive fallback) - คืน true ถ้าช่องทางไหนเป็น 0
+-- ข้อยกเว้น: Deer = ห้ามลดเลือดเด็ดขาด (จัดการด้วย Deer Watcher แทน)
 local function zeroEnemyHealth(model)
+    if model.Name == "Deer" then return false end
     pcall(function() model:SetAttribute("Health", 0) end)
 
     local zeroed = model:GetAttribute("Health") == 0
@@ -1419,6 +1436,41 @@ end)
 print("✅ HP Zero Watcher Running")
 
 -- ============================================
+-- DEER WATCHER: เจอ workspace.Characters.Deer = วาร์ปมันไปไกลๆ แล้วลบโมเดลทิ้งทันที
+-- ไม่ลดเลือด Deer (zeroEnemyHealth + findCultists ดักชื่อไว้แล้ว)
+-- ถ้า server ส่งมันกลับมาใหม่ = เจอซ้ำ วาร์ป + ลบใหม่ วนแบบนี้ไปเรื่อยๆ
+-- ============================================
+task.spawn(function()
+    while true do
+        local chars = workspace:FindFirstChild("Characters")
+        local deer = chars and chars:FindFirstChild("Deer")
+        if deer then
+            pcall(function()
+                -- วาร์ปไปไกลๆ ก่อน (สุดยอดขึ้นไป 5000 studs จากตำแหน่งเดิม)
+                local farPos
+                if deer:IsA("Model") then
+                    farPos = deer:GetPivot().Position + Vector3.new(0, 5000, 0)
+                    deer:PivotTo(CFrame.new(farPos))
+                else
+                    local root = deer:FindFirstChild("HumanoidRootPart") or deer.PrimaryPart
+                        or deer:FindFirstChildWhichIsA("BasePart")
+                    if root then
+                        farPos = root.Position + Vector3.new(0, 5000, 0)
+                        root.CFrame = CFrame.new(farPos)
+                    end
+                end
+            end)
+            task.wait(0.1)
+            pcall(function() deer:Destroy() end)
+            print("[Deer] Found Deer - warped far away & destroyed")
+        end
+        task.wait(0.2)
+    end
+end)
+
+print("✅ Deer Watcher Running")
+
+-- ============================================
 -- STEP 3: Farm Trees and Upgrade Fire
 -- ============================================
 
@@ -1451,7 +1503,6 @@ local firePart = retryUntil("find Fire part", function()
 end)
 
 local firePos = firePart.Position
-print("Fire position:", firePos)
 updateStatus("Finding Trees...")
 
 local trees = retryUntil("find Small Tree", function()
@@ -1464,8 +1515,6 @@ local trees = retryUntil("find Small Tree", function()
     if #found > 0 then return found end
     return nil
 end, 1)
-
-print("Found trees:", #trees)
 
 updateStatus("Sorting Trees...")
 
@@ -1494,7 +1543,6 @@ local bestAxe = retryUntil("find Axe in Inventory", function()
     return best
 end, 1)
 
-print("Best axe:", bestAxe.Name, "Damage:", bestAxe:GetAttribute("WeaponResourceDamage"))
 updateStatus("Equipping Axe...")
 
 local Client = require(player.PlayerScripts.Client)
@@ -1511,7 +1559,6 @@ local toolHandle = retryUntil("equip axe", function()
 end, 0.5)
 
 local axe = toolHandle.OriginalItem.Value
-print("Equipped:", axe.Name)
 
 local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
 local ownerId = tostring(player.UserId) .. "_" .. player.UserId
@@ -1614,58 +1661,74 @@ local LOST_CHILD_NAMES = {
 }
 local LOST_CHILD_TOTAL = #LOST_CHILD_NAMES
 
-local function equipSackAndWait()
-    local inv = LocalPlayer:FindFirstChild("Inventory")
-    local oldSack = inv and inv:FindFirstChild("Old Sack")
-    if not oldSack then return nil end
-    Client.InventoryHandler.RequestEquipItem(oldSack)
-    task.wait(0.3)
-    return LocalPlayer:FindFirstChild("Inventory") and LocalPlayer:FindFirstChild("Inventory"):FindFirstChild("Old Sack")
+-- เช็คสถานะเด็กจาก attribute (อ้างอิงจาก decompile ของเกม: KidClueClient/_DinoKidQuestClient/GiveKidItemClient)
+-- ยังไม่ช่วย = Lost=true + Interaction="CanBeBagged" / ช่วยแล้ว = Lost=false, Interaction="Befriend"..KidId (+Rescued/Friending)
+-- สำคัญ: เด็กที่ช่วยแล้ว "โมเดลไม่หายไปไหน" แค่พลิก attribute - ยิง prompt ใส่ = กด "Ask for Clue" แล้วเกมเด้ง pop-up รัวๆ
+local function kidAlreadyRescued(c)
+    if c:GetAttribute("Lost") == false then return true end
+    local interaction = c:GetAttribute("Interaction")
+    if type(interaction) == "string" and string.sub(interaction, 1, 8) == "Befriend" then return true end
+    return c:GetAttribute("Rescued") == true or c:GetAttribute("Friending") == true
+end
+
+local function kidStillLost(c)
+    return c:GetAttribute("Lost") == true and c:GetAttribute("Interaction") == "CanBeBagged"
 end
 
 local function collectLostChildren()
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return end
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
 
     for _, name in ipairs(LOST_CHILD_NAMES) do
         if not collectedChildren[name] then
             local c = chars:FindFirstChild(name)
             if c then
-                local head = c:FindFirstChild("Head")
-                local attachment = head and head:FindFirstChild("ProximityAttachment")
-                local prompt = attachment and attachment:FindFirstChild("ProximityInteraction")
-                if prompt then
-                    -- วาร์ปเราไปหาเด็ก แล้วยิง prompt ซ้ำจนกว่าเด็กจะหาย
-                    local attempts = 0
-                    while chars:FindFirstChild(name) and attempts < 10 do
-                        local root2 = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
-                        if root2 then
-                            hrp.CFrame = CFrame.new(root2.Position + Vector3.new(0, 2, 0))
-                        end
-                        task.wait(0.1)
-                        pcall(function()
-                            if typeof(fireproximityprompt) == "function" then
-                                fireproximityprompt(prompt, 0, true)
-                            else
-                                prompt.HoldDuration = 0
-                                prompt:InputHoldBegin()
-                                task.wait(0.05)
-                                prompt:InputHoldEnd()
+                if kidAlreadyRescued(c) then
+                    -- mark ว่าจบแล้ว (ปลอดภัย: ตัวที่ช่วยแล้วไม่มีวันอยู่ใน ItemBag) - ห้ามยิง prompt
+                    collectedChildren[name] = true
+                    local count = 0
+                    for _ in pairs(collectedChildren) do count += 1 end
+                    print(string.format("[LostChild] %s already rescued - skipped (%d/%d)", name, count, LOST_CHILD_TOTAL))
+                elseif kidStillLost(c) then
+                    local head = c:FindFirstChild("Head")
+                    local attachment = head and head:FindFirstChild("ProximityAttachment")
+                    local prompt = attachment and attachment:FindFirstChild("ProximityInteraction")
+                    if prompt then
+                        -- วาร์ปเราไปหาเด็ก แล้วยิง prompt ซ้ำจนกว่าเด็กจะหาย หรือสถานะเปลี่ยน (ถูกช่วยแล้ว)
+                        local attempts = 0
+                        while chars:FindFirstChild(name) and kidStillLost(c) and attempts < 10 do
+                            -- ดึง hrp ใหม่ทุก iteration กันตาย/เกิดใหม่กลางลูป (part เก่าถูกทำลาย = วาร์ปเงียบ)
+                            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            local root2 = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
+                            if hrp and root2 then
+                                hrp.CFrame = CFrame.new(root2.Position + Vector3.new(0, 2, 0))
+                                task.wait(0.1)
+                                if prompt.Enabled then
+                                    pcall(function()
+                                        if typeof(fireproximityprompt) == "function" then
+                                            fireproximityprompt(prompt, 0, true)
+                                        else
+                                            prompt.HoldDuration = 0
+                                            prompt:InputHoldBegin()
+                                            task.wait(0.05)
+                                            prompt:InputHoldEnd()
+                                        end
+                                    end)
+                                end
                             end
-                        end)
-                        attempts += 1
-                        task.wait(0.2)
-                    end
-                    if not chars:FindFirstChild(name) then
-                        collectedChildren[name] = true
-                        local count = 0
-                        for _ in pairs(collectedChildren) do count += 1 end
-                        print(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
-                        updateStatus(string.format("Lost Children: %d/%d", count, LOST_CHILD_TOTAL))
+                            attempts += 1
+                            task.wait(0.2)
+                        end
+                        if not chars:FindFirstChild(name) then
+                            collectedChildren[name] = true
+                            local count = 0
+                            for _ in pairs(collectedChildren) do count += 1 end
+                            print(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
+                            updateStatus(string.format("Lost Children: %d/%d", count, LOST_CHILD_TOTAL))
+                        end
                     end
                 end
+                -- attribute ยังไม่ยืนยันทั้งสองทาง (ยังไม่ sync) = ข้ามรอบนี้ ไม่ mark ไม่กด
             end
         end
     end
@@ -1678,7 +1741,8 @@ local function allChildrenCollected()
     return true
 end
 
-local function dropAllLostChildren()
+local function dropAllLostChildren(retryDepth)
+    retryDepth = retryDepth or 0 -- เพดานความลึกของ retry: เดิมเรียกซ้ำไม่จำกัด (ลิมิต 5 รอบใน for ไม่มีวันทำงานจริง)
     local inv = LocalPlayer:FindFirstChild("Inventory")
     local oldSack = inv and inv:FindFirstChild("Old Sack")
     if not oldSack then
@@ -1723,6 +1787,10 @@ local function dropAllLostChildren()
 
     local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
     local droppedCount = 0
+    local droppedNames = {}
+    for name in pairs(collectedChildren) do
+        table.insert(droppedNames, name)
+    end
 
     -- ปล่อยเด็กทีละตัวด้วยดีเลย์
     for name in pairs(collectedChildren) do
@@ -1756,6 +1824,51 @@ local function dropAllLostChildren()
         print("Successfully dropped all", droppedCount, "children at campfire")
     else
         warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
+    end
+
+    -- เช็คสถานะ Lost หลังปล่อย: รอ 5 วิ ถ้าเด็กตัวไหนยังขึ้น Lost = เกมไม่ยอมรับการปล่อย
+    -- ให้ไปเก็บใหม่แล้วปล่อยรอบใหม่ที่กองไฟ (สูงสุด 5 รอบ กันวนไม่รู้จบ)
+    if droppedCount > 0 and #droppedNames > 0 then
+        for attempt = 1, 5 do
+            task.wait(5)
+
+            local charsNow = workspace:FindFirstChild("Characters")
+            local stillLost = {}
+            if charsNow then
+                for _, name in ipairs(droppedNames) do
+                    local c = charsNow:FindFirstChild(name)
+                    if c and c:GetAttribute("Lost") == true then
+                        table.insert(stillLost, name)
+                    end
+                end
+            end
+
+            if #stillLost == 0 then
+                if attempt > 1 then
+                    print("[LostChild] All dropped children saved (Lost cleared)")
+                end
+                break
+            end
+
+            warn("[LostChild] Still Lost after 5s: " .. table.concat(stillLost, ", ")
+                .. " - recollecting & re-dropping (attempt " .. attempt .. "/5)")
+            updateStatus("Lost Child still Lost - recollecting...")
+
+            -- เคลียร์รายชื่อที่ยัง Lost ออกจากตาราง เพื่อให้ collectLostChildren เก็บใหม่ได้
+            for _, name in ipairs(stillLost) do
+                collectedChildren[name] = nil
+            end
+
+            -- เดิมเรียก dropAllLostChildren() แล้ว return ทันที = for attempt ไม่มีวันได้รอบสอง
+            -- ส่ง retryDepth ต่อเพื่อให้เพดาน 5 ชั้นมีผลจริง
+            if retryDepth >= 5 then
+                warn("[LostChild] Retry depth limit (5) reached - giving up for this round")
+                break
+            end
+
+            collectLostChildren()
+            return dropAllLostChildren(retryDepth + 1)
+        end
     end
 
     -- re-equip axe หลังปล่อย
@@ -1975,8 +2088,6 @@ while currentLevel < maxLevel and not isTimerExceeded() do
             local tree = trees[treeIndex]
             local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
 
-            print(string.format("[%d/%d] Cutting tree...", treeIndex, #trees))
-
             -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
             local cutPos = treePos + Vector3.new(5, 0, 0)
             humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
@@ -1985,7 +2096,9 @@ while currentLevel < maxLevel and not isTimerExceeded() do
             task.wait(0.1)
 
             local hitCount = 0
-            while tree.Parent do
+            local failStreak = 0
+            -- backstop 500 ตี: กันต้นที่เซิร์ฟปัด damage เงียบๆ จนลูปฟาร์มหลักค้าง
+            while tree.Parent and hitCount < 500 do
                 if getCurrentLevel() >= maxLevel then
                     print("✅ Max level reached")
                     pcall(updateStatus, "✅ Fire Complete!")
@@ -2006,14 +2119,14 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                 local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
 
                 if not currentAxe then
-                    print("[WARN] Axe lost, re-equipping...")
+                    warn("Axe lost, re-equipping...")
                     Client.InventoryHandler.RequestEquipItem(bestAxe)
                     task.wait(0.3)
                     char = LocalPlayer.Character
                     th = char and char:FindFirstChild("ToolHandle")
                     currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
                     if not currentAxe then
-                        print("[ERROR] Cannot equip axe")
+                        warn("Cannot equip axe")
                         break
                     end
                 end
@@ -2023,18 +2136,27 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                     Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
                 end)
 
-                if not success then
+                if success then
+                    failStreak = 0
+                else
+                    -- เงื่อนไขเดิม (hitCount > 5 and not tree.Parent) ขัดกับเงื่อนไขลูป = เงื่อนไขตาย
+                    -- เปลี่ยนเป็นนับ invoke error ติดกัน 5 ครั้งแล้วข้ามต้นนี้
+                    failStreak += 1
                     if hitCount == 0 then
-                        print("[ERROR] First hit failed:", err)
+                        warn("First hit failed:", err)
                     end
-                    -- ถ้าตีไม่ได้ 5 ครั้งติดต่อกัน ให้ข้ามต้นนี้
-                    if hitCount > 5 and not tree.Parent then
+                    if failStreak >= 5 then
+                        warn("Tree not taking damage after 5 consecutive failed hits - skipping")
                         break
                     end
                 end
 
                 task.wait(0.18)
                 hitCount = hitCount + 1
+            end
+
+            if tree.Parent and hitCount >= 500 then
+                warn("Hit cap (500) reached on one tree - skipping")
             end
 
             if getCurrentLevel() >= maxLevel or isTimerExceeded() then
@@ -2057,10 +2179,10 @@ updateStatus("✅ Fire Complete!")
 dropAllLostChildren()
 
 -- ============================================
--- STEP 3.7: Check Wood/Scrap, craft bench upgrade + beds
+-- STEP 3.5: Check Wood/Scrap, craft bench upgrade + beds
 -- ============================================
 
-print("\n[Step 3.7] Checking resources for crafting...")
+print("\n[Step 3.5] Checking resources for crafting...")
 
 local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
 local campground = workspace.Map.Campground
@@ -2073,7 +2195,7 @@ local NEED_SCRAP = 26
 
 -- หา Wood ที่ขาด: ตัดต้นไม้แล้วดึงไม้ไปโต๊ะคราฟ
 if getTotalWood() < NEED_WOOD then
-    print("[Step 3.7] Wood insufficient - chopping trees...")
+    print("[Step 3.5] Wood insufficient - chopping trees...")
     updateStatus("Chopping trees for Wood...")
     Client.InventoryHandler.RequestEquipItem(bestAxe)
     task.wait(0.3)
@@ -2087,7 +2209,7 @@ if getTotalWood() < NEED_WOOD then
 
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then
-            print("[Step 3.7] HumanoidRootPart not found - waiting...")
+            warn("[Step 3.5] HumanoidRootPart not found - waiting...")
             task.wait(1)
             continue
         end
@@ -2108,7 +2230,7 @@ if getTotalWood() < NEED_WOOD then
             local th = char and char:FindFirstChild("ToolHandle")
             local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
             if not currentAxe then
-                print("[Step 3.7] Axe lost - re-equipping...")
+                print("[Step 3.5] Axe lost - re-equipping...")
                 Client.InventoryHandler.RequestEquipItem(bestAxe)
                 task.wait(0.3)
                 char = LocalPlayer.Character
@@ -2125,7 +2247,7 @@ if getTotalWood() < NEED_WOOD then
             end)
 
             if not success then
-                print("[Step 3.7] Hit failed - tree may be invalid")
+                warn("[Step 3.5] Hit failed - tree may be invalid")
             end
 
             pcall(updateStatus, string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
@@ -2152,11 +2274,18 @@ if getTotalWood() < NEED_WOOD then
     end
     Client.InventoryHandler.RequestEquipItem(bestAxe)
     task.wait(0.3)
+
+    -- วาร์ปกลับไปยืนที่กองไฟ (จุดยืนมาตรฐานข้างกองไฟ) หลังตัดไม้เสร็จ
+    local backHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if backHrp then
+        backHrp.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        platform.Position = firePos + Vector3.new(5, 0, 0)
+    end
 end
 
 -- หา Scrap ที่ขาด: บินวนหา items แล้วดึงไปโต๊ะคราฟ
 if getTotalScrap() < NEED_SCRAP then
-    print("[Step 3.7] Scrap insufficient - searching items...")
+    print("[Step 3.5] Scrap insufficient - searching items...")
     updateStatus("Searching Scrap items...")
     local craftTZ2 = getCraftingTouchZone()
     local craftPos2 = craftTZ2 and (craftTZ2:IsA("BasePart") and craftTZ2.Position or craftTZ2:GetPivot().Position)
@@ -2178,6 +2307,13 @@ if getTotalScrap() < NEED_SCRAP then
             task.wait(0.1)
         end
     end
+
+    -- วาร์ปกลับไปยืนที่กองไฟหลังค้นหา Scrap เสร็จ (จุดยืนมาตรฐานเหมือนตอนตัดไม้)
+    local backHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if backHrp then
+        backHrp.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        platform.Position = firePos + Vector3.new(5, 0, 0)
+    end
 end
 
 -- รอจนครบ
@@ -2188,7 +2324,7 @@ while (getTotalWood() < NEED_WOOD or getTotalScrap() < NEED_SCRAP) and waitCraft
     task.wait(1)
     waitCraft += 1
 end
-print(string.format("[Step 3.7] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
+print(string.format("[Step 3.5] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
 
 -- อัพโต๊ะคราฟ 2 และ 3
 updateStatus("Upgrading Crafting Bench 2...")
@@ -2239,7 +2375,8 @@ for _, bedName in ipairs(BED_ITEMS) do
     if bp then
         local placed = false
         local attempts = 0
-        while not placed do
+        -- เพดาน 10 ครั้ง: เดิม while not placed ไม่มีเพดาน = วางไม่สำเร็จถาวรแล้วสคริปต์ค้างที่ Step 3.5 ตลอด
+        while not placed and attempts < 10 do
             attempts += 1
             -- re-equip ทุกรอบเผื่อหลุด
             Client.InventoryHandler.RequestEquipItem(bp)
@@ -2249,7 +2386,7 @@ for _, bedName in ipairs(BED_ITEMS) do
             local inv2 = LocalPlayer:FindFirstChild("Inventory")
             if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
                 placed = true
-                print("[Step 3.7] Placed " .. bedName .. " (BP gone)")
+                print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
                 break
             end
 
@@ -2263,7 +2400,13 @@ for _, bedName in ipairs(BED_ITEMS) do
                     -- ไม่ต้องวาร์ปตัวเองไปหน้ากองไฟก่อนวางแล้ว - PlaceEvent ส่งพิกัด CFrame ไปเอง
                     pcall(function()
                         local center = alecCircle and select(1, alecCircle:GetBoundingBox()).Position or pos
-                        local placeCF = CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z))
+                        -- ถ้า center อยู่ตรง pos (ระยะแบนระนาบ ~ 0) CFrame.lookAt จะได้ NaN = เซิร์ฟปัดทุกครั้ง วางไม่เคยสำเร็จ
+                        local placeCF
+                        if (center.X - pos.X) ^ 2 + (center.Z - pos.Z) ^ 2 < 0.05 ^ 2 then
+                            placeCF = CFrame.new(pos)
+                        else
+                            placeCF = CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z))
+                        end
                         PlaceEvent:InvokeServer(bp, {
                             Valid = true,
                             CFrame = placeCF,
@@ -2276,31 +2419,31 @@ for _, bedName in ipairs(BED_ITEMS) do
                     if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
                         table.insert(usedPositions, pos)
                         placed = true
-                        print("[Step 3.7] Placed " .. bedName .. " (BP gone)")
+                        print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
                         break
                     end
                 end
             end
 
             if not placed then
-                print(string.format("[Step 3.7] Attempt %d failed for %s - retrying...", attempts, bedName))
+                print(string.format("[Step 3.5] Attempt %d failed for %s - retrying...", attempts, bedName))
                 task.wait(0.2)
             end
         end
 
         if not placed then
-            print("[Step 3.7] Could not place " .. bedName)
+            warn("[Step 3.5] Could not place " .. bedName .. " after " .. attempts .. " attempts - skipping")
         end
     else
-        print("[Step 3.7] Blueprint not found for " .. bedName)
+        warn("[Step 3.5] Blueprint not found for " .. bedName)
     end
     task.wait(0.3)
 end
 
-print("[Step 3.7] Crafting complete!")
+print("[Step 3.5] Crafting complete!")
 updateStatus("Crafting done!")
 
--- platform ต้องอยู่ต่อ เพราะ STEP 3.5/4/5/6 ยังบินและต้องมีแท่นรองใต้เท้า
+-- platform ต้องอยู่ต่อ เพราะ STEP 3.6/4/5/6 ยังบินและต้องมีแท่นรองใต้เท้า
 
 -- ============================================
 -- Shared: Stronghold helpers
@@ -2410,11 +2553,14 @@ local function getStrongholdTimeRemaining()
 end
 
 -- ============================================
--- STEP 3.5: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
+-- STEP 3.6: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
 -- ============================================
 
-print("\n[Step 3.5] Warping to Stronghold Floor...")
+print("\n[Step 3.6] Warping to Stronghold Floor...")
 updateStatus("Warping to Stronghold Floor...")
+
+-- เข้า Stronghold แล้ว = สลับโล่เป็นโหมดโปร่ง (ไม่ชนมอน/พื้น) กันโล่ติดพื้นห้อง/ขวาง TriggerZone
+setShieldSolid(false)
 
 retryUntil("find Stronghold Building", function()
     if getStrongholdBuilding() then return true end
@@ -2428,9 +2574,9 @@ retryUntil("warp to Stronghold Floor", function()
 end, 1)
 
 -- ============================================
--- STEP 3.6: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
+-- STEP 3.7: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
 -- ============================================
-print("\n[Step 3.6] Boosting FPS (cleaning up map/lighting)...")
+print("\n[Step 3.7] Boosting FPS (cleaning up map/lighting)...")
 updateStatus("Boosting FPS...")
 
 do
@@ -2639,7 +2785,9 @@ end
 
 
 -- ============================================
--- STEP 6: Fight loop - ตี Cultist ทีละตัว: บินไปหา -> ลดเลือด -> ตีจนตาย -> ตัวต่อไป
+-- STEP 6: Fight loop - วาร์ปเข้าไปหา Cultist "ทุกตัว" ทีละตัว ปรับเลือดแล้วตีตัวนั้นจากจุดใกล้
+-- ทำครบรอบแล้วตัวไหนยังไม่ตาย = วนทำใหม่อีกรอบ ครบ 2 รอบเต็มยังไม่ตาย
+-- = โหมดเก็บตาย: วาร์ป + ปรับเลือดเร็วก่อน "ทุกตี" (ไม่ต้องรอ) ตีซ้ำจนตาย
 -- ============================================
 
 print("\n[Step 6] Fighting Cultists in Stronghold...")
@@ -2665,6 +2813,11 @@ local combatCenter = strongholdFloorPos or humanoidRootPart.Position
 local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ป "ด้านบน" ของมอน 10 studs (หันหน้าลง)
 local ATTACK_INTERVAL = 0.18
 
+-- นับว่า Cultist ตัวไหน "รอด" จาก [วาร์ปเข้าใกล้ + ปรับเลือด + รอ + ตี] ไปแล้วกี่รอบ (weak key กัน memory leak)
+-- ครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย = เข้าโหมดเก็บตาย: วาร์ป + ปรับเลือดเร็ว (ไม่รอ) + ตี ซ้ำจนตาย
+local surviveCounts = setmetatable({}, {__mode = "k"})
+local FINISH_MODE_AFTER = 2
+
 -- เช็คมอนที่จะตี: ดูจาก attribute "StrongholdEnemy" บนโมเดลใน workspace.Characters โดยตรง
 -- (ยกเลิกการเช็คชื่อ/ระยะ/Floor เดิมทั้งหมด - เชื่อ flag ที่เกม stamp ไว้บนตัวโมเดลเอง)
 local function findCultists()
@@ -2672,6 +2825,7 @@ local function findCultists()
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return list end
     for _, c in ipairs(chars:GetChildren()) do
+        if c.Name == "Deer" then continue end -- Deer ไม่ตี/ไม่ลดเลือด (จัดการโดย Deer Watcher)
         if isStrongholdEnemy(c) then
             local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
             local hum = c:FindFirstChildOfClass("Humanoid")
@@ -2766,95 +2920,13 @@ local function isStrongholdCleared()
     return clearHits >= CLEAR_CONFIRM_COUNT
 end
 
--- ============================================
--- ตีมอนทีละตัว: บินไปหา -> ลดเลือด -> ตีจนตาย -> เสร็จแล้วค่อยไปตัวต่อไป
--- (ยกเลิกการตีจากระยะไกล/หลายระยะแล้ว - ทุกตัวจัดการเหนือหัวมันเท่านั้น)
--- ============================================
-local MAX_HITS_PER_TARGET = 50 -- กันลูปค้าง: ตีเกินนี้ = ข้ามไปตัวอื่นก่อน วนมาแก้ใหม่รอบถัดไป
-
-local function killSingleCultist(cultist)
-    -- re-equip axe ก่อนเริ่มตัวนี้เผื่อหลุด
-    local char = LocalPlayer.Character
-    local th = char and char:FindFirstChild("ToolHandle")
-    if not (th and th:FindFirstChild("OriginalItem")) then
-        Client.InventoryHandler.RequestEquipItem(bestAxe)
-        task.wait(0.1)
-        char = LocalPlayer.Character
-        th = char and char:FindFirstChild("ToolHandle")
-        if th and th:FindFirstChild("OriginalItem") then
-            axe = th.OriginalItem.Value
-        end
-    end
-
-    local function getRoot()
-        if not cultist.Parent then return nil end
-        return cultist:FindFirstChild("HumanoidRootPart")
-            or cultist.PrimaryPart
-            or cultist:FindFirstChildWhichIsA("BasePart")
-    end
-
-    -- 1) บินไปหามอน: ลอยเหนือหัวมัน HOVER_HEIGHT studs (หันหน้าลง)
-    local root = getRoot()
-    local hrp = getLiveParts()
-    if not (root and hrp) then return false end
-    hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
-        * CFrame.Angles(math.rad(-90), 0, 0)
-    task.wait()
-    task.wait() -- รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
-
-    -- 2) ลดเลือดก่อนตี (attribute "Health" + Humanoid.Health) - ลองสูงสุด 3 รอบ
-    for _ = 1, 3 do
-        pcall(function() zeroEnemyHealth(cultist) end)
-        task.wait(0.2)
-        local cultHum = cultist:FindFirstChildOfClass("Humanoid")
-            or cultist:FindFirstChildWhichIsA("Humanoid", true)
-        local attrZero = cultist:GetAttribute("Health") == 0
-        local humZero = cultHum and cultHum.Parent ~= nil and cultHum.Health == 0
-        if attrZero or humZero then break end
-    end
-
-    -- 3) ตี "ตัวนี้ตัวเดียว" จนหายไปจาก workspace
-    --    (เลือด 0 = ตายปลอม ต้องตีต่ออีก 1 รอบถึงตายจริง)
-    local hits = 0
-    while cultist.Parent do
-        if isStrongholdCleared() then return false end
-        if hits >= MAX_HITS_PER_TARGET then
-            print("[Fight] Target not dying after " .. hits .. " hits - skip to next")
-            return false
-        end
-
-        hrp = getLiveParts()
-        if not hrp then
-            task.wait(0.5)
-            continue
-        end
-
-        root = getRoot()
-        if not root then break end
-
-        -- ตามมอนที่เดินหนี: ลอยเหนือหัวมันตลอดระหว่างตี
-        hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
-            * CFrame.Angles(math.rad(-90), 0, 0)
-
-        pcall(function()
-            Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
-        end)
-
-        hits += 1
-        task.wait(ATTACK_INTERVAL)
-    end
-
-    print("[Fight] Cultist down (" .. hits .. " hits)")
-    return true
-end
-
 local TOTAL_ROUNDS = 3
 local completedRounds = 0
 
 local function doOneRound()
     fightStart = os.clock()
     clearHits = 0
-    -- ใช้ตำแหน่ง gate ตอน Stronghold ยังปิด (จับไว้แล้วตอน Step 3.5)
+    -- ใช้ตำแหน่ง gate ตอน Stronghold ยังปิด (จับไว้แล้วตอน Step 3.6)
     gateOrigin = finalGateBasePos
 
     -- รอ Cultist เกิด
@@ -2911,15 +2983,109 @@ local function doOneRound()
             updateStatus("Waiting for Cultists... (round " .. completedRounds+1 .. ")")
             task.wait(1)
         else
-            updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
+            local hrp = getLiveParts()
+            if not hrp then task.wait(0.2) continue end
 
-            -- ตีทีละตัว: บินไปหามอน -> ลดเลือด -> ตีจนตาย -> ค่อยไปตัวต่อไป
-            for _, cultist in ipairs(cultists) do
-                if isStrongholdCleared() then break end
-                if cultist and cultist.Parent then
-                    killSingleCultist(cultist)
+            -- re-equip axe ก่อนตีทุก tick
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            if not (th and th:FindFirstChild("OriginalItem")) then
+                Client.InventoryHandler.RequestEquipItem(bestAxe)
+                task.wait(0.1)
+                char = LocalPlayer.Character
+                th = char and char:FindFirstChild("ToolHandle")
+                if th and th:FindFirstChild("OriginalItem") then
+                    axe = th.OriginalItem.Value
                 end
             end
+
+            -- Phase 1: วาร์ปเข้าไปหา "ทุกตัว" ทีละตัว -> ปรับเลือด -> ตีตัวนั้นทันทีจากจุดใกล้
+            -- (ตีจากจุดที่วาร์ปไปถึงเสมอ กัน server ปัด hit ด้วย range check)
+            for _, cultist in ipairs(cultists) do
+                if not cultist or not cultist.Parent then continue end
+                local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
+                    or cultist:FindFirstChildWhichIsA("Humanoid", true)
+                if not cultistHum then continue end
+                local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
+                if not root then continue end
+
+                -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
+                hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                    * CFrame.Angles(math.rad(-90), 0, 0)
+                task.wait()
+                task.wait()
+
+                updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
+
+                -- ปรับเลือด -> "รอ 0.2 วิ" ให้ค่า settle -> เช็คว่าติด 0 ไหม (ลองได้สูงสุด 3 รอบ)
+                -- ตั้งทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health ผ่าน zeroEnemyHealth
+                local zeroed = false
+                for _ = 1, 3 do
+                    pcall(function() zeroEnemyHealth(cultist) end)
+                    task.wait(0.2)
+                    local attrZero = cultist:GetAttribute("Health") == 0
+                    local humZero = cultistHum.Parent ~= nil and cultistHum.Health == 0
+                    if attrZero or humZero then
+                        zeroed = true
+                        break
+                    end
+                end
+
+                -- ตีตัวนี้ 1 ครั้งจากจุดที่วาร์ปมา (server คืน false/error ก็ถือว่ารอบนี้ทำแล้ว)
+                pcall(function()
+                    Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+                end)
+
+                -- นับรอบที่ตัวนี้ยังไม่ตาย: ปรับเลือดติด = +1, ปรับเลือดไม่ติด = +2 (ไม่ทำงาน = นับหนัก)
+                surviveCounts[cultist] = (surviveCounts[cultist] or 0) + (zeroed and 1 or 2)
+            end
+
+            -- Phase 2: ตัวไหนทำครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย
+            -- = โหมดเก็บตาย: วาร์ปตามตัวมัน + ปรับเลือดเร็วก่อน "ทุกตี" (ไม่ต้องรอ) ตีซ้ำจนตาย
+            for _, cultist in ipairs(cultists) do
+                if cultist and cultist.Parent and (surviveCounts[cultist] or 0) >= FINISH_MODE_AFTER then
+                    print("[Fight] Cultist survived " .. FINISH_MODE_AFTER
+                        .. " full rounds - finish mode: quick zero + hit until dead")
+                    while cultist.Parent and not isStrongholdCleared() do
+                        local hrp2 = getLiveParts()
+                        if not hrp2 then task.wait(0.2) continue end
+                        local root2 = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
+                        if not root2 then break end
+
+                        -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) - มันเดินหนีก็ตามไปตี
+                        hrp2.CFrame = CFrame.new(root2.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait()
+
+                        -- re-equip axe ถ้าหลุดระหว่างตี
+                        local char2 = LocalPlayer.Character
+                        local th2 = char2 and char2:FindFirstChild("ToolHandle")
+                        if not (th2 and th2:FindFirstChild("OriginalItem")) then
+                            Client.InventoryHandler.RequestEquipItem(bestAxe)
+                            task.wait(0.1)
+                            char2 = LocalPlayer.Character
+                            th2 = char2 and char2:FindFirstChild("ToolHandle")
+                            if th2 and th2:FindFirstChild("OriginalItem") then
+                                axe = th2.OriginalItem.Value
+                            end
+                        end
+
+                        -- ปรับเลือดก่อนทุกตี (แบบเร็ว ไม่รอ settle) แล้วค่อยตีทันที
+                        pcall(function() zeroEnemyHealth(cultist) end)
+                        pcall(function()
+                            Event:InvokeServer(cultist, axe, ownerId, hrp2.CFrame, false)
+                        end)
+                        task.wait(ATTACK_INTERVAL)
+                    end
+                    surviveCounts[cultist] = nil -- ตายแล้ว (หรือรอบเคลียร์) - เคลียร์ตัวนับ
+                end
+            end
+
+            -- กลับไปลอยจุดเดิม (เหนือจุดกลาง 10 studs) รอ tick ถัดไป
+            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+
+            task.wait(ATTACK_INTERVAL)
         end
     end
 end
@@ -2961,7 +3127,25 @@ while completedRounds < TOTAL_ROUNDS do
             or workspace:FindFirstChild("Stronghold Diamond Chest", true)
     end)
 
-    local chestPos = chest:IsA("Model") and chest:GetPivot().Position or chest.Position
+    -- chest อาจเป็นชนิดอื่นตอน stream ไม่เสร็จ (ไม่ใช่ Model/BasePart) - index .Position ตรงๆ พัง = สคริปต์หยุดกลาง Step 7
+    local chestPos
+    for _ = 1, 10 do
+        if chest:IsA("Model") then
+            chestPos = chest:GetPivot().Position
+        elseif chest:IsA("BasePart") then
+            chestPos = chest.Position
+        else
+            local part = chest:FindFirstChildWhichIsA("BasePart", true)
+            chestPos = part and part.Position
+        end
+        if chestPos then break end
+        task.wait(0.5)
+    end
+    if not chestPos then
+        -- สรุปตำแหน่งไม่ได้จริง = ใช้จุดกองไฟแทน (รอบนี้หาเพชรไม่เจอ แต่ flow เดินต่อได้ ไม่ error ตาย)
+        warn("[Step 7] Cannot resolve Diamond Chest position - falling back to fire position")
+        chestPos = firePos
+    end
     if platform and platform.Parent then
         platform.Size = Vector3.new(10, 1, 10)
         platform.Position = chestPos - Vector3.new(0, 3, 0)
@@ -3068,7 +3252,9 @@ while completedRounds < TOTAL_ROUNDS do
                     local startDiamonds = LocalPlayer:GetAttribute("Diamonds")
                     local tries = 0
                     local gotIt = false
-                    while not gotIt do
+                    -- เดิม while not gotIt ไม่มีเพดาน: โมเดลถูกลบ/เซิร์ฟปัด = ยิง FireServer ใส่ instance ศพไม่รู้จบ
+                    while not gotIt and tries < 25 do
+                        if not (d.model and d.model.Parent) then break end
                         tries += 1
                         local hrp = getLiveParts()
                         if hrp and d.part and d.part.Parent then
@@ -3083,8 +3269,12 @@ while completedRounds < TOTAL_ROUNDS do
                             updateStatus(("Collecting Diamond... (%d)"):format(tries))
                         end
                     end
-                    collected += 1
-                    task.wait(0.15)
+                    if gotIt then
+                        collected += 1
+                        task.wait(0.15)
+                    elseif d.model and d.model.Parent then
+                        warn("Diamond not collected after 25 tries - skipping")
+                    end
                 end
             end
         end
