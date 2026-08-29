@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 5.41")
+print("Version 1.2.3 / 6.44")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -421,6 +421,71 @@ LocalPlayer:GetAttributeChangedSignal("Diamonds"):Connect(function()
     checkDiamondsGoalAndSendDone()
 end)
 updateDiamondsLabel()
+
+-- ClassStatUpdated Remote watcher: ดัก event จาก server → อัปเดต quest % real-time
+-- signature: ClassStatUpdated:FireClient(player, className, statKey, value, delta)
+local classStatCache = {}  -- [className] = { [statKey] = value }
+local lastFarmReport = 0    -- cooldown log
+
+pcall(function()
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local Remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
+    local ClassStatUpdated = Remotes and Remotes:FindFirstChild("ClassStatUpdated")
+    if not ClassStatUpdated or not ClassStatUpdated.OnClientEvent then return end
+
+    ClassStatUpdated.OnClientEvent:Connect(function(className, statKey, value, delta)
+        if not className or not statKey then return end
+        classStatCache[className] = classStatCache[className] or {}
+        classStatCache[className][statKey] = value
+
+        -- ถ้าอยู่แมพฟาร์ม → คำนวณ % + print + ส่ง Horst update
+        local isLobby = game.PlaceId == 79546208627805
+        if not isLobby and Config.Horst then
+            local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
+            if mainClass and className == mainClass then
+                local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                if lvl < 3 then
+                    local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
+                    if reqs then
+                        local totalPct, count = 0, 0
+                        for sk, goal in pairs(reqs) do
+                            local have = classStatCache[mainClass][sk]
+                                or LocalPlayer.ClassProgress
+                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
+                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk)
+                                or 0
+                            if type(have) == "number" and goal > 0 then
+                                totalPct = totalPct + math.min(have / goal, 1) * 100
+                                count = count + 1
+                            end
+                        end
+                        if count > 0 then
+                            local avgPct = math.floor(totalPct / count)
+                            -- print log cooldown 1 วิ
+                            if os.clock() - lastFarmReport >= 1 then
+                                lastFarmReport = os.clock()
+                                print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
+                                    mainClass, lvl + 1, avgPct))
+                            end
+                            -- ส่ง Horst update (real-time)
+                            local equipped = LocalPlayer:GetAttribute("Class")
+                            local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                            local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
+                                or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
+                            if Config.Horst and _G.Horst_SetDescription then
+                                local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                _G.Horst_SetDescription(string.format(
+                                    "🌲 99 Nights • Diamonds: %d • Class: %s [Can't check classes during farming]",
+                                    diamonds, classTextPart))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    print("[ClassStat] watching ClassStatUpdated")
+end)
 
 -- รอให้ attribute Diamonds sync มาจาก server ก่อน (อาจยังเป็น nil ตอนสคริปต์เริ่ม)
 -- ป้องกันการส่ง "Diamonds: 0" ไปที่ Horst ทั้งที่ยังโหลดค่าจริงไม่เสร็จ
@@ -3051,7 +3116,11 @@ local function cannonTryShoot(energyThreshold)
     -- avgPos + dir จาก cluster นี้
     local avgPos = targetCluster.center
     local dir = (avgPos - head.Position).Unit
-    if dir ~= dir then dir = head.CFrame.LookVector end
+    -- ป้องกัน NaN + zero vector: ถ้า dir = 0 หรือ NaN ใช้ LookVector แทน
+    if dir ~= dir or dir == Vector3.zero then
+        dir = head.CFrame.LookVector
+        if dir == Vector3.zero then dir = Vector3.new(0, 0, -1) end
+    end
 
     local target = enemies[1]
     local targetPart = target:FindFirstChild("HumanoidRootPart")
@@ -3059,7 +3128,7 @@ local function cannonTryShoot(energyThreshold)
         or target.PrimaryPart
     if not targetPart then return false end
 
-    local pcallOk, pcallErr = pcall(function()
+    local pcallOk, pcallErr, serverResult = pcall(function()
         -- ยิง 3 remotes ตรงๆ (ตาม Cobalt log - ไม่ผ่าน ProjectileClass)
         local ReplicatedStorage = game:GetService("ReplicatedStorage")
         local Remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
@@ -3100,7 +3169,7 @@ local function cannonTryShoot(energyThreshold)
                 table.insert(hitList, { Model = e, Distance = d })
             end
         end
-        local ownerId = tostring(pid) .. "_" .. tostring(lp.UserId)
+        local ownerId = tostring(pid) .. "_" .. tostring(LocalPlayer.UserId)
         local result = ExplosiveDamage:InvokeServer(hitList, pid, ownerId, avgPos)
         return result
     end)
@@ -3110,7 +3179,7 @@ local function cannonTryShoot(energyThreshold)
     end
 
     -- เช็คผล: server คืน table {Success=true,...} ถ้าสำเร็จ
-    local result = pcallOk
+    local result = serverResult
     if type(result) == "table" then
         if result.Success == false then
             warn("[Cannon] server refused damage")
@@ -3565,16 +3634,18 @@ local function doOneRound()
             local hrp = getLiveParts()
             if not hrp then task.wait(0.2) continue end
 
-            -- re-equip axe ก่อนตีทุก tick
-            local char = LocalPlayer.Character
-            local th = char and char:FindFirstChild("ToolHandle")
-            if not (th and th:FindFirstChild("OriginalItem")) then
-                Client.InventoryHandler.RequestEquipItem(bestAxe)
-                task.wait(0.1)
-                char = LocalPlayer.Character
-                th = char and char:FindFirstChild("ToolHandle")
-                if th and th:FindFirstChild("OriginalItem") then
-                    axe = th.OriginalItem.Value
+            -- re-equip axe ก่อนตีทุก tick (เฉพาะตอนไม่ใช้ cannon)
+            if not useCannon then
+                local char = LocalPlayer.Character
+                local th = char and char:FindFirstChild("ToolHandle")
+                if not (th and th:FindFirstChild("OriginalItem")) then
+                    Client.InventoryHandler.RequestEquipItem(bestAxe)
+                    task.wait(0.1)
+                    char = LocalPlayer.Character
+                    th = char and char:FindFirstChild("ToolHandle")
+                    if th and th:FindFirstChild("OriginalItem") then
+                        axe = th.OriginalItem.Value
+                    end
                 end
             end
 
@@ -3611,9 +3682,12 @@ local function doOneRound()
                 end
 
                 -- ตีตัวนี้ 1 ครั้งจากจุดที่วาร์ปมา (server คืน false/error ก็ถือว่ารอบนี้ทำแล้ว)
-                pcall(function()
-                    Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
-                end)
+                -- ถ้า useCannon → skip (background loop ยิงให้แล้ว)
+                if not useCannon then
+                    pcall(function()
+                        Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
+                    end)
+                end
 
                 -- นับรอบที่ตัวนี้ยังไม่ตาย: ปรับเลือดติด = +1, ปรับเลือดไม่ติด = +2 (ไม่ทำงาน = นับหนัก)
                 surviveCounts[cultist] = (surviveCounts[cultist] or 0) + (zeroed and 1 or 2)
@@ -3675,6 +3749,44 @@ end
 
 -- Flag: ติดเมื่อ quest ของ main class เสร็จแล้ว รอให้ round ปัจจุบันจบ + เก็บเพชรก่อน teleport
 local questReadyToLeave = false
+
+-- Quest progress watcher: แสดง % ทุกครั้งที่ quest stat อัปเดต (ทุกที่ - Lobby/Stronghold/ฟาร์ม)
+if Config.UpgradeClass and Config.UpgradeClass[1] then
+    local mainClass = Config.UpgradeClass[1]
+    local cp = LocalPlayer:FindFirstChild("ClassProgress")
+    local folder = cp and cp:FindFirstChild(mainClass)
+    if folder then
+        local lastReport = 0
+        local function reportQuestProgress()
+            -- cooldown 1 วิ กัน spam
+            if os.clock() - lastReport < 1 then return end
+            lastReport = os.clock()
+            local lvl = folder:GetAttribute("Level") or 1
+            if lvl >= 3 then return end
+            local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
+            if not reqs then return end
+            local totalPct, count = 0, 0
+            for statKey, goal in pairs(reqs) do
+                local have = folder:GetAttribute(statKey) or 0
+                if type(have) == "number" and goal > 0 then
+                    totalPct = totalPct + math.min(have / goal, 1) * 100
+                    count = count + 1
+                end
+            end
+            if count > 0 then
+                local avgPct = math.floor(totalPct / count)
+                print(string.format("[Quest] %s -> Lv.%d: %d%%", mainClass, lvl + 1, avgPct))
+            end
+        end
+        for statKey, _ in pairs(CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][2] or {}) do
+            folder:GetAttributeChangedSignal(statKey):Connect(reportQuestProgress)
+        end
+        for statKey, _ in pairs(CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][3] or {}) do
+            folder:GetAttributeChangedSignal(statKey):Connect(reportQuestProgress)
+        end
+        reportQuestProgress()  -- แสดงค่าเริ่มต้น
+    end
+end
 
 while completedRounds < TOTAL_ROUNDS do
     print(string.format("\n[Step 6] Round %d/%d", completedRounds+1, TOTAL_ROUNDS))
@@ -3915,6 +4027,7 @@ while completedRounds < TOTAL_ROUNDS do
         print(string.format("[Quest] %s quest complete - leaving for lobby", mainClass))
         updateStatus("Teleporting to lobby...")
         task.wait(2)
+        local LOBBY_PLACE_ID = 79546208627805
         pcall(function()
             local TS = game:GetService("TeleportService")
             TS:Teleport(LOBBY_PLACE_ID, LocalPlayer)
