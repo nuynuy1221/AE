@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3")
+print("Version 1.2.3 / 5.21")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -50,6 +50,7 @@ local function CheckGoals()
 
     local diamondsGoal = Config.Diamonds ~= nil
     local classesGoal = Config.BuyClass and #Config.BuyClass > 0
+    local upgradeGoal = Config.UpgradeClass and #Config.UpgradeClass > 0
     local isLobby = game.PlaceId == 79546208627805
 
     -- Check real-time diamonds from game
@@ -61,13 +62,29 @@ local function CheckGoals()
 
     -- Check real-time classes from game (only in Lobby)
     local classesMet = true
-    if classesGoal and isLobby then
+    if (classesGoal or upgradeGoal) and isLobby then
         local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
         if ClassProgress then
-            for _, className in ipairs(Config.BuyClass) do
-                if not ClassProgress:FindFirstChild(className) then
+            -- Check BuyClass: ต้อง owned ครบทุกตัว
+            if classesGoal then
+                for _, className in ipairs(Config.BuyClass) do
+                    if not ClassProgress:FindFirstChild(className) then
+                        classesMet = false
+                        break
+                    end
+                end
+            end
+            -- Check UpgradeClass: main class ต้องถึง Lv.3
+            if upgradeGoal and classesMet then
+                local mainClass = Config.UpgradeClass[1]
+                local folder = ClassProgress:FindFirstChild(mainClass)
+                if not folder then
                     classesMet = false
-                    break
+                else
+                    local lvl = folder:GetAttribute("Level") or 1
+                    if lvl < 3 then
+                        classesMet = false
+                    end
                 end
             end
         else
@@ -75,8 +92,8 @@ local function CheckGoals()
         end
     end
 
-    -- In farm map: ignore BuyClass goal
-    if not isLobby and classesGoal then
+    -- In farm map: ignore classes goal
+    if not isLobby and (classesGoal or upgradeGoal) then
         return false
     end
 
@@ -280,29 +297,105 @@ local function sendHorstDescription()
     if not _G.Horst_SetDescription then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local classText = "None"
 
     local isLobby = game.PlaceId == 79546208627805
+    local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
+                     (Config.UpgradeClass and #Config.UpgradeClass > 0)
 
-    if Config.BuyClass and #Config.BuyClass > 0 then
-        if isLobby then
-            local ownedClasses = {}
-            local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
-            if ClassProgress then
-                for _, className in ipairs(Config.BuyClass) do
-                    if ClassProgress:FindFirstChild(className) then
-                        table.insert(ownedClasses, className)
+    -- ถ้าไม่มี config เลย → ไม่ต้องแสดง Class
+    if not hasConfig then
+        _G.Horst_SetDescription(string.format("🌲 99 Nights • Diamonds: %d", diamonds))
+        return
+    end
+
+    local classText
+    if isLobby then
+        local lines = {}
+        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+        if ClassProgress then
+            local seen = {}
+            local classesToShow = {}
+            if Config.BuyClass then
+                for _, c in ipairs(Config.BuyClass) do classesToShow[#classesToShow + 1] = c end
+            end
+            if Config.UpgradeClass then
+                for _, c in ipairs(Config.UpgradeClass) do classesToShow[#classesToShow + 1] = c end
+            end
+            for _, className in ipairs(classesToShow) do
+                if not seen[className] then
+                    seen[className] = true
+                    local folder = ClassProgress:FindFirstChild(className)
+                    if folder then
+                        local lvl = folder:GetAttribute("Level") or 1
+                        local classStr = className .. " Lv" .. lvl
+                        -- คำนวณ % quest progress (Lv < 3)
+                        if lvl < 3 then
+                            local targetLevel = lvl + 1
+                            local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
+                            if reqs then
+                                local totalPct = 0
+                                local count = 0
+                                for statKey, goal in pairs(reqs) do
+                                    local have = folder:GetAttribute(statKey) or 0
+                                    if type(have) == "number" and goal > 0 then
+                                        totalPct = totalPct + math.min(have / goal, 1) * 100
+                                        count = count + 1
+                                    end
+                                end
+                                if count > 0 then
+                                    local avgPct = math.floor(totalPct / count)
+                                    classStr = classStr .. " (" .. avgPct .. "%)"
+                                end
+                            end
+                        else
+                            classStr = classStr .. " (MAX)"
+                        end
+                        table.insert(lines, classStr)
+                    else
+                        table.insert(lines, className .. " (not owned)")
                     end
                 end
             end
-            classText = #ownedClasses > 0 and table.concat(ownedClasses, ", ") or "None"
+        end
+        classText = #lines > 0 and table.concat(lines, ", ") or "None"
+    else
+        -- แมพฟาร์ม: เช็คเฉพาะ class ที่กำลัง equip + คำนวณ % quest progress
+        local equipped = LocalPlayer:GetAttribute("Class")
+        if equipped then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local classTextPart = equipped .. " Lv" .. lvl
+            -- คำนวณ % ของ quest ถัดไป (ใช้ CLASS_QUESTS ที่ฝังไว้)
+            local targetLevel = math.min(lvl + 1, 3)
+            local reqs = CLASS_QUESTS[equipped] and CLASS_QUESTS[equipped][targetLevel]
+            if reqs and lvl < 3 then
+                local cp = LocalPlayer:FindFirstChild("ClassProgress")
+                local folder = cp and cp:FindFirstChild(equipped)
+                if folder then
+                    local totalPct = 0
+                    local count = 0
+                    for statKey, goal in pairs(reqs) do
+                        local have = folder:GetAttribute(statKey) or 0
+                        if type(have) == "number" and goal > 0 then
+                            totalPct = totalPct + math.min(have / goal, 1) * 100
+                            count = count + 1
+                        end
+                    end
+                    if count > 0 then
+                        local avgPct = math.floor(totalPct / count)
+                        classTextPart = classTextPart .. " (" .. avgPct .. "%)"
+                    end
+                end
+                classText = classTextPart .. " [Can't check classes during farming]"
+            else
+                classText = classTextPart .. " (MAX) [Can't check classes during farming]"
+            end
         else
-            classText = "Can't check during farming"
+            classText = "None [Can't check classes during farming]"
         end
     end
 
-    local description = string.format("🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText)
-    _G.Horst_SetDescription(description)
+    _G.Horst_SetDescription(string.format(
+        "🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText))
 end
 
 local function checkDiamondsGoalAndSendDone()
