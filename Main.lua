@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 6.54")
+print("Version 1.2.3 / 7.33")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3062,16 +3062,14 @@ local function cannonTryShoot(energyThreshold)
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return false end
     for _, m in ipairs(chars:GetChildren()) do
-        if m:GetAttribute("StrongholdEnemy") == true
+        if m:IsA("Model")
+            and not Players:GetPlayerFromCharacter(m)
             and m:GetAttribute("Dead") ~= true
-            and not m:GetAttribute("NotAttackable")
-            and not Players:GetPlayerFromCharacter(m) then
-            local hp = m:GetAttribute("Health")
-            if hp == nil or hp > 0 then
-                local pos = m:GetPivot().Position
-                if (pos - hrp.Position).Magnitude <= 200 then
-                    table.insert(enemies, m)
-                end
+            and m:GetAttribute("StrongholdEnemy") == true
+            and m:GetAttribute("Tamed") ~= true then
+            local pos = m:GetPivot().Position
+            if (pos - hrp.Position).Magnitude <= 200 then
+                table.insert(enemies, m)
             end
         end
     end
@@ -3675,6 +3673,7 @@ local function doOneRound()
 
                 -- ปรับเลือด -> "รอ 0.2 วิ" ให้ค่า settle -> เช็คว่าติด 0 ไหม (ลองได้สูงสุด 3 รอบ)
                 -- ตั้งทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health ผ่าน zeroEnemyHealth
+                -- ทำเสมอ (ทั้ง cannon class และ axe class) - ให้ Cultist ตายเร็ว
                 local zeroed = false
                 for _ = 1, 3 do
                     pcall(function() zeroEnemyHealth(cultist) end)
