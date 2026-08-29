@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 9.44")
+print("Version 1.2.3 / 11.51")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -733,25 +733,36 @@ local function lobbyAutoLevelUp()
         return
     end
 
-    -- 1) Equip main class (จาก UpgradeClass[1]) ถ้ามีใน ClassProgress
-    if Config.UpgradeClass and Config.UpgradeClass[1] then
-        local mainClass = Config.UpgradeClass[1]
-        local folder = ClassProgress:FindFirstChild(mainClass)
-        if folder and folder:GetAttribute("Equipped") ~= true then
-            Client.Events.UpdateEquipped:FireServer(mainClass)
-            local t = 0
-            while folder:GetAttribute("Equipped") ~= true and t < 3 do
-                task.wait(0.1); t += 0.1
-            end
-            if folder:GetAttribute("Equipped") == true then
-                print("[ClassUpgrade] equipped " .. mainClass)
+    -- 1) Equip class ตามลำดับ UpgradeClass - ข้าม class ที่ Lv.3 แล้ว
+    if Config.UpgradeClass and #Config.UpgradeClass > 0 then
+        for _, mainClass in ipairs(Config.UpgradeClass) do
+            local folder = ClassProgress:FindFirstChild(mainClass)
+            if not folder then
+                warn("[ClassUpgrade] " .. mainClass .. " not owned (skip equip)")
             else
-                warn("[ClassUpgrade] equip " .. mainClass .. " timed out")
+                local curLvl = folder:GetAttribute("Level") or 1
+                if curLvl >= 3 then
+                    print("[ClassUpgrade] " .. mainClass .. " Lv." .. curLvl .. " done, skip equip")
+                else
+                    -- equip
+                    if folder:GetAttribute("Equipped") ~= true then
+                        Client.Events.UpdateEquipped:FireServer(mainClass)
+                        local t = 0
+                        while folder:GetAttribute("Equipped") ~= true and t < 3 do
+                            task.wait(0.1); t += 0.1
+                        end
+                        if folder:GetAttribute("Equipped") == true then
+                            print("[ClassUpgrade] equipped " .. mainClass .. " (Lv." .. curLvl .. ")")
+                        else
+                            warn("[ClassUpgrade] equip " .. mainClass .. " timed out")
+                        end
+                    else
+                        -- already equipped
+                    end
+                    -- เจอ class ที่ยังไม่ Lv.3 แล้ว → หยุด (ทำแค่ class เดียว)
+                    break
+                end
             end
-        elseif folder then
-            -- already equipped, no log
-        else
-            warn("[ClassUpgrade] " .. mainClass .. " not owned (skip equip)")
         end
     end
 
