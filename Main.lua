@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 5.27")
+print("Version 1.2.3 / 5.41")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -296,6 +296,15 @@ local function updateDiamondsLabel()
 end
 
 -- ส่ง Description ให้ Horst
+-- CLASS_QUESTS ต้อง declare ก่อน (hoist) เพราะ function bodies ในบาง executor scope leak
+local CLASS_QUESTS = {
+    Cyborg = {
+        [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
+        [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
+    },
+    -- ... (จะ merge เพิ่มด้านล่าง)
+}
+
 local function sendHorstDescription()
     if not Config.Horst then return end
     if not _G.Horst_SetDescription then return end
@@ -2750,11 +2759,9 @@ end, 1)
 ----------------------------------------------------------------
 -- Quest table (ฝังในไฟล์ - ไม่เรียก database) ใช้เช็คว่า quest เสร็จหรือยัง
 -- Format: [className] = { [level] = { statKey = goal, ... } }
-local CLASS_QUESTS = {
-    Cyborg = {
-        [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
-        [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
-    },
+-- (merge เข้ากับ CLASS_QUESTS ที่ hoist ไว้ข้างบน)
+do
+local _questKeys = {
     Ranger = {
         [2] = { EnemyKills = 80, KidRescues = 10 },
         [3] = { EnemyKills = 200, KidRescues = 35 },
@@ -2912,6 +2919,10 @@ local CLASS_QUESTS = {
         [3] = { Dissolves = 150 },
     },
 }
+for k, v in pairs(_questKeys) do
+    CLASS_QUESTS[k] = v
+end
+end  -- end of do block
 
 local useCannon = false
 local cannonTool = nil
