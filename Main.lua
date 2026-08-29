@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 2.14")
+print("Version 1.2.3 / 2.18")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -785,22 +785,42 @@ local function lobbyAutoLevelUp()
     local upgraded = 0
     for _, folder in ipairs(ClassProgress:GetChildren()) do
         local cn = folder:GetAttribute("ClassName") or folder.Name
-        if folder:GetAttribute("CanLevelUp") == true then
-            local curLevel = folder:GetAttribute("Level") or 1
+        local curLevel = folder:GetAttribute("Level") or 1
+        local canLvl = folder:GetAttribute("CanLevelUp")
+        print(string.format("[ClassUpgrade] check %s Lv.%d CanLvl=%s",
+            cn, curLevel, tostring(canLvl)))
+        if canLvl == true then
             if curLevel < 3 then
-                local ok = pcall(function()
+                local ok, err = pcall(function()
                     Client.Events.RequestLevelUpClass:FireServer(cn)
                 end)
                 if ok then
-                    upgraded += 1
+                    -- รอ server process + verify Level อัป
+                    task.wait(0.5)
+                    local newLevel = folder:GetAttribute("Level") or 1
+                    if newLevel > curLevel then
+                        upgraded += 1
+                        print(string.format("[ClassUpgrade] %s Lv.%d -> Lv.%d OK",
+                            cn, curLevel, newLevel))
+                    else
+                        warn(string.format("[ClassUpgrade] %s still Lv.%d after request (server may not have processed)",
+                            cn, curLevel))
+                    end
+                else
+                    warn("[ClassUpgrade] RequestLevelUpClass(" .. cn .. ") failed: " .. tostring(err))
                 end
+            else
+                print("[ClassUpgrade] " .. cn .. " already Lv.3, skip")
             end
         end
     end
+    print("[ClassUpgrade] total upgraded: " .. upgraded)
     if upgraded > 0 then
         print("[ClassUpgrade] upgraded " .. upgraded .. " class(es)")
         updateStatus("Upgraded " .. upgraded .. " class(es)")
         task.wait(1.5)
+    else
+        print("[ClassUpgrade] nothing to upgrade (CanLevelUp may be false or already Lv.3)")
     end
 end
 
