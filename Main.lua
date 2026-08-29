@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.2")
+print("Version 1.2.3")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -26,6 +26,11 @@ local Config = _G.Config
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
 Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"Camper", "Medic"}
+-- UpgradeClass: class หลักที่จะใช้ฟาร์ม (ตอนนี้รอบรับ Cyborg — ใช้ Laser Cannon ยิงแทนตี)
+-- ตอนอยู่ lobby: equip class นี้ทันที + อัปเกรดถ้า CanLevelUp
+-- ตอนเข้า Stronghold: equip Laser Cannon + ยิงแทนตี
+-- ถ้าไม่ตั้ง = ฟาร์มปกติ (ตีต้นไม้ด้วยขวาน)
+Config.UpgradeClass = Config.UpgradeClass or {}  -- Table เช่น {"Cyborg"} - ตอนนี้ใช้แค่ตัวแรก
 -- RerollShop: สุ่มหน้าร้าน class จนเจอตัวที่อยู่ใน BuyClass (เปิดได้เมื่อมี BuyClass เท่านั้น)
 Config.RerollShop = Config.RerollShop == true
 -- MaxRerollPrice: ราคาสุ่มสูงสุดที่ยอมรับ เช่น 50 (ราคา 51+ = เลิกสุ่ม) - มีผลเมื่อ RerollShop = true เท่านั้น
@@ -517,6 +522,64 @@ local function isLobby()
     return workspace:FindFirstChild("Boards") ~= nil
 end
 
+----------------------------------------------------------------
+-- Auto-level-up + equip class (Lobby)
+-- 1. ถ้ามี UpgradeClass ใน Config → equip class นั้นก่อน (ถ้ามีอยู่แล้ว)
+-- 2. เช็ค class ทุกตัวที่ owned → ถ้า CanLevelUp=true → ยิง RequestLevelUpClass
+-- 3. ตอนนี้รอบรับแค่ตัวแรกของ UpgradeClass เป็น "main" class
+----------------------------------------------------------------
+local function lobbyAutoLevelUp()
+    local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+    if not ClassProgress then
+        warn("[ClassUpgrade] no ClassProgress folder")
+        return
+    end
+
+    -- 1) Equip main class (จาก UpgradeClass[1]) ถ้ามีใน ClassProgress
+    if Config.UpgradeClass and Config.UpgradeClass[1] then
+        local mainClass = Config.UpgradeClass[1]
+        local folder = ClassProgress:FindFirstChild(mainClass)
+        if folder and folder:GetAttribute("Equipped") ~= true then
+            Client.Events.UpdateEquipped:FireServer(mainClass)
+            local t = 0
+            while folder:GetAttribute("Equipped") ~= true and t < 3 do
+                task.wait(0.1); t += 0.1
+            end
+            if folder:GetAttribute("Equipped") == true then
+                print("[ClassUpgrade] equipped " .. mainClass)
+            else
+                warn("[ClassUpgrade] equip " .. mainClass .. " timed out")
+            end
+        elseif folder then
+            -- already equipped, no log
+        else
+            warn("[ClassUpgrade] " .. mainClass .. " not owned (skip equip)")
+        end
+    end
+
+    -- 2) เช็คทุก class ที่ owned แล้วอัปเกรดถ้า CanLevelUp
+    local upgraded = 0
+    for _, folder in ipairs(ClassProgress:GetChildren()) do
+        local cn = folder:GetAttribute("ClassName") or folder.Name
+        if folder:GetAttribute("CanLevelUp") == true then
+            local curLevel = folder:GetAttribute("Level") or 1
+            if curLevel < 3 then
+                local ok = pcall(function()
+                    Client.Events.RequestLevelUpClass:FireServer(cn)
+                end)
+                if ok then
+                    upgraded += 1
+                end
+            end
+        end
+    end
+    if upgraded > 0 then
+        print("[ClassUpgrade] upgraded " .. upgraded .. " class(es)")
+        updateStatus("Upgraded " .. upgraded .. " class(es)")
+        task.wait(1.5)
+    end
+end
+
 print("\n[Step 1] Checking current map...")
 updateStatus("Checking Map...")
 
@@ -687,6 +750,14 @@ if isLobby() then
     claimAllBadges()
 
     print("Daily Quests & Badges done")
+
+    -- ============================================
+    -- Auto-Upgrade + Equip Class (Lobby only - ก่อน Auto-Buy)
+    -- 1) Equip main class จาก UpgradeClass[1]
+    -- 2) อัปเกรดทุก class ที่ CanLevelUp
+    -- ============================================
+    updateStatus("Upgrading Classes...")
+    lobbyAutoLevelUp()
 
     -- ============================================
     -- Auto-Buy Class (ก่อนสร้างห้อง)
@@ -2573,6 +2644,406 @@ retryUntil("warp to Stronghold Floor", function()
     return warpToStrongholdFloor(2)
 end, 1)
 
+----------------------------------------------------------------
+-- STEP 3.6b: Equip Laser Cannon + ยิงแทนตี
+-- ทำเฉพาะเมื่อ equipped class ตรงกับ Config.UpgradeClass[1]
+-- (ตอนนี้ Cyborg ใช้ Laser Cannon, ฆ่า Stronghold enemy ด้วยกระสุน Energy)
+-- ตรวจ Energy เต็ม 100 ก่อนยิง, ยิงหลายตัวพร้อมกัน (multi-target ใน 1 นัด)
+-- ถ้าไม่มี class ตาม UpgradeClass → ฟาร์มปกติ (ไม่ทำอะไร)
+----------------------------------------------------------------
+-- Quest table (ฝังในไฟล์ - ไม่เรียก database) ใช้เช็คว่า quest เสร็จหรือยัง
+-- Format: [className] = { [level] = { statKey = goal, ... } }
+local CLASS_QUESTS = {
+    Cyborg = {
+        [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
+        [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
+    },
+    Ranger = {
+        [2] = { EnemyKills = 80, KidRescues = 10 },
+        [3] = { EnemyKills = 200, KidRescues = 35 },
+    },
+    Medic = {
+        [2] = { RevivePlayers = 25, FindMeds = 30 },
+        [3] = { RevivePlayers = 40, FindMeds = 50 },
+    },
+    Assassin = {
+        [2] = { TravelStuds = 2500, PerfectKills = 100 },
+        [3] = { TravelStuds = 10000, PerfectKills = 250 },
+    },
+    Camper = {
+        [2] = { FoodCooked = 75, LogsBurned = 200 },
+        [3] = { FoodCooked = 150, LogsBurned = 350 },
+    },
+    Scavenger = {
+        [2] = { ScrapScrap = 450, TravelStuds = 2500 },
+        [3] = { ScrapScrap = 1000, TravelStuds = 10000 },
+    },
+    Cook = {
+        [2] = { CookMeat = 200, CookStew = 50 },
+        [3] = { CookMeat = 400, CookStew = 200 },
+    },
+    Lumberjack = {
+        [2] = { CutTree = 200, PlantSapling = 70 },
+        [3] = { CutTree = 500, PlantSapling = 200 },
+    },
+    Brawler = {
+        [2] = { MeleeHit = 350, TakeMeleeHit = 200 },
+        [3] = { MeleeHit = 600, Regenerate = 5000 },
+    },
+    Hunter = {
+        [2] = { WolfKills = 120, BunnyKills = 120 },
+        [3] = { WolfKills = 250, AlphaWolfKills = 120 },
+    },
+    Alien = {
+        [2] = { AlienTechKills = 150 },
+        [3] = { AlienTechKills = 300 },
+    },
+    Farmer = {
+        [2] = { WaterFarmPlots = 40, PickCrops = 200 },
+        [3] = { WaterFarmPlots = 80, PickCrops = 500 },
+    },
+    Blacksmith = {
+        [2] = { BuildStructures = 80, UpgradeCraftingBench = 20 },
+        [3] = { BuildStructures = 250, UpgradeCraftingBench = 40 },
+    },
+    ["Base Defender"] = {
+        [2] = { BuildDefense = 60, DefenseKills = 80 },
+        [3] = { BuildDefense = 150, DefenseKills = 200 },
+    },
+    Berserker = {
+        [2] = { EnemyKillsWhileLow = 50 },
+        [3] = { EnemyKillsWhileLow = 150 },
+    },
+    Fisherman = {
+        [2] = { CatchFish = 350, CatchSharks = 5 },
+        [3] = { CatchFish = 500, CatchSharks = 15 },
+    },
+    Pyromaniac = {
+        [2] = { EnemyKillsWithFire = 150 },
+        [3] = { EnemyKillsWithFire = 400 },
+    },
+    ["Poison Master"] = {
+        [2] = { EnemyKillsWithPoison = 100 },
+        [3] = { EnemyKillsWithPoison = 250 },
+    },
+    ["Big Game Hunter"] = {
+        [2] = { ConsumePelt = 50, WolfKills = 70 },
+        [3] = { ConsumePelt = 100, WolfKills = 150 },
+    },
+    Chef = {
+        [2] = { FoodCooked = 200, CookSpecialDish = 50 },
+        [3] = { FoodCooked = 400, CookSpecialDish = 100 },
+    },
+    Gambler = {
+        [2] = { ChestOpened = 70 },
+        [3] = { ChestOpened = 150, RubyChestOpened = 10 },
+    },
+    Support = {
+        [2] = { SupportDamageAbsorbed = 500, SupportBonusDamageDealt = 200 },
+        [3] = { SupportDamageAbsorbed = 1500, SupportBonusDamageDealt = 500 },
+    },
+    ["Fire Bandit"] = {
+        [2] = { EnemyKillsWithFire = 100, SetEnemiesOnFire = 200 },
+        [3] = { EnemyKillsWithFire = 250, SetEnemiesOnFire = 500 },
+    },
+    Zookeeper = {
+        [2] = { PetsTamed = 30 },
+        [3] = { PetsTamed = 60 },
+    },
+    Beastmaster = {
+        [2] = { WolvesSummoned = 50, PetDamageDealt = 5000 },
+        [3] = { WolvesSummoned = 100, PetDamageDealt = 15000 },
+    },
+    Undead = {
+        [2] = { Revived = 30 },
+        [3] = { Revived = 60 },
+    },
+    Necromancer = {
+        [2] = { CultistsResurrected = 100, PetDamageDealt = 5000 },
+        [3] = { CultistsResurrected = 200, PetDamageDealt = 5000 },
+    },
+    Witch = {
+        [2] = { HitPotion = 100 },
+        [3] = { HitPotion = 300 },
+    },
+    Vampire = {
+        [2] = { LifestealHealing = 450, DealDamage = 5000 },
+        [3] = { LifestealHealing = 1000, DealDamage = 15000 },
+    },
+    Brute = {
+        [2] = { Taunts = 100, DamageBlocked = 800 },
+        [3] = { Taunts = 250, DamageBlocked = 2000 },
+    },
+    Explorer = {
+        [2] = { TravelStuds = 2500, ChestOpened = 80 },
+        [3] = { TravelStuds = 10000, ChestOpened = 200 },
+    },
+    ["Gifting Elf"] = {
+        [2] = { GivePresent = 40 },
+        [3] = { GivePresent = 90 },
+    },
+    Snowman = {
+        [2] = { HitSnowball = 500 },
+        [3] = { HitSnowball = 1000 },
+    },
+    Engineer = {
+        [2] = { BuildTurret = 15, TurretKill = 300 },
+        [3] = { BuildTurret = 40, TurretKill = 600 },
+    },
+    Feaster = {
+        [2] = { EatStew = 50, TimeOverfed = 1000 },
+        [3] = { EatStew = 150, TimeOverfed = 3000 },
+    },
+    Nightcrawler = {
+        [2] = { EnemiesDefeatedInDark = 50 },
+        [3] = { EnemiesDefeatedInDark = 150 },
+    },
+    Grenadier = {
+        [2] = { ExplosiveKills = 50 },
+        [3] = { ExplosiveKills = 150 },
+    },
+    Gunslinger = {
+        [2] = { TrustyRevolverKills = 250 },
+        [3] = { TrustyRevolverKills = 500 },
+    },
+    Bunny = {
+        [2] = { EatCarrots = 200 },
+        [3] = { EatCarrots = 400 },
+    },
+    ["Alien Scientist"] = {
+        [2] = { Dissolves = 50 },
+        [3] = { Dissolves = 150 },
+    },
+}
+
+local useCannon = false
+local cannonTool = nil
+local cannonEnergyCost = 75  -- EnergyCost ต่อนัด (จาก CheckEnergy.lua)
+-- เกมเก็บ Energy คงเหลือที่ LocalPlayer:GetAttribute("EnergyAmmo")
+-- Logic ยิง: 1 นัดใช้ 75 Energy → ต้องมี Energy > 75 ก่อนยิง (เช็ค >= 76)
+
+if Config.UpgradeClass and Config.UpgradeClass[1] then
+    local equippedClass = LocalPlayer:GetAttribute("Class")
+    if equippedClass == Config.UpgradeClass[1] then
+        -- เช็ค level: ถ้า Lv.3 แล้ว = เควสครบแล้ว → ฟาร์มปกติด้วยขวาน (no cannon)
+        local equippedLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
+        if equippedLevel >= 3 then
+            print(string.format("[Cannon] %s Lv.%d done, using axe", equippedClass, equippedLevel))
+        else
+            local inv = LocalPlayer:FindFirstChild("Inventory")
+            if inv then
+                cannonTool = inv:FindFirstChild("Laser Cannon")
+                if cannonTool then
+                    useCannon = true
+                    updateStatus("Equipping Laser Cannon...")
+                    pcall(function()
+                        Client.InventoryHandler.RequestEquipItem(cannonTool)
+                    end)
+                    task.wait(1.0)
+                    local char = LocalPlayer.Character
+                    local th = char and char:FindFirstChild("ToolHandle")
+                    local origItem = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                    if origItem and origItem.Name == "Laser Cannon" then
+                        print("[Cannon] equipped")
+                        -- ใช้ Tool instance จาก OriginalItem.Value (แก้ปัญหา "not a valid member of Model")
+                        cannonTool = origItem
+                    else
+                        warn("[Cannon] equip failed (got " .. tostring(origItem and origItem.Name) .. ")")
+                        useCannon = false
+                    end
+                else
+                    warn("[Cannon] Laser Cannon not in Inventory, fallback to axe")
+                end
+            end
+        end
+    end
+end
+
+-- ฟังก์ชันยิงเฉพาะเมื่อ useCannon=true
+-- คืน true ถ้ายิงสำเร็จ (Energy เต็ม + มีเป้า)
+local function cannonTryShoot(energyThreshold)
+    energyThreshold = energyThreshold or 100
+    if not useCannon or not cannonTool then return false end
+
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local head = char:FindFirstChild("Head")
+    if not head then return false end
+
+    -- เช็ค EnergyAmmo คงเหลือ (เกมเก็บที่ LocalPlayer)
+    local energy = LocalPlayer:GetAttribute("EnergyAmmo")
+    if type(energy) == "number" and energy <= cannonEnergyCost then
+        return false  -- Energy ไม่พอ → รอ refill
+    end
+
+    -- หา enemy ในรัศมี 200 studs (เฉพาะ Stronghold enemy ที่ยังไม่ตาย)
+    local enemies = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return false end
+    for _, m in ipairs(chars:GetChildren()) do
+        if m:GetAttribute("StrongholdEnemy") == true
+            and m:GetAttribute("Dead") ~= true
+            and not m:GetAttribute("NotAttackable")
+            and not Players:GetPlayerFromCharacter(m) then
+            local hp = m:GetAttribute("Health")
+            if hp == nil or hp > 0 then
+                local pos = m:GetPivot().Position
+                if (pos - hrp.Position).Magnitude <= 200 then
+                    table.insert(enemies, m)
+                end
+            end
+        end
+    end
+
+    if #enemies == 0 then return false end
+
+    -- Cluster enemies: จัดกลุ่มตัวที่อยู่ใกล้กัน (<= ExplosionRadius * 1.2)
+    -- ถ้ากลุ่มใหญ่เกินไปจนกระจายเกิน AOE → แยกยิงทีละ cluster
+    local cannonExplosionRadius = cannonTool:GetAttribute("ExplosionRadius") or 16
+    local clusterRadius = cannonExplosionRadius * 1.2
+    local clusters = {}
+
+    local function getPos(inst)
+        if inst:IsA("Model") then return inst:GetPivot().Position end
+        if inst:IsA("BasePart") then return inst.Position end
+        return nil
+    end
+
+    for _, e in ipairs(enemies) do
+        local pos = getPos(e)
+        if pos then
+            local placed = false
+            for _, cluster in ipairs(clusters) do
+                if (cluster.center - pos).Magnitude <= clusterRadius then
+                    table.insert(cluster.members, e)
+                    -- อัปเดต center เป็นค่าเฉลี่ย
+                    local sum = cluster.center * cluster.count
+                    sum = sum + pos
+                    cluster.count = cluster.count + 1
+                    cluster.center = sum / cluster.count
+                    placed = true
+                    break
+                end
+            end
+            if not placed then
+                table.insert(clusters, { center = pos, members = { e }, count = 1 })
+            end
+        end
+    end
+
+    -- เอา cluster แรก (ใกล้สุด) — เพื่อให้ยิงทีละกลุ่ม ไม่ใช่ยิงหมดใน 1 นัด
+    table.sort(clusters, function(a, b)
+        return (a.center - head.Position).Magnitude < (b.center - head.Position).Magnitude
+    end)
+    local targetCluster = clusters[1]
+    local targetEnemies = targetCluster.members
+
+    -- avgPos + dir จาก cluster นี้
+    local avgPos = targetCluster.center
+    local dir = (avgPos - head.Position).Unit
+    if dir ~= dir then dir = head.CFrame.LookVector end
+
+    local target = enemies[1]
+    local targetPart = target:FindFirstChild("HumanoidRootPart")
+        or target:FindFirstChild("Head")
+        or target.PrimaryPart
+    if not targetPart then return false end
+
+    local pcallOk, pcallErr = pcall(function()
+        -- ยิง 3 remotes ตรงๆ (ตาม Cobalt log - ไม่ผ่าน ProjectileClass)
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
+        local RegisterProjectile = Remotes and Remotes:FindFirstChild("RegisterProjectile")
+        local ReplicateBullet = Remotes and Remotes:FindFirstChild("ReplicateBullet")
+        local ExplosiveDamage = Remotes and Remotes:FindFirstChild("ExplosiveProjectileDamageEnemy")
+
+        if not (RegisterProjectile and ReplicateBullet and ExplosiveDamage) then
+            warn("[Cannon] missing remote(s)")
+            return
+        end
+
+        local speed = cannonTool:GetAttribute("ProjectileSpeed") or 700
+        local gravity = cannonTool:GetAttribute("ProjectileGravity") or 0
+        local velocity = dir * speed
+        local pid = math.floor((tick() * 1000) % 1000000)
+
+        -- 1) RegisterProjectile
+        RegisterProjectile:InvokeServer(cannonTool, pid, false)
+
+        -- 2) ReplicateBullet
+        ReplicateBullet:FireServer("FireAllClients", pid, {
+            ProjectileGravity = gravity,
+            HeadPos = head.Position,
+            Origin = head.Position,
+            Velocity = velocity,
+            ProjectileName = "LaserMissile",
+        })
+
+        -- 3) ExplosiveProjectileDamageEnemy (AOE) - ใช้ avgPos เป็นจุดระเบิด
+        local hitList = {}
+        for _, e in ipairs(targetEnemies) do
+            if e:IsA("Model") then
+                local d = (e:GetPivot().Position - avgPos).Magnitude
+                table.insert(hitList, { Model = e, Distance = d })
+            elseif e:IsA("BasePart") then
+                local d = (e.Position - avgPos).Magnitude
+                table.insert(hitList, { Model = e, Distance = d })
+            end
+        end
+        local ownerId = tostring(pid) .. "_" .. tostring(lp.UserId)
+        local result = ExplosiveDamage:InvokeServer(hitList, pid, ownerId, avgPos)
+        return result
+    end)
+    if not pcallOk then
+        warn("[Cannon] shoot failed: " .. tostring(pcallErr))
+        return false
+    end
+
+    -- เช็คผล: server คืน table {Success=true,...} ถ้าสำเร็จ
+    local result = pcallOk
+    if type(result) == "table" then
+        if result.Success == false then
+            warn("[Cannon] server refused damage")
+            return false
+        end
+        -- สำเร็จ → นับ enemy ที่ตาย (HP <= 0 หรือ Destroyed)
+        local killed = 0
+        for _, e in ipairs(targetEnemies) do
+            if not e or not e.Parent then
+                killed += 1
+            elseif e:IsA("Model") then
+                local hum = e:FindFirstChildOfClass("Humanoid")
+                    or e:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Health <= 0 then
+                    killed += 1
+                end
+            end
+        end
+        if killed > 0 then
+            print(string.format("[Cannon] killed %d/%d", killed, #enemies))
+        end
+        return true
+    end
+    return true
+end
+
+-- Background: ยิง cannon ตลอดเวลาตอนอยู่ Stronghold (ทำงานขนานกับ main loop)
+-- EnergyCost = 75 ต่อนัด (จาก CheckEnergy.lua) - server จะ validate Energy คงเหลือ
+if useCannon then
+    task.spawn(function()
+        while useCannon do
+            local shot = cannonTryShoot()
+            if not shot then
+                task.wait(0.5)  -- ไม่มีเป้า / Energy ไม่พอ → รอ
+            else
+                task.wait(0.2)  -- ยิงสำเร็จ → cooldown
+            end
+        end
+    end)
+end
+
 -- ============================================
 -- STEP 3.7: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
 -- ============================================
@@ -3094,20 +3565,33 @@ end
 -- STEP 6-7: วน 3 รอบ fight + เปิด chest + เก็บเพชร
 -- ============================================
 
+-- Flag: ติดเมื่อ quest ของ main class เสร็จแล้ว รอให้ round ปัจจุบันจบ + เก็บเพชรก่อน teleport
+local questReadyToLeave = false
+
 while completedRounds < TOTAL_ROUNDS do
     print(string.format("\n[Step 6] Round %d/%d", completedRounds+1, TOTAL_ROUNDS))
     updateStatus(string.format("Round %d/%d - Fighting...", completedRounds+1, TOTAL_ROUNDS))
 
-    -- Re-equip axe ทุกรอบ
-    Client.InventoryHandler.RequestEquipItem(bestAxe)
+    -- Re-equip ทุกรอบ: ถ้า useCannon → Laser Cannon, ไม่งั้น axe
+    if useCannon and cannonTool then
+        pcall(function() Client.InventoryHandler.RequestEquipItem(cannonTool) end)
+    else
+        Client.InventoryHandler.RequestEquipItem(bestAxe)
+    end
     do
         local waited = 0
         while waited < 3 do
             local char = LocalPlayer.Character
             local th = char and char:FindFirstChild("ToolHandle")
             if th and th:FindFirstChild("OriginalItem") then
-                axe = th.OriginalItem.Value
-                break
+                local currentTool = th.OriginalItem.Value
+                if useCannon and cannonTool and currentTool.Name == "Laser Cannon" then
+                    axe = currentTool  -- ใช้ตัวแปร axe ร่วม (เพื่อ compat กับ doOneRound)
+                    break
+                elseif not useCannon and currentTool == bestAxe then
+                    axe = currentTool
+                    break
+                end
             end
             task.wait(0.1)
             waited += 0.1
@@ -3116,6 +3600,39 @@ while completedRounds < TOTAL_ROUNDS do
 
     doOneRound()
     completedRounds += 1
+
+    -- เช็ค quest ของ class ที่ equip อยู่ ถ้าครบตาม level → ตั้ง flag (รอจบ loop + เก็บเพชรก่อน)
+    if useCannon and not questReadyToLeave then
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
+        if cp and mainClass then
+            local folder = cp:FindFirstChild(mainClass)
+            if folder then
+                local level = folder:GetAttribute("Level") or 1
+                local goalLevel = level + 1
+                if goalLevel <= 3 then
+                    -- ใช้ CLASS_QUESTS ที่ฝังไว้แทน database
+                    local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][goalLevel]
+                    if reqs then
+                        local allMet = true
+                        for statKey, goal in pairs(reqs) do
+                            local have = folder:GetAttribute(statKey) or 0
+                            if type(have) ~= "number" or have < goal then
+                                allMet = false
+                                break
+                            end
+                        end
+                        if allMet then
+                            questReadyToLeave = true
+                            print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round",
+                                mainClass, goalLevel))
+                            updateStatus("Quest done - finishing round")
+                        end
+                    end
+                end
+            end
+        end
+    end
 
     -- เปิด chest
     print(string.format("\n[Step 7] Opening Diamond Chest (round %d)...", completedRounds))
@@ -3283,6 +3800,21 @@ while completedRounds < TOTAL_ROUNDS do
     end
     print(("[OK] Collected %d diamonds (round %d)"):format(collected, completedRounds))
     updateStatus(("✅ Collected %d Diamonds"):format(collected))
+
+    -- ถ้า quest พร้อมอัปแล้ว → ออกจาก Stronghold กลับ lobby (หลังเก็บเพชรเสร็จ)
+    if questReadyToLeave then
+        local mainClass = Config.UpgradeClass and Config.UpgradeClass[1] or "?"
+        print(string.format("[Quest] %s quest complete - leaving for lobby", mainClass))
+        updateStatus("Teleporting to lobby...")
+        task.wait(2)
+        pcall(function()
+            local TS = game:GetService("TeleportService")
+            TS:Teleport(LOBBY_PLACE_ID, LocalPlayer)
+        end)
+        task.wait(5)
+        useCannon = false
+        return
+    end
 
     -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
     if completedRounds < TOTAL_ROUNDS then
