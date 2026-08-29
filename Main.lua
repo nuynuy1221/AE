@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 6.44")
+print("Version 1.2.3 / 6.54")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -429,62 +429,68 @@ local lastFarmReport = 0    -- cooldown log
 
 pcall(function()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local Remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
-    local ClassStatUpdated = Remotes and Remotes:FindFirstChild("ClassStatUpdated")
-    if not ClassStatUpdated or not ClassStatUpdated.OnClientEvent then return end
+    -- รอ remote แบบ indefinite ใน background task (กัน hook ก่อน remote พร้อม)
+    task.spawn(function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Remotes = ReplicatedStorage:WaitForChild("RemoteEvents", 300)  -- รอ 5 นาที
+        if not Remotes then
+            warn("[ClassStat] RemoteEvents not found after 5 min")
+            return
+        end
+        -- ตอนนี้รอ ClassStatUpdated แบบ indefinite (กัน hook ก่อน remote replicate)
+        local ClassStatUpdated = Remotes:WaitForChild("ClassStatUpdated", math.huge)
+        if not ClassStatUpdated or not ClassStatUpdated.OnClientEvent then return end
+        ClassStatUpdated.OnClientEvent:Connect(function(className, statKey, value, delta)
+            if not className or not statKey then return end
+            classStatCache[className] = classStatCache[className] or {}
+            classStatCache[className][statKey] = value
 
-    ClassStatUpdated.OnClientEvent:Connect(function(className, statKey, value, delta)
-        if not className or not statKey then return end
-        classStatCache[className] = classStatCache[className] or {}
-        classStatCache[className][statKey] = value
-
-        -- ถ้าอยู่แมพฟาร์ม → คำนวณ % + print + ส่ง Horst update
-        local isLobby = game.PlaceId == 79546208627805
-        if not isLobby and Config.Horst then
-            local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
-            if mainClass and className == mainClass then
-                local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-                if lvl < 3 then
-                    local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
-                    if reqs then
-                        local totalPct, count = 0, 0
-                        for sk, goal in pairs(reqs) do
-                            local have = classStatCache[mainClass][sk]
-                                or LocalPlayer.ClassProgress
-                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
-                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk)
-                                or 0
-                            if type(have) == "number" and goal > 0 then
-                                totalPct = totalPct + math.min(have / goal, 1) * 100
-                                count = count + 1
+            -- ถ้าอยู่แมพฟาร์ม → คำนวณ % + print + ส่ง Horst update
+            local isLobby = game.PlaceId == 79546208627805
+            if not isLobby and Config.Horst then
+                local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
+                if mainClass and className == mainClass then
+                    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                    if lvl < 3 then
+                        local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
+                        if reqs then
+                            local totalPct, count = 0, 0
+                            for sk, goal in pairs(reqs) do
+                                local have = classStatCache[mainClass][sk]
+                                    or (LocalPlayer.ClassProgress
+                                        and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
+                                        and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk))
+                                    or 0
+                                if type(have) == "number" and goal > 0 then
+                                    totalPct = totalPct + math.min(have / goal, 1) * 100
+                                    count = count + 1
+                                end
                             end
-                        end
-                        if count > 0 then
-                            local avgPct = math.floor(totalPct / count)
-                            -- print log cooldown 1 วิ
-                            if os.clock() - lastFarmReport >= 1 then
-                                lastFarmReport = os.clock()
-                                print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
-                                    mainClass, lvl + 1, avgPct))
-                            end
-                            -- ส่ง Horst update (real-time)
-                            local equipped = LocalPlayer:GetAttribute("Class")
-                            local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-                            local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
-                                or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
-                            if Config.Horst and _G.Horst_SetDescription then
-                                local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-                                _G.Horst_SetDescription(string.format(
-                                    "🌲 99 Nights • Diamonds: %d • Class: %s [Can't check classes during farming]",
-                                    diamonds, classTextPart))
+                            if count > 0 then
+                                local avgPct = math.floor(totalPct / count)
+                                if os.clock() - lastFarmReport >= 1 then
+                                    lastFarmReport = os.clock()
+                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
+                                        mainClass, lvl + 1, avgPct))
+                                end
+                                local equipped = LocalPlayer:GetAttribute("Class")
+                                local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                                local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
+                                    or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
+                                if Config.Horst and _G.Horst_SetDescription then
+                                    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                    _G.Horst_SetDescription(string.format(
+                                        "🌲 99 Nights • Diamonds: %d • Class: %s [Can't check classes during farming]",
+                                        diamonds, classTextPart))
+                                end
                             end
                         end
                     end
                 end
             end
-        end
+        end)
+        print("[ClassStat] watching ClassStatUpdated")
     end)
-    print("[ClassStat] watching ClassStatUpdated")
 end)
 
 -- รอให้ attribute Diamonds sync มาจาก server ก่อน (อาจยังเป็น nil ตอนสคริปต์เริ่ม)
