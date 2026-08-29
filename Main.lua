@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 2.18")
+print("Version 1.2.3 / 2.21")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -728,6 +728,7 @@ end
 ----------------------------------------------------------------
 local function lobbyAutoLevelUp()
     print("[ClassUpgrade] lobbyAutoLevelUp START")
+    local Client = require(LocalPlayer.PlayerScripts.Client)
     local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
     if not ClassProgress then
         warn("[ClassUpgrade] no ClassProgress folder")
