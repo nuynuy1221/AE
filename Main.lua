@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 8.28")
+print("Version 1.2.3 / 9.44")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3848,7 +3848,7 @@ while completedRounds < TOTAL_ROUNDS do
     completedRounds += 1
 
     -- เช็ค quest ของ class ที่ equip อยู่ ถ้าครบตาม level → ตั้ง flag (รอจบ loop + เก็บเพชรก่อน)
-    if useCannon and not questReadyToLeave then
+    if Config.UpgradeClass and Config.UpgradeClass[1] and not questReadyToLeave then
         local cp = LocalPlayer:FindFirstChild("ClassProgress")
         local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
         if cp and mainClass then
@@ -3862,7 +3862,8 @@ while completedRounds < TOTAL_ROUNDS do
                     if reqs then
                         local allMet = true
                         for statKey, goal in pairs(reqs) do
-                            local have = folder:GetAttribute(statKey) or 0
+                            -- ใช้ classStatCache อย่างเดียว (real-time จาก ClassStatUpdated event)
+                            local have = (classStatCache[mainClass] and classStatCache[mainClass][statKey]) or 0
                             if type(have) ~= "number" or have < goal then
                                 allMet = false
                                 break
