@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 5.21")
+print("Version 1.2.3 / 5.27")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -76,14 +76,18 @@ local function CheckGoals()
             end
             -- Check UpgradeClass: main class ต้องถึง Lv.3
             if upgradeGoal and classesMet then
-                local mainClass = Config.UpgradeClass[1]
-                local folder = ClassProgress:FindFirstChild(mainClass)
-                if not folder then
+                local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
+                if not mainClass then
                     classesMet = false
                 else
-                    local lvl = folder:GetAttribute("Level") or 1
-                    if lvl < 3 then
+                    local folder = ClassProgress:FindFirstChild(mainClass)
+                    if not folder then
                         classesMet = false
+                    else
+                        local lvl = folder:GetAttribute("Level") or 1
+                        if lvl < 3 then
+                            classesMet = false
+                        end
                     end
                 end
             end
