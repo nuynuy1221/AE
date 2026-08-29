@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 7.33")
+print("Version 1.2.3 / 8.28")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -358,6 +358,16 @@ local function sendHorstDescription()
                                 if count > 0 then
                                     local avgPct = math.floor(totalPct / count)
                                     classStr = classStr .. " (" .. avgPct .. "%)"
+                                    -- Dev Logs: แสดงแต่ละ stat แยก
+                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
+                                        className, targetLevel, avgPct))
+                                    for statKey, goal in pairs(reqs) do
+                                        local have = folder:GetAttribute(statKey) or 0
+                                        if type(have) == "number" and goal > 0 then
+                                            print(string.format("  - %s: %d / %d",
+                                                statKey, have, goal))
+                                        end
+                                    end
                                 end
                             end
                         else
@@ -472,6 +482,17 @@ pcall(function()
                                     lastFarmReport = os.clock()
                                     print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
                                         mainClass, lvl + 1, avgPct))
+                                    -- Dev Logs: แสดง stat แต่ละอัน
+                                    for sk, goal in pairs(reqs) do
+                                        local have = classStatCache[mainClass][sk]
+                                            or (LocalPlayer.ClassProgress
+                                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
+                                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk))
+                                            or 0
+                                        if type(have) == "number" and goal > 0 then
+                                            print(string.format("  - %s: %d / %d", sk, have, goal))
+                                        end
+                                    end
                                 end
                                 local equipped = LocalPlayer:GetAttribute("Class")
                                 local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
