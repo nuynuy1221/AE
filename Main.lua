@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 1.40")
+print("Version 1.2.3 / 2.14")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -727,10 +727,25 @@ end
 -- 3. ตอนนี้รอบรับแค่ตัวแรกของ UpgradeClass เป็น "main" class
 ----------------------------------------------------------------
 local function lobbyAutoLevelUp()
+    print("[ClassUpgrade] lobbyAutoLevelUp START")
     local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
     if not ClassProgress then
         warn("[ClassUpgrade] no ClassProgress folder")
         return
+    end
+    print("[ClassUpgrade] ClassProgress found, children:")
+    for _, f in ipairs(ClassProgress:GetChildren()) do
+        local cn = f:GetAttribute("ClassName") or f.Name
+        local lvl = f:GetAttribute("Level") or 1
+        local canLvl = f:GetAttribute("CanLevelUp")
+        local eq = f:GetAttribute("Equipped")
+        print(string.format("  - %s: Lv.%d CanLvl=%s Eq=%s", cn, lvl, tostring(canLvl), tostring(eq)))
+    end
+
+    if not (Config.UpgradeClass and #Config.UpgradeClass > 0) then
+        print("[ClassUpgrade] Config.UpgradeClass is empty or nil!")
+    else
+        print("[ClassUpgrade] Config.UpgradeClass = " .. table.concat(Config.UpgradeClass, ", "))
     end
 
     -- 1) Equip class ตามลำดับ UpgradeClass - ข้าม class ที่ Lv.3 แล้ว
