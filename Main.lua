@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 11.51")
+print("Version 1.2.3 / 1.31")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3860,31 +3860,54 @@ while completedRounds < TOTAL_ROUNDS do
 
     -- เช็ค quest ของ class ที่ equip อยู่ ถ้าครบตาม level → ตั้ง flag (รอจบ loop + เก็บเพชรก่อน)
     if Config.UpgradeClass and Config.UpgradeClass[1] and not questReadyToLeave then
-        local cp = LocalPlayer:FindFirstChild("ClassProgress")
-        local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
-        if cp and mainClass then
-            local folder = cp:FindFirstChild(mainClass)
+        local mainClass = Config.UpgradeClass[1]
+        local isLobby = game.PlaceId == 79546208627805
+
+        -- ใน Lobby: ใช้ ClassProgress folder (อ่านจาก attribute ของ folder - แม่นยำ)
+        -- ในแมพฟาร์ม: ใช้ LocalPlayer attribute (folder อาจหาย)
+        local level = 1
+        local statSource = nil  -- table ที่ใช้อ่าน stat
+        if isLobby then
+            local cp = LocalPlayer:FindFirstChild("ClassProgress")
+            local folder = cp and cp:FindFirstChild(mainClass)
             if folder then
-                local level = folder:GetAttribute("Level") or 1
-                local goalLevel = level + 1
-                if goalLevel <= 3 then
-                    -- ใช้ CLASS_QUESTS ที่ฝังไว้แทน database
-                    local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][goalLevel]
-                    if reqs then
-                        local allMet = true
+                level = folder:GetAttribute("Level") or 1
+                statSource = folder
+            end
+        else
+            level = LocalPlayer:GetAttribute("ClassLevel") or 1
+            statSource = classStatCache[mainClass]  -- ดักจาก ClassStatUpdated event
+        end
+
+        if statSource then
+            local goalLevel = level + 1
+            if goalLevel <= 3 then
+                local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][goalLevel]
+                if reqs then
+                    local allMet = true
+                    for statKey, goal in pairs(reqs) do
+                        local have = statSource[statKey] or 0
+                        if type(have) ~= "number" or have < goal then
+                            allMet = false
+                        end
+                    end
+                    if allMet then
+                        questReadyToLeave = true
+                        print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round",
+                            mainClass, goalLevel))
+                        updateStatus("Quest done - finishing round")
+                    end
+                end
+            end
+        end
+    end
+                        local cache = classStatCache[mainClass] or {}
                         for statKey, goal in pairs(reqs) do
                             -- ใช้ classStatCache อย่างเดียว (real-time จาก ClassStatUpdated event)
-                            local have = (classStatCache[mainClass] and classStatCache[mainClass][statKey]) or 0
+                            local have = cache[statKey] or 0
                             if type(have) ~= "number" or have < goal then
                                 allMet = false
-                                break
                             end
-                        end
-                        if allMet then
-                            questReadyToLeave = true
-                            print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round",
-                                mainClass, goalLevel))
-                            updateStatus("Quest done - finishing round")
                         end
                     end
                 end
