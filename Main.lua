@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 1.31")
+print("Version 1.2.3 / 1.40")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3896,19 +3896,6 @@ while completedRounds < TOTAL_ROUNDS do
                         print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round",
                             mainClass, goalLevel))
                         updateStatus("Quest done - finishing round")
-                    end
-                end
-            end
-        end
-    end
-                        local cache = classStatCache[mainClass] or {}
-                        for statKey, goal in pairs(reqs) do
-                            -- ใช้ classStatCache อย่างเดียว (real-time จาก ClassStatUpdated event)
-                            local have = cache[statKey] or 0
-                            if type(have) ~= "number" or have < goal then
-                                allMet = false
-                            end
-                        end
                     end
                 end
             end
