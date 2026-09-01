@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 3.50")
+print("Version 1.2.4 4.06")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -100,7 +100,6 @@ local function CheckGoals()
                 end
             end
         end
-    end
     end
 
     -- In farm map: ignore classes goal
@@ -3155,7 +3154,6 @@ local _questKeys = {
 for k, v in pairs(_questKeys) do
     CLASS_QUESTS[k] = v
 end
-end  -- end of do block
 
 local useCannon = false
 local cannonTool = nil
