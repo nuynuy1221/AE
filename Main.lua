@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.19")
+print("Version 1.2.4 / 10.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1938,11 +1938,23 @@ local function isVampireAllQuestDone()
 end
 
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, NPC HP > 100 (Mossy Mammoth etc.), Friendly tag, Pet tag, StrongholdEnemy (Cultist)
-local SKIP_NAMES = {
+-- ข้าม: Deer, Owl, ชื่อที่มีคำว่า "Cultist", NPC HP > 100, Friendly tag, Pet tag, StrongholdEnemy
+local SKIP_EXACT = {
     ["Deer"] = true,
     ["Owl"] = true,
 }
+local SKIP_KEYWORDS = {
+    "Cultist",  -- ข้ามทุกชื่อที่มีคำว่า Cultist (Cultist, Ice Cultist, Cultist Brute, etc.)
+}
+local function shouldSkipName(name)
+    if SKIP_EXACT[name] then return true end
+    for _, keyword in ipairs(SKIP_KEYWORDS) do
+        if string.find(name, keyword, 1, true) then  -- 1, true = plain text (case-sensitive)
+            return true
+        end
+    end
+    return false
+end
 local HP_SKIP_THRESHOLD = 100  -- ข้าม NPC ที่ HP > 100 (Mossy Mammoth, etc.)
 
 local function findNightMonsters()
@@ -1951,8 +1963,8 @@ local function findNightMonsters()
     if not chars then return list end
 
     for _, model in ipairs(chars:GetChildren()) do
-        -- ข้ามชื่อที่ห้ามตี
-        if not SKIP_NAMES[model.Name] then
+        -- ข้ามชื่อที่ห้ามตี (exact + keywords)
+        if not shouldSkipName(model.Name) then
             -- ข้าม Cultist (StrongholdEnemy)
             if model:GetAttribute("StrongholdEnemy") ~= true then
                 -- ข้าม Friendly/Pet tag
@@ -3524,6 +3536,7 @@ local function vampireNightLoop()
     if not isVampire then return end
     print("[Vampire] Night loop started")
     local lastLoggedState = nil  -- เก็บ state ที่ print ล่าสุด (กัน spam)
+    local wasNight = false  -- เก็บว่าเคยเป็น Night แล้วหรือยัง (กลางวันมา = เลิก)
 
     -- ตรวจ dependencies ตอนเริ่ม
     if not vampireScythe then
@@ -3536,6 +3549,7 @@ local function vampireNightLoop()
     -- ใช้ AlignPosition + AlignOrientation ลอยค้าง (ไม่ Anchored HRP)
     local floatAP = nil  -- AlignPosition
     local floatAO = nil  -- AlignOrientation
+    local followThread = nil  -- task.spawn อัปเดต Position
     local function ensureFloating()
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -3571,10 +3585,32 @@ local function vampireNightLoop()
             floatAO.CFrame = hrp.CFrame
             floatAO.Parent = hrp
         end
+
+        -- เริ่ม task.spawn อัปเดต Position ทุก 0.5s (ตามตัว)
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
     end
 
     -- ลบ AlignPosition/AlignOrientation เมื่อออกจาก NightLoop
     local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
         pcall(function() if floatAP then floatAP:Destroy() end end)
         pcall(function() if floatAO then floatAO:Destroy() end end)
         floatAP = nil
@@ -3640,6 +3676,20 @@ local function vampireNightLoop()
             continue
         end
         if currentState ~= "Night" then
+            -- ถ้าเคยเป็น Night แล้ว (กลางวืนมา) → เลิกทันที + วาร์ปกลับ Stronghold
+            if wasNight and currentState == "Day" then
+                print("[Vampire] Day time - leaving NightLoop, warping back to Stronghold")
+                disableFloating()
+                -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos)
+                local hrp = LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local returnPos = finalGateBasePos or hrp.Position
+                    hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                        * CFrame.Angles(math.rad(-90), 0, 0)
+                end
+                break
+            end
             -- print เฉพาะตอน state เปลี่ยน
             if lastLoggedState ~= currentState then
                 print(string.format("[Vampire] Waiting for night (State: %s)", tostring(currentState)))
@@ -3647,6 +3697,11 @@ local function vampireNightLoop()
             end
             task.wait(1)
             continue
+        end
+        wasNight = true  -- เริ่มเป็น Night
+        if lastLoggedState ~= "Night" then
+            print("[Vampire] State changed to Night")
+            lastLoggedState = "Night"
         end
         if lastLoggedState ~= "Night" then
             print("[Vampire] State changed to Night")
@@ -3671,7 +3726,7 @@ local function vampireNightLoop()
         -- (quiet - ไม่ print "Found N monster")
 
         -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
-        local MAX_HITS_PER_TARGET = 50
+        local MAX_HITS_PER_TARGET = 10
         for monsterIdx, monster in ipairs(monsters) do
             if not (monster and monster.Parent) then
                 -- (quiet - ไม่ print "Monster already destroyed")
