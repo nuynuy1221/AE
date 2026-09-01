@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.08")
+print("Version 1.2.4 / 10.19")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3554,8 +3554,8 @@ local function vampireNightLoop()
             floatAP.Name = "FloatAlignPosition"
             floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
             floatAP.Attachment0 = hrp.FloatAttachment
-            floatAP.MaxForce = 1e9  -- แรงสูงมาก = ลอยค้าง
-            floatAP.Responsiveness = 200  -- ตอบสนองเร็ว
+            floatAP.MaxForce = 5000  -- แรงพอลอยค้าง แต่ไม่ขัดขวางการวาร์ป
+            floatAP.Responsiveness = 50
             floatAP.Position = hrp.Position
             floatAP.Parent = hrp
         end
@@ -3566,8 +3566,8 @@ local function vampireNightLoop()
             floatAO.Name = "FloatAlignOrientation"
             floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
             floatAO.Attachment0 = hrp.FloatAttachment
-            floatAO.MaxTorque = 1e9
-            floatAO.Responsiveness = 200
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
             floatAO.CFrame = hrp.CFrame
             floatAO.Parent = hrp
         end
@@ -3705,6 +3705,13 @@ local function vampireNightLoop()
             -- วาร์ปไปเหนือ (20 studs เหมือน Stronghold - airHeight)
             hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
+            -- อัปเดตตำแหน่งเป้าหมายของ AlignPosition (ให้ลอยตาม)
+            if floatAP then
+                floatAP.Position = hrp.Position
+            end
+            if floatAO then
+                floatAO.CFrame = hrp.CFrame
+            end
             -- (quiet - ไม่ print "Warping")
             task.wait(0.2)
 
