@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.55")
+print("Version 1.2.4 / 9.11")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1938,10 +1938,13 @@ local function isVampireAllQuestDone()
 end
 
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, Friendly tag, Pet tag, StrongholdEnemy (Cultist)
+-- ข้าม: Deer, Owl, Mammoth, Bear, Hellephant, Friendly tag, Pet tag, StrongholdEnemy (Cultist)
 local SKIP_NAMES = {
     ["Deer"] = true,
     ["Owl"] = true,
+    ["Mammoth"] = true,
+    ["Bear"] = true,
+    ["Hellephant"] = true,
 }
 
 local function findNightMonsters()
@@ -3527,6 +3530,31 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
+    -- สร้าง Floating Platform ใต้ตัว เพื่อไม่ให้ตกพื้น
+    local floatPlatform = nil
+    local function ensureFloatPlatform()
+        if floatPlatform and floatPlatform.Parent then return floatPlatform end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return nil end
+
+        floatPlatform = Instance.new("Part")
+        floatPlatform.Name = "VampireFloatPlatform"
+        floatPlatform.Size = Vector3.new(6, 1, 6)
+        floatPlatform.Anchored = false  -- weld กับ HRP ให้ตามตัว
+        floatPlatform.CanCollide = true
+        floatPlatform.Transparency = 1
+        floatPlatform.Material = Enum.Material.SmoothPlastic
+        floatPlatform.CFrame = hrp.CFrame * CFrame.new(0, -3, 0)  -- ใต้ตัว 3 studs
+        floatPlatform.Parent = char
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = hrp
+        weld.Part1 = floatPlatform
+        weld.Parent = floatPlatform
+        return floatPlatform
+    end
+
     while isVampire do
         -- Pre-check 1: Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ครบ?
         local allOk, allErr = pcall(isVampireAllQuestDone)
@@ -3620,6 +3648,9 @@ local function vampireNightLoop()
                 warn("[Vampire] No HumanoidRootPart - cannot warp, breaking")
                 break
             end
+
+            -- สร้าง Floating Platform ใต้ตัว (กันตกพื้น)
+            ensureFloatPlatform()
 
             local root = monster:FindFirstChild("HumanoidRootPart")
                 or monster.PrimaryPart
