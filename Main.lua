@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.20")
+print("Version 1.2.4 / 8.21")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1890,25 +1890,7 @@ local ownerId = tostring(player.UserId) .. "_" .. player.UserId
 local vampireScythe = LocalPlayer.Inventory
     and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
 local isVampire = LocalPlayer:GetAttribute("Class") == "Vampire"
--- Function เช็ค Class จาก ClassProgress (folder ที่ Equipped = true)
-local function getEquippedClassName()
-    local cp = LocalPlayer:FindFirstChild("ClassProgress")
-    if not cp then return nil end
-    for _, folder in ipairs(cp:GetChildren()) do
-        if folder:GetAttribute("Equipped") == true then
-            return folder.Name
-        end
-    end
-    return nil
-end
--- Override isVampire ด้วยการเช็คจาก ClassProgress
-local equippedClass = getEquippedClassName()
-if equippedClass then
-    isVampire = (equippedClass == "Vampire")
-    print(string.format("[Vampire] Equipped class: %s | isVampire: %s", tostring(equippedClass), tostring(isVampire)))
-else
-    print("[Vampire] No class equipped (Equipped=true not found in ClassProgress)")
-end
+print(string.format("[Vampire] isVampire=%s (Class=%s)", tostring(isVampire), tostring(LocalPlayer:GetAttribute("Class"))))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
 -- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
