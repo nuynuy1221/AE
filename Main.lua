@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 5.58")
+print("Version 1.2.4 / 6.34")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3513,7 +3513,14 @@ local function vampireNightLoop()
     while isVampire do
         -- Pre-check 1: Quest LifestealHealing ครบ?
         if isVampireLifestealDone() then
-            print("[Vampire] Lifesteal quest done, returning to Stronghold")
+            local have = classStatCache["Vampire"]
+                and classStatCache["Vampire"]["LifestealHealing"] or 0
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local goal = CLASS_QUESTS["Vampire"]
+                and CLASS_QUESTS["Vampire"][lvl + 1]
+                and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
+            print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
+                have, goal))
             restoreHP()
             break
         end
@@ -3596,8 +3603,14 @@ local function vampireNightLoop()
 
                 -- เช็ค Quest LifestealHealing ทันที (อาจครบจากการตีตัวนี้)
                 if isVampireLifestealDone() then
-                    print(string.format("[Vampire] Lifesteal quest done after %d hits on %s, returning to Stronghold",
-                        hitCount, monster.Name))
+                    local have = classStatCache["Vampire"]
+                        and classStatCache["Vampire"]["LifestealHealing"] or 0
+                    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                    local goal = CLASS_QUESTS["Vampire"]
+                        and CLASS_QUESTS["Vampire"][lvl + 1]
+                        and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
+                    print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
+                        have, goal))
                     restoreHP()
                     return  -- ออกจาก vampireNightLoop ทันที
                 end
@@ -4055,8 +4068,17 @@ local function doOneRound()
                 -- (ถ้า useCannon → skip - background loop ยิงให้แล้ว)
                 -- (Vampire: ใช้ Scythe แทน axe + keepHPOne ถ้า Lifesteal ยังไม่เสร็จ)
                 if not useCannon then
-                    -- เลือก weapon: Scythe ถ้า Vampire, axe ถ้า class อื่น
-                    local weapon = (isVampire and vampireScythe) or axe
+                    -- เลือก weapon: Scythe ถ้า Vampire (ถือ Scythe จริง), axe ถ้า class อื่น
+                    local weapon
+                    if isVampire and vampireScythe then
+                        weapon = vampireScythe
+                        -- equip Scythe จริง (Client.InventoryHandler) — ให้ Player ถือ Scythe
+                        pcall(function()
+                            Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                        end)
+                    else
+                        weapon = axe
+                    end
                     -- keepHPOne ก่อนตี (เฉพาะ Vampire + Lifesteal ยังไม่เสร็จ)
                     if isVampire and weapon and not isVampireLifestealDone() then
                         keepHPOne()
@@ -4113,8 +4135,17 @@ local function doOneRound()
 
                         -- ปรับเลือดก่อนทุกตี (แบบเร็ว ไม่รอ settle) แล้วค่อยตีทันที
                         pcall(function() zeroEnemyHealth(cultist) end)
-                        -- เลือก weapon: Scythe ถ้า Vampire
-                        local weapon2 = (isVampire and vampireScythe) or axe
+                        -- เลือก weapon: Scythe ถ้า Vampire (equip จริง), axe ถ้า class อื่น
+                        local weapon2
+                        if isVampire and vampireScythe then
+                            weapon2 = vampireScythe
+                            -- equip Scythe จริง (Client.InventoryHandler)
+                            pcall(function()
+                                Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                            end)
+                        else
+                            weapon2 = axe
+                        end
                         -- keepHPOne ก่อนตี (Vampire + Lifesteal ยังไม่เสร็จ)
                         if isVampire and weapon2 and not isVampireLifestealDone() then
                             keepHPOne()
