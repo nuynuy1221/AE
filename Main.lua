@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.31")
+print("Version 1.2.4 / 9.38")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3531,55 +3531,24 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
-    -- ใช้ Anchored Platform ใต้ตัว ลอยค้าง (เหมือน Stronghold) - ไม่ใช้ BodyPosition
-    local floatPlatform = nil
+    -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร) - ตาม Stronghold
+    local anchoredHRP = nil
     local function ensureFloating()
-        if floatPlatform and floatPlatform.Parent then return floatPlatform end
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not (char and hrp) then return nil end
+        if not (char and hrp) then return end
 
-        floatPlatform = Instance.new("Part")
-        floatPlatform.Name = "VampireFloatPlatform"
-        floatPlatform.Size = Vector3.new(6, 1, 6)
-        floatPlatform.Anchored = true  -- ไม่ตก (เหมือน platform ใน Stronghold)
-        floatPlatform.CanCollide = true
-        floatPlatform.Transparency = 1
-        floatPlatform.Material = Enum.Material.SmoothPlastic
-        floatPlatform.CFrame = hrp.CFrame * CFrame.new(0, -3, 0)  -- ใต้ตัว 3 studs
-        floatPlatform.Parent = workspace
-        return floatPlatform
+        if anchoredHRP == hrp then return end  -- HRP เดิม
+        hrp.Anchored = true
+        anchoredHRP = hrp
     end
 
-    -- อัปเดต Platform ตามตัว (ลอยล็อคตามตัว)
-    local followThread = nil
-    local function startFollowing()
-        if followThread then return end
-        followThread = task.spawn(function()
-            while floatPlatform and floatPlatform.Parent do
-                local char = LocalPlayer.Character
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    floatPlatform.CFrame = hrp.CFrame
-                end
-                task.wait(0.1)  -- อัปเดตทุก 0.1s
-            end
-            followThread = nil
-        end)
-    end
-
-    local function stopFollowing()
-        if followThread then
-            pcall(function() task.cancel(followThread) end)
-            followThread = nil
-        end
-    end
-
-    -- ลบ Platform เมื่อออกจาก NightLoop
+    -- ปลดล็อค HRP เมื่อออกจาก NightLoop
     local function disableFloating()
-        stopFollowing()
-        pcall(function() if floatPlatform then floatPlatform:Destroy() end end)
-        floatPlatform = nil
+        if anchoredHRP then
+            pcall(function() anchoredHRP.Anchored = false end)
+            anchoredHRP = nil
+        end
     end
 
     while isVampire do
@@ -3685,9 +3654,8 @@ local function vampireNightLoop()
                 break
             end
 
-            -- ใช้ Anchored Platform ใต้ตัว (กันตกพื้น - ลอยล็อคตามตัว)
+            -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร)
             ensureFloating()
-            startFollowing()
 
             -- equip Scythe จริง (Client.InventoryHandler) ให้ Player ถือ Scythe
             if vampireScythe then
@@ -3824,7 +3792,6 @@ end
 -- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
 -- ============================================
 if isVampire then
-    print("[Vampire] NightLoop starting")
     task.spawn(vampireNightLoop)
 end
 
