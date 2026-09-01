@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.30")
+print("Version 1.2.4 / 10.37")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3676,9 +3676,10 @@ local function vampireNightLoop()
             continue
         end
         if currentState ~= "Night" then
-            -- ถ้าเคยเป็น Night แล้ว (กลางวืนมา) → เลิกทันที + วาร์ปกลับ Stronghold
-            if wasNight and currentState == "Day" then
-                print("[Vampire] Day time - leaving NightLoop, warping back to Stronghold")
+            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิกทันที + วาร์ปกลับ Stronghold
+            if wasNight then
+                print(string.format("[Vampire] State changed to %s - leaving NightLoop, warping back to Stronghold",
+                    tostring(currentState)))
                 disableFloating()
                 -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos)
                 local hrp = LocalPlayer.Character
