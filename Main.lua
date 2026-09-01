@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 6.52")
+print("Version 1.2.4 / 7.59")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1920,6 +1920,21 @@ local function isVampireLifestealDone()
     return have >= reqs.LifestealHealing
 end
 
+-- เช็ค Quest DealDamage ครบไหม
+local function isVampireDealDamageDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+    if not reqs or not reqs.DealDamage then return true end
+    local have = classStatCache["Vampire"]
+        and classStatCache["Vampire"]["DealDamage"] or 0
+    return have >= reqs.DealDamage
+end
+
+-- เช็คทั้ง 2 stat ครบไหม (ใช้สำหรับ HP Watcher / keepMap / Stronghold flow)
+local function isVampireAllQuestDone()
+    return isVampireLifestealDone() and isVampireDealDamageDone()
+end
+
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
 -- ข้าม: Deer, Owl, Friendly tag, Pet tag, StrongholdEnemy (Cultist)
 local SKIP_NAMES = {
@@ -3416,7 +3431,7 @@ do
 
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
-    local keepMap = isVampire and not isVampireLifestealDone()
+    local keepMap = isVampire and not isVampireAllQuestDone()
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -3511,34 +3526,44 @@ local function vampireNightLoop()
     end
 
     while isVampire do
-        -- Pre-check 1: Quest LifestealHealing ครบ?
-        local questDoneOk, questDoneErr = pcall(isVampireLifestealDone)
-        if not questDoneOk then
-            warn(string.format("[Vampire] isVampireLifestealDone() error: %s", tostring(questDoneErr)))
+        -- Pre-check 1: Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ครบ?
+        local allOk, allErr = pcall(isVampireAllQuestDone)
+        if not allOk then
+            warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(allErr)))
             task.wait(1)
             continue
         end
-        if questDoneOk and questDoneErr then -- pcall returns true/false but here questDoneErr is the result
+        if allErr then -- pcall: ok, result = allOk, allErr
         end
-        if pcall(isVampireLifestealDone) and (function()
-            local ok, result = pcall(isVampireLifestealDone)
-            return ok and result
-        end)() then
-            local have = classStatCache["Vampire"]
-                and classStatCache["Vampire"]["LifestealHealing"] or 0
+        local ok1, result1 = pcall(isVampireAllQuestDone)
+        if ok1 and result1 then
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-            local goal = CLASS_QUESTS["Vampire"]
-                and CLASS_QUESTS["Vampire"][lvl + 1]
-                and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
-            print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
-                have, goal))
+            local lifestealHave = classStatCache["Vampire"]
+                and classStatCache["Vampire"]["LifestealHealing"] or 0
+            local damageHave = classStatCache["Vampire"]
+                and classStatCache["Vampire"]["DealDamage"] or 0
+            local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+            local lifestealGoal = (reqs and reqs.LifestealHealing) or 0
+            local damageGoal = (reqs and reqs.DealDamage) or 0
+            print(string.format("[Vampire] All quests done (Lifesteal %d/%d, DealDamage %d/%d), returning to Stronghold",
+                lifestealHave, lifestealGoal, damageHave, damageGoal))
             local restoreOk, restoreErr = pcall(restoreHP)
             if not restoreOk then
                 warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
             end
             break
         end
-        print("[Vampire] Quest Lifesteal: not done yet, continuing")
+        -- แสดง progress ของทั้ง 2 stat
+        local lvl2 = LocalPlayer:GetAttribute("ClassLevel") or 1
+        local reqs2 = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl2 + 1]
+        local lh = classStatCache["Vampire"]
+            and classStatCache["Vampire"]["LifestealHealing"] or 0
+        local dd = classStatCache["Vampire"]
+            and classStatCache["Vampire"]["DealDamage"] or 0
+        local lhGoal = (reqs2 and reqs2.LifestealHealing) or 0
+        local ddGoal = (reqs2 and reqs2.DealDamage) or 0
+        print(string.format("[Vampire] Quests: Lifesteal %d/%d, DealDamage %d/%d - not done yet",
+            lh, lhGoal, dd, ddGoal))
 
         -- Pre-check 2: Stronghold เปิด?
         local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
@@ -3548,8 +3573,8 @@ local function vampireNightLoop()
             continue
         end
         if cultistResult then
-            print("[Vampire] Stronghold opened (Cultist found), returning to Stronghold")
-            break
+            print("[Vampire] Stronghold opened (Cultist found), pausing NightLoop for Stronghold")
+            return  -- ออกจาก NightLoop — flow หลักจะทำ Stronghold แล้วเรียก NightLoop ใหม่
         end
 
         -- Pre-check 3: State == "Night"?
@@ -3648,19 +3673,21 @@ local function vampireNightLoop()
                         monsterIdx, #monsters, monster.Name, hitCount))
                 end
 
-                -- เช็ค Quest LifestealHealing ทันที (อาจครบจากการตีตัวนี้)
-                local questOk, questResult = pcall(isVampireLifestealDone)
+                -- เช็ค Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ทันที
+                local questOk, questResult = pcall(isVampireAllQuestDone)
                 if not questOk then
-                    warn(string.format("[Vampire] isVampireLifestealDone() error: %s", tostring(questResult)))
+                    warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(questResult)))
                 elseif questResult then
-                    local have = classStatCache["Vampire"]
-                        and classStatCache["Vampire"]["LifestealHealing"] or 0
                     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-                    local goal = CLASS_QUESTS["Vampire"]
-                        and CLASS_QUESTS["Vampire"][lvl + 1]
-                        and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
-                    print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
-                        have, goal))
+                    local lh = classStatCache["Vampire"]
+                        and classStatCache["Vampire"]["LifestealHealing"] or 0
+                    local dd = classStatCache["Vampire"]
+                        and classStatCache["Vampire"]["DealDamage"] or 0
+                    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+                    local lhGoal = (reqs and reqs.LifestealHealing) or 0
+                    local ddGoal = (reqs and reqs.DealDamage) or 0
+                    print(string.format("[Vampire] All quests done (Lifesteal %d/%d, DealDamage %d/%d), returning to Stronghold",
+                        lh, lhGoal, dd, ddGoal))
                     local restoreOk2, restoreErr2 = pcall(restoreHP)
                     if not restoreOk2 then
                         warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr2)))
@@ -3715,11 +3742,11 @@ if isVampire then
     task.spawn(function()
         local hpRestored = false
         while isVampire do
-            if isVampireLifestealDone() then
+            if isVampireAllQuestDone() then
                 if not hpRestored then
                     restoreHP()
                     hpRestored = true
-                    print("[Vampire] Lifesteal quest done - HP restored to 100")
+                    print("[Vampire] All quests done (Lifesteal + DealDamage) - HP restored to 100")
                 end
             else
                 hpRestored = false
@@ -3753,10 +3780,10 @@ end
 
 -- ============================================
 -- VAMPIRE: ถ้าเป็น Class Vampire และ LifestealHealing ยังไม่เสร็จ
--- ตี Monster ตอนกลางคืนก่อนเข้า Stronghold (Step 5+)
+-- ตี Monster ตอนกลางคืน — เริ่มทันที (ไม่รอ Stronghold เปิด) และทำงานขนานกับ flow
 -- ============================================
 if isVampire then
-    vampireNightLoop()
+    task.spawn(vampireNightLoop)
 end
 
 -- ============================================
@@ -4132,8 +4159,8 @@ local function doOneRound()
                     else
                         weapon = axe
                     end
-                    -- keepHPOne ก่อนตี (เฉพาะ Vampire + Lifesteal ยังไม่เสร็จ)
-                    if isVampire and weapon and not isVampireLifestealDone() then
+                    -- keepHPOne ก่อนตี (เฉพาะ Vampire + Quest ทั้ง 2 stat ยังไม่เสร็จ)
+                    if isVampire and weapon and not isVampireAllQuestDone() then
                         keepHPOne()
                     end
                     for _, cultist in ipairs(validCultists) do
@@ -4199,8 +4226,8 @@ local function doOneRound()
                         else
                             weapon2 = axe
                         end
-                        -- keepHPOne ก่อนตี (Vampire + Lifesteal ยังไม่เสร็จ)
-                        if isVampire and weapon2 and not isVampireLifestealDone() then
+                        -- keepHPOne ก่อนตี (Vampire + Quest ทั้ง 2 stat ยังไม่เสร็จ)
+                        if isVampire and weapon2 and not isVampireAllQuestDone() then
                             keepHPOne()
                         end
                         pcall(function()
@@ -4326,16 +4353,18 @@ while completedRounds < TOTAL_ROUNDS do
                 local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][goalLevel]
                 if reqs then
                     local allMet = true
+                    local statProgress = {}
                     for statKey, goal in pairs(reqs) do
                         local have = statSource[statKey] or 0
+                        table.insert(statProgress, string.format("%s %d/%d", statKey, have, goal))
                         if type(have) ~= "number" or have < goal then
                             allMet = false
                         end
                     end
                     if allMet then
                         questReadyToLeave = true
-                        print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round",
-                            mainClass, goalLevel))
+                        print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round (%s)",
+                            mainClass, goalLevel, table.concat(statProgress, ", ")))
                         updateStatus("Quest done - finishing round")
                     end
                 end
@@ -4528,27 +4557,35 @@ while completedRounds < TOTAL_ROUNDS do
 
     -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
     if completedRounds < TOTAL_ROUNDS then
-        print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
-        warpToStrongholdFloor(1)
-        -- นับ 20 นาทีเองแทนการอ่าน timer
-        local WAIT_SECONDS = 20 * 60
-        for i = WAIT_SECONDS, 1, -1 do
-            local mins = math.floor(i / 60)
-            local secs = i % 60
-            updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
-            task.wait(1)
-        end
-        -- หลังนับครบ เช็คว่าเปิดจริงไหม ถ้าไม่ให้รอต่อ
-        while true do
-            local remaining = getStrongholdTimeRemaining()
-            if not remaining or remaining <= 0 then
-                print("✅ Stronghold reopened!")
-                break
+        -- VAMPIRE: ถ้า Quest Lifesteal ยังไม่เสร็จ → เริ่ม NightLoop ทำเรื่อยๆ จนกว่า Cultist จะ spawn
+        -- NightLoop จะหยุดเองเมื่อ checkAnyCultistSpawned() = true
+        if isVampire and not isVampireAllQuestDone() then
+            print("[Vampire] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            -- เริ่ม NightLoop — มันจะรอจนกว่า Cultist จะ spawn แล้ว return
+            vampireNightLoop()
+        else
+            -- ไม่ใช่ Vampire หรือ Quest ครบแล้ว → ใช้ logic เดิม
+            print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
+            warpToStrongholdFloor(1)
+            local WAIT_SECONDS = 20 * 60
+            for i = WAIT_SECONDS, 1, -1 do
+                local mins = math.floor(i / 60)
+                local secs = i % 60
+                updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
+                task.wait(1)
             end
-            local mins = math.floor(remaining / 60)
-            local secs = math.floor(remaining % 60)
-            updateStatus(string.format("Waiting... %02d:%02d", mins, secs))
-            task.wait(1)
+            while true do
+                local remaining = getStrongholdTimeRemaining()
+                if not remaining or remaining <= 0 then
+                    print("✅ Stronghold reopened!")
+                    break
+                end
+                local mins = math.floor(remaining / 60)
+                local secs = math.floor(remaining % 60)
+                updateStatus(string.format("Waiting... %02d:%02d", mins, secs))
+                task.wait(1)
+            end
         end
         warpToTriggerZone()
         task.wait(1)
