@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.58")
+print("Version 1.2.4 / 11.02")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3905,7 +3905,7 @@ end
 -- ============================================
 -- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
 -- ============================================
-if isVampire then
+if isVampire and not isVampireAllQuestDone() then
     task.spawn(vampireNightLoop)
 end
 
