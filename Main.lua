@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.21")
+print("Version 1.2.4 / 8.29")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3546,7 +3546,7 @@ local function vampireNightLoop()
             local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
             local lifestealGoal = (reqs and reqs.LifestealHealing) or 0
             local damageGoal = (reqs and reqs.DealDamage) or 0
-            print(string.format("[Vampire] All quests done (Lifesteal %d/%d, DealDamage %d/%d), returning to Stronghold",
+            print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
                 lifestealHave, lifestealGoal, damageHave, damageGoal))
             local restoreOk, restoreErr = pcall(restoreHP)
             if not restoreOk then
@@ -3554,17 +3554,7 @@ local function vampireNightLoop()
             end
             break
         end
-        -- แสดง progress ของทั้ง 2 stat
-        local lvl2 = LocalPlayer:GetAttribute("ClassLevel") or 1
-        local reqs2 = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl2 + 1]
-        local lh = classStatCache["Vampire"]
-            and classStatCache["Vampire"]["LifestealHealing"] or 0
-        local dd = classStatCache["Vampire"]
-            and classStatCache["Vampire"]["DealDamage"] or 0
-        local lhGoal = (reqs2 and reqs2.LifestealHealing) or 0
-        local ddGoal = (reqs2 and reqs2.DealDamage) or 0
-        print(string.format("[Vampire] Quests: Lifesteal %d/%d, DealDamage %d/%d - not done yet",
-            lh, lhGoal, dd, ddGoal))
+        -- แสดง progress ของทั้ง 2 stat (quiet - ไม่ print ทุก iteration)
 
         -- Pre-check 2: Stronghold เปิด?
         local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
@@ -3614,14 +3604,13 @@ local function vampireNightLoop()
             task.wait(1)
             continue
         end
-        print(string.format("[Vampire] Found %d monster(s) to attack", #monsters))
+        -- (quiet - ไม่ print "Found N monster")
 
         -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
         local MAX_HITS_PER_TARGET = 100
         for monsterIdx, monster in ipairs(monsters) do
             if not (monster and monster.Parent) then
-                print(string.format("[Vampire] [%d/%d] Monster already destroyed, skipping",
-                    monsterIdx, #monsters))
+                -- (quiet - ไม่ print "Monster already destroyed")
                 continue
             end
             local hrp = LocalPlayer.Character
@@ -3642,8 +3631,7 @@ local function vampireNightLoop()
             -- วาร์ปไปเหนือ
             hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 10, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
-            print(string.format("[Vampire] [%d/%d] Warping to %s at (%.0f, %.0f, %.0f)",
-                monsterIdx, #monsters, monster.Name, root.Position.X, root.Position.Y, root.Position.Z))
+            -- (quiet - ไม่ print "Warping")
             task.wait(0.2)
 
             -- ตีซ้ำตัวเดิมจนกว่าจะตาย หรือครบ 100 ที
@@ -3669,9 +3657,8 @@ local function vampireNightLoop()
                 end
                 hitCount = hitCount + 1
 
-                if hitCount == 1 or hitCount % 10 == 0 then
-                    print(string.format("[Vampire] [%d/%d] Hit %s x%d",
-                        monsterIdx, #monsters, monster.Name, hitCount))
+                if hitCount == 1 then
+                    -- (quiet - ไม่ print "Hit")
                 end
 
                 -- เช็ค Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ทันที
@@ -3687,7 +3674,7 @@ local function vampireNightLoop()
                     local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
                     local lhGoal = (reqs and reqs.LifestealHealing) or 0
                     local ddGoal = (reqs and reqs.DealDamage) or 0
-                    print(string.format("[Vampire] All quests done (Lifesteal %d/%d, DealDamage %d/%d), returning to Stronghold",
+                    print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
                         lh, lhGoal, dd, ddGoal))
                     local restoreOk2, restoreErr2 = pcall(restoreHP)
                     if not restoreOk2 then
@@ -3705,8 +3692,7 @@ local function vampireNightLoop()
                 end
 
                 if isDead then
-                    print(string.format("[Vampire] [%d/%d] Killed %s after %d hits",
-                        monsterIdx, #monsters, monster.Name, hitCount))
+                    -- (quiet - ไม่ print "Killed after N hits")
                     break  -- ตายแล้ว → ตัวถัดไป
                 end
 
@@ -3720,7 +3706,7 @@ local function vampireNightLoop()
             end
         end
 
-        print("[Vampire] Finished this batch, rescanning in 1s")
+        -- (quiet - ไม่ print "Finished this batch")
         task.wait(1)
     end
 
@@ -3747,7 +3733,7 @@ if isVampire then
                 if not hpRestored then
                     restoreHP()
                     hpRestored = true
-                    print("[Vampire] All quests done (Lifesteal + DealDamage) - HP restored to 100")
+                    -- (quiet - ไม่ print "All quests done")
                 end
             else
                 hpRestored = false
