@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 6.34")
+print("Version 1.2.4 / 6.52")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3512,7 +3512,18 @@ local function vampireNightLoop()
 
     while isVampire do
         -- Pre-check 1: Quest LifestealHealing ครบ?
-        if isVampireLifestealDone() then
+        local questDoneOk, questDoneErr = pcall(isVampireLifestealDone)
+        if not questDoneOk then
+            warn(string.format("[Vampire] isVampireLifestealDone() error: %s", tostring(questDoneErr)))
+            task.wait(1)
+            continue
+        end
+        if questDoneOk and questDoneErr then -- pcall returns true/false but here questDoneErr is the result
+        end
+        if pcall(isVampireLifestealDone) and (function()
+            local ok, result = pcall(isVampireLifestealDone)
+            return ok and result
+        end)() then
             local have = classStatCache["Vampire"]
                 and classStatCache["Vampire"]["LifestealHealing"] or 0
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
@@ -3521,19 +3532,41 @@ local function vampireNightLoop()
                 and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
             print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
                 have, goal))
-            restoreHP()
+            local restoreOk, restoreErr = pcall(restoreHP)
+            if not restoreOk then
+                warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
+            end
             break
         end
         print("[Vampire] Quest Lifesteal: not done yet, continuing")
 
         -- Pre-check 2: Stronghold เปิด?
-        if checkAnyCultistSpawned() then
+        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+        if not cultistOk then
+            warn(string.format("[Vampire] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            task.wait(1)
+            continue
+        end
+        if cultistResult then
             print("[Vampire] Stronghold opened (Cultist found), returning to Stronghold")
             break
         end
 
         -- Pre-check 3: State == "Night"?
-        local currentState = workspace:GetAttribute("State")
+        local currentState
+        local stateOk, stateErr = pcall(function()
+            currentState = workspace:GetAttribute("State")
+        end)
+        if not stateOk then
+            warn(string.format("[Vampire] Failed to read workspace:GetAttribute('State'): %s", tostring(stateErr)))
+            task.wait(1)
+            continue
+        end
+        if currentState == nil then
+            warn("[Vampire] workspace:GetAttribute('State') returned nil - game may not be initialized, waiting...")
+            task.wait(1)
+            continue
+        end
         if currentState ~= "Night" then
             print(string.format("[Vampire] Waiting for night (current State: %s)", tostring(currentState)))
             task.wait(1)
@@ -3542,7 +3575,14 @@ local function vampireNightLoop()
         print("[Vampire] State=Night, scanning for monsters")
 
         -- หา Monster ที่ไม่ใช่ Cultist
-        local monsters = findNightMonsters()
+        local monsters
+        local findOk, findErr = pcall(findNightMonsters)
+        if not findOk then
+            warn(string.format("[Vampire] findNightMonsters() error: %s", tostring(findErr)))
+            task.wait(1)
+            continue
+        end
+        monsters = findErr  -- pcall returns result as second value when ok
         if #monsters == 0 then
             warn("[Vampire] No hittable monsters found in workspace.Characters - waiting 1s")
             task.wait(1)
@@ -3584,13 +3624,20 @@ local function vampireNightLoop()
             local hitCount = 0
             while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
                 -- ลด HP ตัวเองเหลือ 1 (ทุกตี — ต้องทำ Lifesteal)
-                keepHPOne()
+                local hpOk, hpErr = pcall(keepHPOne)
+                if not hpOk then
+                    warn(string.format("[Vampire] keepHPOne() error: %s", tostring(hpErr)))
+                end
 
                 -- ตีด้วย Vampire Scythe (ไม่ลดเลือดมอน)
                 if vampireScythe then
-                    pcall(function()
+                    local hitOk, hitErr = pcall(function()
                         Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
                     end)
+                    if not hitOk then
+                        warn(string.format("[Vampire] Event:InvokeServer() error on %s: %s",
+                            monster.Name, tostring(hitErr)))
+                    end
                 else
                     warn("[Vampire] No Vampire Scythe - skipping hit")
                 end
@@ -3602,7 +3649,10 @@ local function vampireNightLoop()
                 end
 
                 -- เช็ค Quest LifestealHealing ทันที (อาจครบจากการตีตัวนี้)
-                if isVampireLifestealDone() then
+                local questOk, questResult = pcall(isVampireLifestealDone)
+                if not questOk then
+                    warn(string.format("[Vampire] isVampireLifestealDone() error: %s", tostring(questResult)))
+                elseif questResult then
                     local have = classStatCache["Vampire"]
                         and classStatCache["Vampire"]["LifestealHealing"] or 0
                     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
@@ -3611,7 +3661,10 @@ local function vampireNightLoop()
                         and CLASS_QUESTS["Vampire"][lvl + 1].LifestealHealing or 0
                     print(string.format("[Vampire] Lifesteal quest done (%d/%d), returning to Stronghold",
                         have, goal))
-                    restoreHP()
+                    local restoreOk2, restoreErr2 = pcall(restoreHP)
+                    if not restoreOk2 then
+                        warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr2)))
+                    end
                     return  -- ออกจาก vampireNightLoop ทันที
                 end
 
