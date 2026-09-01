@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.37")
+print("Version 1.2.4 / 10.58")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3629,24 +3629,44 @@ local function vampireNightLoop()
         end
         local ok1, result1 = pcall(isVampireAllQuestDone)
         if ok1 and result1 then
-            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-            local lifestealHave = classStatCache["Vampire"]
-                and classStatCache["Vampire"]["LifestealHealing"] or 0
-            local damageHave = classStatCache["Vampire"]
-                and classStatCache["Vampire"]["DealDamage"] or 0
-            local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
-            local lifestealGoal = (reqs and reqs.LifestealHealing) or 0
-            local damageGoal = (reqs and reqs.DealDamage) or 0
+            -- Quest เสร็จ → print แค่ครั้งเดียว แล้ววาร์ปกลับ
             print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
-                lifestealHave, lifestealGoal, damageHave, damageGoal))
+                (classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0),
+                (CLASS_QUESTS["Vampire"]
+                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].LifestealHealing or 0),
+                (classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0),
+                (CLASS_QUESTS["Vampire"]
+                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].DealDamage or 0)))
             local restoreOk, restoreErr = pcall(restoreHP)
             if not restoreOk then
                 warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
             end
-            disableFloating()  -- ลบ BodyPosition/BodyGyro ก่อนออก
+            disableFloating()  -- ลบ Align ก่อนออก
+
+            -- วาร์ปกลับ Stronghold ซ้ำๆ 3 ครั้ง (รวม ~2.4 วิ)
+            local hrpEnd = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrpEnd then
+                local returnPos = finalGateBasePos or hrpEnd.Position
+                for i = 1, 3 do
+                    hrpEnd.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                        * CFrame.Angles(math.rad(-90), 0, 0)
+                    task.wait(0.8)
+                end
+            end
             break
         end
-        -- แสดง progress ของทั้ง 2 stat (quiet - ไม่ print ทุก iteration)
+        -- Quest ยังไม่เสร็จ → print บอก progress + เวลา (ทุกครั้งที่เข้า loop)
+        local lvlNow = LocalPlayer:GetAttribute("ClassLevel") or 1
+        local reqsNow = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvlNow + 1]
+        local lhNow = classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0
+        local ddNow = classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0
+        local lhGoalNow = (reqsNow and reqsNow.LifestealHealing) or 0
+        local ddGoalNow = (reqsNow and reqsNow.DealDamage) or 0
+        print(string.format("[Vampire] Quest: Lifesteal %d/%d, DealDamage %d/%d (ClassLevel=%d)",
+            lhNow, lhGoalNow, ddNow, ddGoalNow, lvlNow))
 
         -- Pre-check 2: Stronghold เปิด?
         local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
@@ -3678,16 +3698,17 @@ local function vampireNightLoop()
         if currentState ~= "Night" then
             -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิกทันที + วาร์ปกลับ Stronghold
             if wasNight then
-                print(string.format("[Vampire] State changed to %s - leaving NightLoop, warping back to Stronghold",
-                    tostring(currentState)))
                 disableFloating()
-                -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos)
+                -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos) ซ้ำ 3 ครั้ง
                 local hrp = LocalPlayer.Character
                     and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     local returnPos = finalGateBasePos or hrp.Position
-                    hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
-                        * CFrame.Angles(math.rad(-90), 0, 0)
+                    for i = 1, 3 do
+                        hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait(0.8)
+                    end
                 end
                 break
             end
