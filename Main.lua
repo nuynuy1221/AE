@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 5.23")
+print("Version 1.2.4 / 5.58")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2146,88 +2146,94 @@ end
 
 local function dropAllLostChildren(retryDepth)
     retryDepth = retryDepth or 0 -- เพดานความลึกของ retry: เดิมเรียกซ้ำไม่จำกัด (ลิมิต 5 รอบใน for ไม่มีวันทำงานจริง)
-    local inv = LocalPlayer:FindFirstChild("Inventory")
-    local oldSack = inv and inv:FindFirstChild("Old Sack")
-    if not oldSack then
-        warn("Cannot drop children: Old Sack not found in inventory")
-        return
-    end
 
-    -- วาร์ปไปยืน "ด้านหน้ากองไฟ" (+5 stud = จุดยืนมาตรฐานเดียวกับที่ใช้ทั่วสคริปต์)
-    -- แล้วค่อยปล่อยเด็ก (เดิมไปยืนทับกองไฟ +0)
-    local targetPos = firePos + Vector3.new(5, 3, 0)
-    local warpSuccess, warpErr = pcall(function()
-        humanoidRootPart.CFrame = CFrame.new(targetPos)
-    end)
-
-    if not warpSuccess then
-        warn("Failed to warp to campfire:", warpErr)
-        return
-    end
-
-    task.wait(0.1)
-
-    -- ตรวจสอบว่าวาร์ปสำเร็จจริง
-    local currentPos = humanoidRootPart.Position
-    local distance = (currentPos - targetPos).Magnitude
-    if distance > 10 then
-        warn("Warp to campfire failed! Distance from target:", distance)
-        return
-    end
-
-    -- เพิ่มเวลารอให้เซิร์ฟเวอร์อัพเดทตำแหน่ง
-    task.wait(1.5)
-
-    -- equip sack ก่อนปล่อย
-    Client.InventoryHandler.RequestEquipItem(oldSack)
-    task.wait(0.3)
-    inv = LocalPlayer:FindFirstChild("Inventory")
-    oldSack = inv and inv:FindFirstChild("Old Sack")
-    if not oldSack then
-        warn("Old Sack disappeared after equip attempt")
-        return
-    end
-
-    local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
-    local droppedCount = 0
-    local droppedNames = {}
-    for name in pairs(collectedChildren) do
-        table.insert(droppedNames, name)
-    end
-
-    -- ปล่อยเด็กทีละตัวด้วยดีเลย์
-    for name in pairs(collectedChildren) do
-        local bag = LocalPlayer:FindFirstChild("ItemBag")
-        local bagChild = bag and bag:FindFirstChild(name)
-        if bagChild then
-            pcall(function()
-                BagDrop:FireServer(oldSack, bagChild, false)
-            end)
-            droppedCount = droppedCount + 1
-            task.wait(0.2) -- ดีเลย์ป้องกัน rate-limiting
+    -- Inner function: ปล่อยเด็ก 1 รอบ (เรียกซ้ำได้โดยไม่ recursive ทั้งฟังก์ชัน)
+    local function dropOneRound()
+        local inv = LocalPlayer:FindFirstChild("Inventory")
+        local oldSack = inv and inv:FindFirstChild("Old Sack")
+        if not oldSack then
+            warn("Cannot drop children: Old Sack not found in inventory")
+            return 0, {}
         end
-    end
 
-    -- รอให้เซิร์ฟเวอร์ประมวลผลการปล่อย
-    task.wait(1)
+        -- วาร์ปไปยืน "ด้านหน้ากองไฟ" (+5 stud = จุดยืนมาตรฐานเดียวกับที่ใช้ทั่วสคริปต์)
+        local targetPos = firePos + Vector3.new(5, 3, 0)
+        local warpSuccess, warpErr = pcall(function()
+            humanoidRootPart.CFrame = CFrame.new(targetPos)
+        end)
 
-    -- ตรวจสอบว่ากระเป๋าว่างจริงก่อนล้างตาราง
-    local bag = LocalPlayer:FindFirstChild("ItemBag")
-    local remainingChildren = 0
-    if bag then
-        for _, child in pairs(bag:GetChildren()) do
-            if child:IsA("Model") and table.find(LOST_CHILD_NAMES, child.Name) then
-                remainingChildren = remainingChildren + 1
+        if not warpSuccess then
+            warn("Failed to warp to campfire:", warpErr)
+            return 0, {}
+        end
+
+        task.wait(0.1)
+
+        -- ตรวจสอบว่าวาร์ปสำเร็จจริง
+        local currentPos = humanoidRootPart.Position
+        local distance = (currentPos - targetPos).Magnitude
+        if distance > 10 then
+            warn("Warp to campfire failed! Distance from target:", distance)
+            return 0, {}
+        end
+
+        task.wait(1.5)
+
+        -- equip sack ก่อนปล่อย
+        Client.InventoryHandler.RequestEquipItem(oldSack)
+        task.wait(0.3)
+        inv = LocalPlayer:FindFirstChild("Inventory")
+        oldSack = inv and inv:FindFirstChild("Old Sack")
+        if not oldSack then
+            warn("Old Sack disappeared after equip attempt")
+            return 0, {}
+        end
+
+        local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
+        local droppedCount = 0
+        local droppedNames = {}
+        for name in pairs(collectedChildren) do
+            table.insert(droppedNames, name)
+        end
+
+        -- ปล่อยเด็กทีละตัวด้วยดีเลย์
+        for name in pairs(collectedChildren) do
+            local bag = LocalPlayer:FindFirstChild("ItemBag")
+            local bagChild = bag and bag:FindFirstChild(name)
+            if bagChild then
+                pcall(function()
+                    BagDrop:FireServer(oldSack, bagChild, false)
+                end)
+                droppedCount = droppedCount + 1
+                task.wait(0.2)
             end
         end
+
+        task.wait(1)
+
+        -- ตรวจสอบว่ากระเป๋าว่างจริงก่อนล้างตาราง
+        local bag = LocalPlayer:FindFirstChild("ItemBag")
+        local remainingChildren = 0
+        if bag then
+            for _, child in pairs(bag:GetChildren()) do
+                if child:IsA("Model") and table.find(LOST_CHILD_NAMES, child.Name) then
+                    remainingChildren = remainingChildren + 1
+                end
+            end
+        end
+
+        if remainingChildren == 0 then
+            collectedChildren = {}
+            print("Successfully dropped all", droppedCount, "children at campfire")
+        else
+            warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
+        end
+
+        return droppedCount, droppedNames
     end
 
-    if remainingChildren == 0 then
-        collectedChildren = {}
-        print("Successfully dropped all", droppedCount, "children at campfire")
-    else
-        warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
-    end
+    -- ปล่อยรอบแรก
+    local droppedCount, droppedNames = dropOneRound()
 
     -- เช็คสถานะ Lost หลังปล่อย: รอ 5 วิ ถ้าเด็กตัวไหนยังขึ้น Lost = เกมไม่ยอมรับการปล่อย
     -- ให้ไปเก็บใหม่แล้วปล่อยรอบใหม่ที่กองไฟ (สูงสุด 5 รอบ กันวนไม่รู้จบ)
@@ -2262,15 +2268,23 @@ local function dropAllLostChildren(retryDepth)
                 collectedChildren[name] = nil
             end
 
-            -- เดิมเรียก dropAllLostChildren() แล้ว return ทันที = for attempt ไม่มีวันได้รอบสอง
-            -- ส่ง retryDepth ต่อเพื่อให้เพดาน 5 ชั้นมีผลจริง
+            -- เช็ค retryDepth ก่อนวนรอบใหม่
             if retryDepth >= 5 then
                 warn("[LostChild] Retry depth limit (5) reached - giving up for this round")
                 break
             end
 
+            -- เก็บเด็กกลับเข้า Inventory (ไม่ return — ปล่อยอีกรอบใน loop นี้)
             collectLostChildren()
-            return dropAllLostChildren(retryDepth + 1)
+
+            -- ปล่อยอีกรอบ (อยู่ใน loop เดิม ไม่ recursive)
+            local redroppedCount, redroppedNames = dropOneRound()
+            if redroppedCount == 0 or #redroppedNames == 0 then
+                warn("[LostChild] Re-drop failed, will try again next iteration")
+                -- ใช้ droppedNames เดิมสำหรับเช็ครอบหน้า
+            else
+                droppedNames = redroppedNames
+            end
         end
     end
 
@@ -3478,6 +3492,12 @@ print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
 -- ตีด้วย Vampire Scythe + ลด HP ตัวเองเหลือ 1
 -- หยุดเมื่อ: Quest ครบ / Stronghold เปิด / ไม่ใช่กลางคืน
 -- ============================================
+
+-- Forward declarations: ต้องประกาศก่อน vampireNightLoop() เพราะ combatCenter/HOVER_HEIGHT
+-- ถูกประกาศจริงที่บรรทัด 3807 (หลัง function นี้) - ใช้ placeholder ก่อน
+local combatCenter = humanoidRootPart and humanoidRootPart.Position or Vector3.new(0, 0, 0)
+local HOVER_HEIGHT = 10
+
 local function vampireNightLoop()
     if not isVampire then return end
     print("[Vampire] Night loop started")
