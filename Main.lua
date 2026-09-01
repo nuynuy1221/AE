@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 4.10")
+print("Version 1.2.4 / 4.18")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1909,14 +1909,14 @@ local function restoreHP()
 end
 
 -- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
+-- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
+-- ใช้ classStatCache (อัปเดตจาก ClassStatUpdated event) เพราะ ClassProgress มีแค่ใน Lobby
 local function isVampireLifestealDone()
-    local folder = LocalPlayer.ClassProgress
-        and LocalPlayer.ClassProgress:FindFirstChild("Vampire")
-    if not folder then return false end
-    local lvl = folder:GetAttribute("Level") or 1
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
     local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
     if not reqs or not reqs.LifestealHealing then return true end
-    local have = folder:GetAttribute("LifestealHealing") or 0
+    local have = classStatCache["Vampire"]
+        and classStatCache["Vampire"]["LifestealHealing"] or 0
     return have >= reqs.LifestealHealing
 end
 
