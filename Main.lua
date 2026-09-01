@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 7.59")
+print("Version 1.2.4 / 8.08")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3783,6 +3783,7 @@ end
 -- ตี Monster ตอนกลางคืน — เริ่มทันที (ไม่รอ Stronghold เปิด) และทำงานขนานกับ flow
 -- ============================================
 if isVampire then
+    print("[Vampire] isVampire=true, starting NightLoop")
     task.spawn(vampireNightLoop)
 end
 
