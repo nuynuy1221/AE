@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 5.16")
+print("Version 1.2.4 / 5.23")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3481,6 +3481,15 @@ print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
 local function vampireNightLoop()
     if not isVampire then return end
     print("[Vampire] Night loop started")
+
+    -- ตรวจ dependencies ตอนเริ่ม
+    if not vampireScythe then
+        warn("[Vampire] Vampire Scythe not found in Inventory - cannot fight, will skip hits")
+    end
+    if not LocalPlayer:FindFirstChild("Inventory") then
+        warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
+    end
+
     while isVampire do
         -- Pre-check 1: Quest LifestealHealing ครบ?
         if isVampireLifestealDone() then
@@ -3488,41 +3497,60 @@ local function vampireNightLoop()
             restoreHP()
             break
         end
+        print("[Vampire] Quest Lifesteal: not done yet, continuing")
 
         -- Pre-check 2: Stronghold เปิด?
         if checkAnyCultistSpawned() then
-            print("[Vampire] Stronghold opened, returning to Stronghold")
+            print("[Vampire] Stronghold opened (Cultist found), returning to Stronghold")
             break
         end
 
         -- Pre-check 3: State == "Night"?
-        if workspace:GetAttribute("State") ~= "Night" then
+        local currentState = workspace:GetAttribute("State")
+        if currentState ~= "Night" then
+            print(string.format("[Vampire] Waiting for night (current State: %s)", tostring(currentState)))
             task.wait(1)
             continue
         end
+        print("[Vampire] State=Night, scanning for monsters")
 
         -- หา Monster ที่ไม่ใช่ Cultist
         local monsters = findNightMonsters()
         if #monsters == 0 then
+            warn("[Vampire] No hittable monsters found in workspace.Characters - waiting 1s")
             task.wait(1)
             continue
         end
+        print(string.format("[Vampire] Found %d monster(s) to attack", #monsters))
 
         -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
         local MAX_HITS_PER_TARGET = 100
-        for _, monster in ipairs(monsters) do
-            if not (monster and monster.Parent) then continue end
+        for monsterIdx, monster in ipairs(monsters) do
+            if not (monster and monster.Parent) then
+                print(string.format("[Vampire] [%d/%d] Monster already destroyed, skipping",
+                    monsterIdx, #monsters))
+                continue
+            end
             local hrp = LocalPlayer.Character
                 and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not hrp then break end
+            if not hrp then
+                warn("[Vampire] No HumanoidRootPart - cannot warp, breaking")
+                break
+            end
 
             local root = monster:FindFirstChild("HumanoidRootPart")
                 or monster.PrimaryPart
-            if not root then continue end
+            if not root then
+                warn(string.format("[Vampire] [%d/%d] %s has no HumanoidRootPart/PrimaryPart, skipping",
+                    monsterIdx, #monsters, monster.Name))
+                continue
+            end
 
             -- วาร์ปไปเหนือ
             hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 10, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
+            print(string.format("[Vampire] [%d/%d] Warping to %s at (%.0f, %.0f, %.0f)",
+                monsterIdx, #monsters, monster.Name, root.Position.X, root.Position.Y, root.Position.Z))
             task.wait(0.2)
 
             -- ตีซ้ำตัวเดิมจนกว่าจะตาย หรือครบ 100 ที
@@ -3536,12 +3564,20 @@ local function vampireNightLoop()
                     pcall(function()
                         Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
                     end)
+                else
+                    warn("[Vampire] No Vampire Scythe - skipping hit")
                 end
                 hitCount = hitCount + 1
 
+                if hitCount == 1 or hitCount % 10 == 0 then
+                    print(string.format("[Vampire] [%d/%d] Hit %s x%d",
+                        monsterIdx, #monsters, monster.Name, hitCount))
+                end
+
                 -- เช็ค Quest LifestealHealing ทันที (อาจครบจากการตีตัวนี้)
                 if isVampireLifestealDone() then
-                    print("[Vampire] Lifesteal quest done, returning to Stronghold")
+                    print(string.format("[Vampire] Lifesteal quest done after %d hits on %s, returning to Stronghold",
+                        hitCount, monster.Name))
                     restoreHP()
                     return  -- ออกจาก vampireNightLoop ทันที
                 end
@@ -3555,12 +3591,14 @@ local function vampireNightLoop()
                 end
 
                 if isDead then
-                    print("[Vampire] Killed " .. monster.Name .. " after " .. hitCount .. " hits")
+                    print(string.format("[Vampire] [%d/%d] Killed %s after %d hits",
+                        monsterIdx, #monsters, monster.Name, hitCount))
                     break  -- ตายแล้ว → ตัวถัดไป
                 end
 
                 if hitCount >= MAX_HITS_PER_TARGET then
-                    print("[Vampire] " .. monster.Name .. " survived " .. MAX_HITS_PER_TARGET .. " hits, skipping")
+                    warn(string.format("[Vampire] [%d/%d] %s survived %d hits, skipping to next",
+                        monsterIdx, #monsters, monster.Name, MAX_HITS_PER_TARGET))
                     break  -- ครบ 100 → เปลี่ยนตัว
                 end
 
@@ -3568,6 +3606,7 @@ local function vampireNightLoop()
             end
         end
 
+        print("[Vampire] Finished this batch, rescanning in 1s")
         task.wait(1)
     end
 
