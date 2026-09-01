@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.37")
+print("Version 1.2.4 / 8.43")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3745,6 +3745,14 @@ if isVampire then
     end)
 end
 
+-- ============================================
+-- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
+-- ============================================
+if isVampire then
+    print("[Vampire] NightLoop starting")
+    task.spawn(vampireNightLoop)
+end
+
 print("\n[Step 4] Waiting for Stronghold to open...")
 updateStatus("Waiting for Stronghold...")
 
@@ -3764,15 +3772,6 @@ while true do
         updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
         task.wait(1)
     end
-end
-
--- ============================================
--- VAMPIRE: ถ้าเป็น Class Vampire และ LifestealHealing ยังไม่เสร็จ
--- ตี Monster ตอนกลางคืน — เริ่มทันที (ไม่รอ Stronghold เปิด) และทำงานขนานกับ flow
--- ============================================
-if isVampire then
-    print("[Vampire] NightLoop starting")
-    task.spawn(vampireNightLoop)
 end
 
 -- ============================================
