@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 4.18")
+print("Version 1.2.4 / 4.54")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3407,14 +3407,20 @@ do
     end
 
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
+    -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" (ต้องวาร์ปบน Ground)
     local map = workspace:FindFirstChild("Map")
     if map then
+        local keepGround = isVampire and not isVampireLifestealDone()
         local mapFolderNames = {
             "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
             "ExplodableModels", "FishingSpots", "Foliage", "Ground",
             "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
         }
         for _, folderName in ipairs(mapFolderNames) do
+            -- ข้าม "Ground" ถ้า Vampire ยังทำ Quest อยู่
+            if keepGround and folderName == "Ground" then
+                continue
+            end
             local folder = map:FindFirstChild(folderName)
             if folder then
                 pcall(function()
