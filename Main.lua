@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 4.54")
+print("Version 1.2.4 / 4.59")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3407,10 +3407,10 @@ do
     end
 
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
-    -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" (ต้องวาร์ปบน Ground)
+    -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
     local map = workspace:FindFirstChild("Map")
     if map then
-        local keepGround = isVampire and not isVampireLifestealDone()
+        local keepMap = isVampire and not isVampireLifestealDone()
         local mapFolderNames = {
             "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
             "ExplodableModels", "FishingSpots", "Foliage", "Ground",
@@ -3418,7 +3418,7 @@ do
         }
         for _, folderName in ipairs(mapFolderNames) do
             -- ข้าม "Ground" ถ้า Vampire ยังทำ Quest อยู่
-            if keepGround and folderName == "Ground" then
+            if keepMap and folderName == "Ground" then
                 continue
             end
             local folder = map:FindFirstChild(folderName)
@@ -3435,14 +3435,16 @@ do
         end
     end
 
-    -- ลบทุกอย่างใต้ workspace.Characters
-    local chars = workspace:FindFirstChild("Characters")
-    if chars then
-        pcall(function()
-            for _, child in ipairs(chars:GetChildren()) do
-                pcall(function() child:Destroy() end)
-            end
-        end)
+    -- ลบทุกอย่างใต้ workspace.Characters (ยกเว้นถ้า Vampire ยังทำ Quest อยู่)
+    if not keepMap then
+        local chars = workspace:FindFirstChild("Characters")
+        if chars then
+            pcall(function()
+                for _, child in ipairs(chars:GetChildren()) do
+                    pcall(function() child:Destroy() end)
+                end
+            end)
+        end
     end
 
     print("[OK] FPS boost cleanup done")
