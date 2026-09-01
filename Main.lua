@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.43")
+print("Version 1.2.4 / 8.55")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3608,7 +3608,7 @@ local function vampireNightLoop()
         -- (quiet - ไม่ print "Found N monster")
 
         -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
-        local MAX_HITS_PER_TARGET = 100
+        local MAX_HITS_PER_TARGET = 50
         for monsterIdx, monster in ipairs(monsters) do
             if not (monster and monster.Parent) then
                 -- (quiet - ไม่ print "Monster already destroyed")
@@ -3629,8 +3629,8 @@ local function vampireNightLoop()
                 continue
             end
 
-            -- วาร์ปไปเหนือ
-            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 10, 0))
+            -- วาร์ปไปเหนือ (20 studs เหมือน Stronghold - airHeight)
+            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
             -- (quiet - ไม่ print "Warping")
             task.wait(0.2)
