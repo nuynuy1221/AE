@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.38")
+print("Version 1.2.4 / 9.46")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1938,14 +1938,12 @@ local function isVampireAllQuestDone()
 end
 
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, Mammoth, Bear, Hellephant, Friendly tag, Pet tag, StrongholdEnemy (Cultist)
+-- ข้าม: Deer, Owl, NPC HP > 100 (Mossy Mammoth etc.), Friendly tag, Pet tag, StrongholdEnemy (Cultist)
 local SKIP_NAMES = {
     ["Deer"] = true,
     ["Owl"] = true,
-    ["Mammoth"] = true,
-    ["Bear"] = true,
-    ["Hellephant"] = true,
 }
+local HP_SKIP_THRESHOLD = 100  -- ข้าม NPC ที่ HP > 100 (Mossy Mammoth, etc.)
 
 local function findNightMonsters()
     local list = {}
@@ -1965,6 +1963,10 @@ local function findNightMonsters()
                     local hum = model:FindFirstChildOfClass("Humanoid")
                         or model:FindFirstChildWhichIsA("Humanoid", true)
                     if hum and hum.Parent and hum.Health > 0 then
+                        -- ข้าม NPC ที่ HP > threshold (Mossy Mammoth, Bear, Hellephant, etc.)
+                        if hum.Health > HP_SKIP_THRESHOLD then
+                            continue
+                        end
                         table.insert(list, model)
                     end
                 end
@@ -3531,23 +3533,23 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
-    -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร) - ตาม Stronghold
-    local anchoredHRP = nil
+    -- ใช้ Humanoid.PlatformStand = true ลอยค้าง (กันตกพื้น)
+    local floatingHum = nil
     local function ensureFloating()
         local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not (char and hrp) then return end
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not (char and hum) then return end
 
-        if anchoredHRP == hrp then return end  -- HRP เดิม
-        hrp.Anchored = true
-        anchoredHRP = hrp
+        if floatingHum == hum then return end  -- เดิมแล้ว
+        hum.PlatformStand = true  -- ยืนบนอากาศได้
+        floatingHum = hum
     end
 
-    -- ปลดล็อค HRP เมื่อออกจาก NightLoop
+    -- ปิด PlatformStand เมื่อออกจาก NightLoop
     local function disableFloating()
-        if anchoredHRP then
-            pcall(function() anchoredHRP.Anchored = false end)
-            anchoredHRP = nil
+        if floatingHum then
+            pcall(function() floatingHum.PlatformStand = false end)
+            floatingHum = nil
         end
     end
 
