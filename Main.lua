@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 10.01")
+print("Version 1.2.4 / 10.08")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3533,24 +3533,52 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
-    -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร) - ป้องกันตกพื้น
-    local anchoredHRP = nil
+    -- ใช้ AlignPosition + AlignOrientation ลอยค้าง (ไม่ Anchored HRP)
+    local floatAP = nil  -- AlignPosition
+    local floatAO = nil  -- AlignOrientation
     local function ensureFloating()
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not (char and hrp) then return end
 
-        if anchoredHRP == hrp then return end  -- HRP เดิม
-        hrp.Anchored = true  -- ล็อคตัวละคร (ลอยค้าง - ไม่ตก)
-        anchoredHRP = hrp
+        -- สร้าง Attachment ถ้ายังไม่มี
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        -- สร้าง AlignPosition (ล็อคตำแหน่ง)
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 1e9  -- แรงสูงมาก = ลอยค้าง
+            floatAP.Responsiveness = 200  -- ตอบสนองเร็ว
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        -- สร้าง AlignOrientation (ล็อคการหมุน)
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 1e9
+            floatAO.Responsiveness = 200
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
     end
 
-    -- ปลดล็อค HRP เมื่อออกจาก NightLoop
+    -- ลบ AlignPosition/AlignOrientation เมื่อออกจาก NightLoop
     local function disableFloating()
-        if anchoredHRP then
-            pcall(function() anchoredHRP.Anchored = false end)
-            anchoredHRP = nil
-        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
     end
 
     while isVampire do
