@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.54")
+print("Version 1.2.4 / 10.01")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3533,23 +3533,23 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
-    -- ใช้ Humanoid.PlatformStand = true ลอยค้าง (กันตกพื้น)
-    local floatingHum = nil
+    -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร) - ป้องกันตกพื้น
+    local anchoredHRP = nil
     local function ensureFloating()
         local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if not (char and hum) then return end
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
 
-        if floatingHum == hum then return end  -- เดิมแล้ว
-        hum.PlatformStand = true  -- ยืนบนอากาศได้
-        floatingHum = hum
+        if anchoredHRP == hrp then return end  -- HRP เดิม
+        hrp.Anchored = true  -- ล็อคตัวละคร (ลอยค้าง - ไม่ตก)
+        anchoredHRP = hrp
     end
 
-    -- ปิด PlatformStand เมื่อออกจาก NightLoop
+    -- ปลดล็อค HRP เมื่อออกจาก NightLoop
     local function disableFloating()
-        if floatingHum then
-            pcall(function() floatingHum.PlatformStand = false end)
-            floatingHum = nil
+        if anchoredHRP then
+            pcall(function() anchoredHRP.Anchored = false end)
+            anchoredHRP = nil
         end
     end
 
