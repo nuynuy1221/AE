@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.11")
+print("Version 1.2.4 / 9.24")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3521,6 +3521,7 @@ local HOVER_HEIGHT = 10
 local function vampireNightLoop()
     if not isVampire then return end
     print("[Vampire] Night loop started")
+    local lastLoggedState = nil  -- เก็บ state ที่ print ล่าสุด (กัน spam)
 
     -- ตรวจ dependencies ตอนเริ่ม
     if not vampireScythe then
@@ -3530,29 +3531,38 @@ local function vampireNightLoop()
         warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
     end
 
-    -- สร้าง Floating Platform ใต้ตัว เพื่อไม่ให้ตกพื้น
+    -- ใช้ Anchored Platform ใต้ตัว ลอยค้าง (เหมือน Stronghold) - ไม่ใช้ BodyPosition
     local floatPlatform = nil
-    local function ensureFloatPlatform()
-        if floatPlatform and floatPlatform.Parent then return floatPlatform end
+    local function ensureFloating()
+        if floatPlatform and floatPlatform.Parent then
+            -- อัปเดตตำแหน่ง platform ให้ตรงกับ Monster (ลอยตาม)
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                floatPlatform.CFrame = hrp.CFrame
+            end
+            return
+        end
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not (char and hrp) then return nil end
+        if not (char and hrp) then return end
 
         floatPlatform = Instance.new("Part")
         floatPlatform.Name = "VampireFloatPlatform"
         floatPlatform.Size = Vector3.new(6, 1, 6)
-        floatPlatform.Anchored = false  -- weld กับ HRP ให้ตามตัว
+        floatPlatform.Anchored = true  -- ไม่ตก (เหมือน platform ใน Stronghold)
         floatPlatform.CanCollide = true
         floatPlatform.Transparency = 1
         floatPlatform.Material = Enum.Material.SmoothPlastic
         floatPlatform.CFrame = hrp.CFrame * CFrame.new(0, -3, 0)  -- ใต้ตัว 3 studs
-        floatPlatform.Parent = char
-
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = hrp
-        weld.Part1 = floatPlatform
-        weld.Parent = floatPlatform
+        floatPlatform.Parent = workspace
         return floatPlatform
+    end
+
+    -- ลบ Platform เมื่อออกจาก NightLoop
+    local function disableFloating()
+        pcall(function() if floatPlatform then floatPlatform:Destroy() end end)
+        floatPlatform = nil
     end
 
     while isVampire do
@@ -3581,6 +3591,7 @@ local function vampireNightLoop()
             if not restoreOk then
                 warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
             end
+            disableFloating()  -- ลบ BodyPosition/BodyGyro ก่อนออก
             break
         end
         -- แสดง progress ของทั้ง 2 stat (quiet - ไม่ print ทุก iteration)
@@ -3613,9 +3624,17 @@ local function vampireNightLoop()
             continue
         end
         if currentState ~= "Night" then
-            print(string.format("[Vampire] Waiting for night (current State: %s)", tostring(currentState)))
+            -- print เฉพาะตอน state เปลี่ยน
+            if lastLoggedState ~= currentState then
+                print(string.format("[Vampire] Waiting for night (State: %s)", tostring(currentState)))
+                lastLoggedState = currentState
+            end
             task.wait(1)
             continue
+        end
+        if lastLoggedState ~= "Night" then
+            print("[Vampire] State changed to Night")
+            lastLoggedState = "Night"
         end
         print("[Vampire] State=Night, scanning for monsters")
 
@@ -3649,8 +3668,15 @@ local function vampireNightLoop()
                 break
             end
 
-            -- สร้าง Floating Platform ใต้ตัว (กันตกพื้น)
-            ensureFloatPlatform()
+            -- ใช้ BodyPosition + BodyGyro ลอยค้าง (กันตกพื้น)
+            ensureFloating()
+
+            -- equip Scythe จริง (Client.InventoryHandler) ให้ Player ถือ Scythe
+            if vampireScythe then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                end)
+            end
 
             local root = monster:FindFirstChild("HumanoidRootPart")
                 or monster.PrimaryPart
