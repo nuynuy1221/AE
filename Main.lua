@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.46")
+print("Version 1.2.4 / 9.54")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3447,8 +3447,8 @@ do
             "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
         }
         for _, folderName in ipairs(mapFolderNames) do
-            -- ข้าม "Ground" ถ้า Vampire ยังทำ Quest อยู่
-            if keepMap and folderName == "Ground" then
+            -- ข้าม "Ground" + "Landmarks" ถ้า Vampire ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
+            if keepMap and (folderName == "Ground" or folderName == "Landmarks") then
                 continue
             end
             local folder = map:FindFirstChild(folderName)
