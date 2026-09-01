@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 5.05")
+print("Version 1.2.4 / 5.16")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1921,8 +1921,7 @@ local function isVampireLifestealDone()
 end
 
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, Friendly tag, Pet tag, StrongholdEnemy
--- ตีถ้า: มี tag "Monster" หรือ attribute "Attackable" (ต้องมีอย่างใดอย่างหนึ่ง)
+-- ข้าม: Deer, Owl, Friendly tag, Pet tag, StrongholdEnemy (Cultist)
 local SKIP_NAMES = {
     ["Deer"] = true,
     ["Owl"] = true,
@@ -1946,12 +1945,7 @@ local function findNightMonsters()
                     local hum = model:FindFirstChildOfClass("Humanoid")
                         or model:FindFirstChildWhichIsA("Humanoid", true)
                     if hum and hum.Parent and hum.Health > 0 then
-                        -- เกณฑ์ตี: tag "Monster" หรือ attribute "Attackable"
-                        local hasMonsterTag = model:HasTag("Monster")
-                        local isAttackable = model:GetAttribute("Attackable") == true
-                        if hasMonsterTag or isAttackable then
-                            table.insert(list, model)
-                        end
+                        table.insert(list, model)
                     end
                 end
             end
@@ -3514,7 +3508,8 @@ local function vampireNightLoop()
             continue
         end
 
-        -- ตีทีละตัว
+        -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
+        local MAX_HITS_PER_TARGET = 100
         for _, monster in ipairs(monsters) do
             if not (monster and monster.Parent) then continue end
             local hrp = LocalPlayer.Character
@@ -3530,24 +3525,47 @@ local function vampireNightLoop()
                 * CFrame.Angles(math.rad(-90), 0, 0)
             task.wait(0.2)
 
-            -- ลด HP ตัวเองเหลือ 1 (ทุกตี — ต้องทำ Lifesteal)
-            keepHPOne()
+            -- ตีซ้ำตัวเดิมจนกว่าจะตาย หรือครบ 100 ที
+            local hitCount = 0
+            while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
+                -- ลด HP ตัวเองเหลือ 1 (ทุกตี — ต้องทำ Lifesteal)
+                keepHPOne()
 
-            -- ตีด้วย Vampire Scythe (ไม่ลดเลือดมอน)
-            if vampireScythe then
-                pcall(function()
-                    Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
-                end)
+                -- ตีด้วย Vampire Scythe (ไม่ลดเลือดมอน)
+                if vampireScythe then
+                    pcall(function()
+                        Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
+                    end)
+                end
+                hitCount = hitCount + 1
+
+                -- เช็ค Quest LifestealHealing ทันที (อาจครบจากการตีตัวนี้)
+                if isVampireLifestealDone() then
+                    print("[Vampire] Lifesteal quest done, returning to Stronghold")
+                    restoreHP()
+                    return  -- ออกจาก vampireNightLoop ทันที
+                end
+
+                -- เช็คว่ามอนตายหรือยัง (Dead attribute หรือ Humanoid.Health <= 0)
+                local npc = monster:FindFirstChild("NPC")
+                local isDead = false
+                if npc then
+                    if npc:GetAttribute("Dead") == true then isDead = true end
+                    if npc:IsA("Humanoid") and npc.Health <= 0 then isDead = true end
+                end
+
+                if isDead then
+                    print("[Vampire] Killed " .. monster.Name .. " after " .. hitCount .. " hits")
+                    break  -- ตายแล้ว → ตัวถัดไป
+                end
+
+                if hitCount >= MAX_HITS_PER_TARGET then
+                    print("[Vampire] " .. monster.Name .. " survived " .. MAX_HITS_PER_TARGET .. " hits, skipping")
+                    break  -- ครบ 100 → เปลี่ยนตัว
+                end
+
+                task.wait(0.2)
             end
-
-            -- เช็ค Quest ทันทีหลังตี
-            if isVampireLifestealDone() then
-                print("[Vampire] Lifesteal quest done mid-loop, returning to Stronghold")
-                restoreHP()
-                return  -- ออกจาก vampireNightLoop ทันที
-            end
-
-            task.wait(0.2)
         end
 
         task.wait(1)
