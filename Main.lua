@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 9.24")
+print("Version 1.2.4 / 9.31")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3534,18 +3534,10 @@ local function vampireNightLoop()
     -- ใช้ Anchored Platform ใต้ตัว ลอยค้าง (เหมือน Stronghold) - ไม่ใช้ BodyPosition
     local floatPlatform = nil
     local function ensureFloating()
-        if floatPlatform and floatPlatform.Parent then
-            -- อัปเดตตำแหน่ง platform ให้ตรงกับ Monster (ลอยตาม)
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                floatPlatform.CFrame = hrp.CFrame
-            end
-            return
-        end
+        if floatPlatform and floatPlatform.Parent then return floatPlatform end
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not (char and hrp) then return end
+        if not (char and hrp) then return nil end
 
         floatPlatform = Instance.new("Part")
         floatPlatform.Name = "VampireFloatPlatform"
@@ -3559,8 +3551,33 @@ local function vampireNightLoop()
         return floatPlatform
     end
 
+    -- อัปเดต Platform ตามตัว (ลอยล็อคตามตัว)
+    local followThread = nil
+    local function startFollowing()
+        if followThread then return end
+        followThread = task.spawn(function()
+            while floatPlatform and floatPlatform.Parent do
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    floatPlatform.CFrame = hrp.CFrame
+                end
+                task.wait(0.1)  -- อัปเดตทุก 0.1s
+            end
+            followThread = nil
+        end)
+    end
+
+    local function stopFollowing()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+    end
+
     -- ลบ Platform เมื่อออกจาก NightLoop
     local function disableFloating()
+        stopFollowing()
         pcall(function() if floatPlatform then floatPlatform:Destroy() end end)
         floatPlatform = nil
     end
@@ -3668,8 +3685,9 @@ local function vampireNightLoop()
                 break
             end
 
-            -- ใช้ BodyPosition + BodyGyro ลอยค้าง (กันตกพื้น)
+            -- ใช้ Anchored Platform ใต้ตัว (กันตกพื้น - ลอยล็อคตามตัว)
             ensureFloating()
+            startFollowing()
 
             -- equip Scythe จริง (Client.InventoryHandler) ให้ Player ถือ Scythe
             if vampireScythe then
