@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 8.29")
+print("Version 1.2.4 / 8.37")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1889,8 +1889,9 @@ local ownerId = tostring(player.UserId) .. "_" .. player.UserId
 -- ============================================
 local vampireScythe = LocalPlayer.Inventory
     and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
-local isVampire = LocalPlayer:GetAttribute("Class") == "Vampire"
-print(string.format("[Vampire] isVampire=%s (Class=%s)", tostring(isVampire), tostring(LocalPlayer:GetAttribute("Class"))))
+local currentClass = LocalPlayer:GetAttribute("Class")
+local isVampire = currentClass == "Vampire"
+print(string.format("[Class] Using: %s", tostring(currentClass)))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
 -- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
@@ -3770,7 +3771,7 @@ end
 -- ตี Monster ตอนกลางคืน — เริ่มทันที (ไม่รอ Stronghold เปิด) และทำงานขนานกับ flow
 -- ============================================
 if isVampire then
-    print("[Vampire] isVampire=true, starting NightLoop")
+    print("[Vampire] NightLoop starting")
     task.spawn(vampireNightLoop)
 end
 
