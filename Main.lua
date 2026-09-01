@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.3 / 2.21")
+print("Version 1.2.4 / 3.50")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -74,26 +74,33 @@ local function CheckGoals()
                     end
                 end
             end
-            -- Check UpgradeClass: main class ต้องถึง Lv.3
+            -- Check UpgradeClass: ทุก class ใน list ต้องถึง Lv.3
+            -- (ถ้าไม่มี class ไหน Lv.3 สักตัว = ยังไม่达成 - เรียงตาม priority)
             if upgradeGoal and classesMet then
-                local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
-                if not mainClass then
-                    classesMet = false
-                else
-                    local folder = ClassProgress:FindFirstChild(mainClass)
-                    if not folder then
-                        classesMet = false
-                    else
-                        local lvl = folder:GetAttribute("Level") or 1
-                        if lvl < 3 then
-                            classesMet = false
+                local allAtMax = true
+                local anyValid = false
+                for _, clsName in ipairs(Config.UpgradeClass) do
+                    if type(clsName) == "string" then
+                        anyValid = true
+                        local folder = ClassProgress:FindFirstChild(clsName)
+                        if not folder then
+                            allAtMax = false
+                            break
+                        else
+                            local lvl = folder:GetAttribute("Level") or 1
+                            if lvl < 3 then
+                                allAtMax = false
+                                break
+                            end
                         end
                     end
                 end
+                if not anyValid or not allAtMax then
+                    classesMet = false
+                end
             end
-        else
-            classesMet = false
         end
+    end
     end
 
     -- In farm map: ignore classes goal
@@ -456,10 +463,16 @@ pcall(function()
             classStatCache[className][statKey] = value
 
             -- ถ้าอยู่แมพฟาร์ม → คำนวณ % + print + ส่ง Horst update
+            -- ใช้กับ "currently equipped class" (LocalPlayer.ClassLevel) — ไม่ใช่ [1] เสมอ
             local isLobby = game.PlaceId == 79546208627805
             if not isLobby and Config.Horst then
-                local mainClass = Config.UpgradeClass and Config.UpgradeClass[1]
-                if mainClass and className == mainClass then
+                -- ตรวจว่า className นี้อยู่ใน UpgradeClass list ไหม
+                local isTracked = false
+                for _, clsName in ipairs(Config.UpgradeClass or {}) do
+                    if clsName == className then isTracked = true break end
+                end
+                if isTracked then
+                    local mainClass = className
                     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
                     if lvl < 3 then
                         local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
@@ -727,103 +740,89 @@ end
 -- 3. ตอนนี้รอบรับแค่ตัวแรกของ UpgradeClass เป็น "main" class
 ----------------------------------------------------------------
 local function lobbyAutoLevelUp()
-    print("[ClassUpgrade] lobbyAutoLevelUp START")
     local Client = require(LocalPlayer.PlayerScripts.Client)
     local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
     if not ClassProgress then
-        warn("[ClassUpgrade] no ClassProgress folder")
         return
     end
-    print("[ClassUpgrade] ClassProgress found, children:")
-    for _, f in ipairs(ClassProgress:GetChildren()) do
-        local cn = f:GetAttribute("ClassName") or f.Name
-        local lvl = f:GetAttribute("Level") or 1
-        local canLvl = f:GetAttribute("CanLevelUp")
-        local eq = f:GetAttribute("Equipped")
-        print(string.format("  - %s: Lv.%d CanLvl=%s Eq=%s", cn, lvl, tostring(canLvl), tostring(eq)))
+
+    -- Validate Config.UpgradeClass: ต้องเป็น table ของ string เท่านั้น
+    local validClasses = {}
+    if Config.UpgradeClass == nil then
+        -- ไม่ได้ตั้ง → silent skip
+    elseif type(Config.UpgradeClass) ~= "table" then
+        warn(string.format("[ClassUpgrade] Config.UpgradeClass is %s (expected table) - skip",
+            type(Config.UpgradeClass)))
+    else
+        for i, v in ipairs(Config.UpgradeClass) do
+            if type(v) ~= "string" then
+                warn(string.format("[ClassUpgrade] UpgradeClass[%d] is %s (expected string) - skip",
+                    i, type(v)))
+            else
+                table.insert(validClasses, v)
+            end
+        end
     end
 
-    if not (Config.UpgradeClass and #Config.UpgradeClass > 0) then
-        print("[ClassUpgrade] Config.UpgradeClass is empty or nil!")
-    else
-        print("[ClassUpgrade] Config.UpgradeClass = " .. table.concat(Config.UpgradeClass, ", "))
+    if #validClasses == 0 then
+        -- ไม่มี class ที่ valid → skip ทั้งหมด
+        return
     end
 
     -- 1) Equip class ตามลำดับ UpgradeClass - ข้าม class ที่ Lv.3 แล้ว
-    if Config.UpgradeClass and #Config.UpgradeClass > 0 then
-        for _, mainClass in ipairs(Config.UpgradeClass) do
-            local folder = ClassProgress:FindFirstChild(mainClass)
-            if not folder then
-                warn("[ClassUpgrade] " .. mainClass .. " not owned (skip equip)")
+    for _, mainClass in ipairs(validClasses) do
+        local folder = ClassProgress:FindFirstChild(mainClass)
+        if not folder then
+            warn("[ClassUpgrade] " .. mainClass .. " not owned")
+        else
+            local curLvl = folder:GetAttribute("Level") or 1
+            if curLvl >= 3 then
+                -- skip, ลอง class ถัดไป
             else
-                local curLvl = folder:GetAttribute("Level") or 1
-                if curLvl >= 3 then
-                    print("[ClassUpgrade] " .. mainClass .. " Lv." .. curLvl .. " done, skip equip")
-                else
-                    -- equip
-                    if folder:GetAttribute("Equipped") ~= true then
-                        Client.Events.UpdateEquipped:FireServer(mainClass)
-                        local t = 0
-                        while folder:GetAttribute("Equipped") ~= true and t < 3 do
-                            task.wait(0.1); t += 0.1
-                        end
-                        if folder:GetAttribute("Equipped") == true then
-                            print("[ClassUpgrade] equipped " .. mainClass .. " (Lv." .. curLvl .. ")")
-                        else
-                            warn("[ClassUpgrade] equip " .. mainClass .. " timed out")
-                        end
-                    else
-                        -- already equipped
+                if folder:GetAttribute("Equipped") ~= true then
+                    Client.Events.UpdateEquipped:FireServer(mainClass)
+                    local t = 0
+                    while folder:GetAttribute("Equipped") ~= true and t < 3 do
+                        task.wait(0.1); t += 0.1
                     end
-                    -- เจอ class ที่ยังไม่ Lv.3 แล้ว → หยุด (ทำแค่ class เดียว)
-                    break
+                    if folder:GetAttribute("Equipped") ~= true then
+                        warn("[ClassUpgrade] equip " .. mainClass .. " timed out (server may not have responded)")
+                    end
                 end
+                break  -- เจอ class ที่ยังไม่ Lv.3 → หยุด
             end
         end
     end
 
-    -- 2) เช็คทุก class ที่ owned แล้วอัปเกรดถ้า CanLevelUp
-    local upgraded = 0
+    -- 2) อัปเกรดทุก class ที่ CanLevelUp → รวมเป็นบรรทัดเดียว
+    local upgrades = {}
     for _, folder in ipairs(ClassProgress:GetChildren()) do
-        local cn = folder:GetAttribute("ClassName") or folder.Name
-        local curLevel = folder:GetAttribute("Level") or 1
-        local canLvl = folder:GetAttribute("CanLevelUp")
-        print(string.format("[ClassUpgrade] check %s Lv.%d CanLvl=%s",
-            cn, curLevel, tostring(canLvl)))
-        if canLvl == true then
-            if curLevel < 3 then
-                local ok, err = pcall(function()
-                    Client.Events.RequestLevelUpClass:FireServer(cn)
-                end)
-                if ok then
-                    -- รอ server process + verify Level อัป
-                    task.wait(0.5)
-                    local newLevel = folder:GetAttribute("Level") or 1
-                    if newLevel > curLevel then
-                        upgraded += 1
-                        print(string.format("[ClassUpgrade] %s Lv.%d -> Lv.%d OK",
-                            cn, curLevel, newLevel))
-                    else
-                        warn(string.format("[ClassUpgrade] %s still Lv.%d after request (server may not have processed)",
-                            cn, curLevel))
-                    end
-                else
-                    warn("[ClassUpgrade] RequestLevelUpClass(" .. cn .. ") failed: " .. tostring(err))
-                end
+        if folder:GetAttribute("CanLevelUp") == true and (folder:GetAttribute("Level") or 1) < 3 then
+            local cn = folder:GetAttribute("ClassName") or folder.Name
+            local fromLv = folder:GetAttribute("Level") or 1
+            local ok = pcall(function()
+                Client.Events.RequestLevelUpClass:FireServer(cn)
+            end)
+            if not ok then
+                warn("[ClassUpgrade] FireServer(" .. cn .. ") failed")
+            end
+            task.wait(0.5)
+            local toLv = folder:GetAttribute("Level") or 1
+            if toLv > fromLv then
+                table.insert(upgrades, cn .. " Lv" .. fromLv .. "->Lv" .. toLv)
             else
-                print("[ClassUpgrade] " .. cn .. " already Lv.3, skip")
+                warn("[ClassUpgrade] " .. cn .. " still Lv." .. toLv .. " after request (server may not have processed)")
             end
         end
     end
-    print("[ClassUpgrade] total upgraded: " .. upgraded)
-    if upgraded > 0 then
-        print("[ClassUpgrade] upgraded " .. upgraded .. " class(es)")
-        updateStatus("Upgraded " .. upgraded .. " class(es)")
-        task.wait(1.5)
-    else
-        print("[ClassUpgrade] nothing to upgrade (CanLevelUp may be false or already Lv.3)")
+
+    if #upgrades > 0 then
+        local msg = "[ClassUpgrade] " .. table.concat(upgrades, ", ")
+        print(msg)
+        updateStatus(msg)
     end
 end
+
 
 print("\n[Step 1] Checking current map...")
 updateStatus("Checking Map...")
@@ -1297,14 +1296,21 @@ if isLobby() then
                             if classFolder then
                                 local inStock = isInStock(classFolder)
                                 if inStock then
+                                    print(string.format("[Auto-Buy] Buying: %s", className))
                                     updateStatus(string.format("Buying: %s", className))
                                     Client.Events.RequestPurchaseClass:FireServer(className)
                                     task.wait(0.5)
+                                    if ClassProgress:FindFirstChild(className) then
+                                        print(string.format("[Auto-Buy] Bought: %s", className))
+                                    else
+                                        warn(string.format("[Auto-Buy] Buy %s failed (server may not have processed)", className))
+                                    end
                                 else
+                                    print(string.format("[Auto-Buy] %s out of stock", className))
                                     table.insert(outOfStock, className)
                                 end
                             else
-                                warn(string.format("Auto-Buy: Class folder not found: %s", className))
+                                warn(string.format("[Auto-Buy] Class folder not found: %s", className))
                             end
                         else
                             ownedCount = ownedCount + 1
@@ -1878,6 +1884,94 @@ local axe = toolHandle.OriginalItem.Value
 
 local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
 local ownerId = tostring(player.UserId) .. "_" .. player.UserId
+
+-- ============================================
+-- VAMPIRE CLASS HELPERS
+-- ============================================
+local vampireScythe = LocalPlayer.Inventory
+    and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
+local isVampire = LocalPlayer:GetAttribute("Class") == "Vampire"
+local myChar = workspace:WaitForChild(LocalPlayer.Name)
+
+-- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
+local function keepHPOne()
+    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 1 then
+        pcall(function() hum.Health = 1 end)
+    end
+end
+
+-- เซ็ต HP กลับ 100 (เรียกเมื่อ Lifesteal Quest เสร็จ)
+local function restoreHP()
+    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health < 100 then
+        pcall(function() hum.Health = 100 end)
+    end
+end
+
+-- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
+local function isVampireLifestealDone()
+    local folder = LocalPlayer.ClassProgress
+        and LocalPlayer.ClassProgress:FindFirstChild("Vampire")
+    if not folder then return false end
+    local lvl = folder:GetAttribute("Level") or 1
+    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+    if not reqs or not reqs.LifestealHealing then return true end
+    local have = folder:GetAttribute("LifestealHealing") or 0
+    return have >= reqs.LifestealHealing
+end
+
+-- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
+-- ข้าม: Deer, Owl, Friendly tag, Pet tag, StrongholdEnemy
+-- ตีถ้า: มี tag "Monster" หรือ attribute "Attackable" (ต้องมีอย่างใดอย่างหนึ่ง)
+local SKIP_NAMES = {
+    ["Deer"] = true,
+    ["Owl"] = true,
+}
+
+local function findNightMonsters()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+
+    for _, model in ipairs(chars:GetChildren()) do
+        -- ข้ามชื่อที่ห้ามตี
+        if not SKIP_NAMES[model.Name] then
+            -- ข้าม Cultist (StrongholdEnemy)
+            if model:GetAttribute("StrongholdEnemy") ~= true then
+                -- ข้าม Friendly/Pet tag
+                local hasFactionTag = model:HasTag("Friendly")
+                    or model:HasTag("Pet")
+                    or model:HasTag("Ally")
+                if not hasFactionTag then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                        or model:FindFirstChildWhichIsA("Humanoid", true)
+                    if hum and hum.Parent and hum.Health > 0 then
+                        -- เกณฑ์ตี: tag "Monster" หรือ attribute "Attackable"
+                        local hasMonsterTag = model:HasTag("Monster")
+                        local isAttackable = model:GetAttribute("Attackable") == true
+                        if hasMonsterTag or isAttackable then
+                            table.insert(list, model)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return list
+end
+
+-- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
+local function checkAnyCultistSpawned()
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return false end
+    for _, c in ipairs(chars:GetChildren()) do
+        if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+    end
+    return false
+end
 
 local fireFrame = retryUntil("find MainFire BillboardGui", function()
     local center = mainFire:FindFirstChild("Center")
@@ -3069,9 +3163,10 @@ local cannonEnergyCost = 75  -- EnergyCost ต่อนัด (จาก CheckEn
 -- เกมเก็บ Energy คงเหลือที่ LocalPlayer:GetAttribute("EnergyAmmo")
 -- Logic ยิง: 1 นัดใช้ 75 Energy → ต้องมี Energy > 75 ก่อนยิง (เช็ค >= 76)
 
-if Config.UpgradeClass and Config.UpgradeClass[1] then
+if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
     local equippedClass = LocalPlayer:GetAttribute("Class")
-    if equippedClass == Config.UpgradeClass[1] then
+    -- Cannon ใช้ได้เฉพาะ Cyborg (Energy weapon → AlienTechKills quest)
+    if equippedClass == "Cyborg" then
         -- เช็ค level: ถ้า Lv.3 แล้ว = เควสครบแล้ว → ฟาร์มปกติด้วยขวาน (no cannon)
         local equippedLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
         if equippedLevel >= 3 then
@@ -3092,7 +3187,6 @@ if Config.UpgradeClass and Config.UpgradeClass[1] then
                     local origItem = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
                     if origItem and origItem.Name == "Laser Cannon" then
                         print("[Cannon] equipped")
-                        -- ใช้ Tool instance จาก OriginalItem.Value (แก้ปัญหา "not a valid member of Model")
                         cannonTool = origItem
                     else
                         warn("[Cannon] equip failed (got " .. tostring(origItem and origItem.Name) .. ")")
@@ -3377,6 +3471,115 @@ print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
 -- STEP 4: Wait for Stronghold to Open
 -- ============================================
 
+-- ============================================
+-- VAMPIRE NIGHT LOOP (เฉพาะ Class Vampire)
+-- ทำ Quest LifestealHealing ตอนกลางคืน
+-- ตีด้วย Vampire Scythe + ลด HP ตัวเองเหลือ 1
+-- หยุดเมื่อ: Quest ครบ / Stronghold เปิด / ไม่ใช่กลางคืน
+-- ============================================
+local function vampireNightLoop()
+    if not isVampire then return end
+    print("[Vampire] Night loop started")
+    while isVampire do
+        -- Pre-check 1: Quest LifestealHealing ครบ?
+        if isVampireLifestealDone() then
+            print("[Vampire] Lifesteal quest done, returning to Stronghold")
+            restoreHP()
+            break
+        end
+
+        -- Pre-check 2: Stronghold เปิด?
+        if checkAnyCultistSpawned() then
+            print("[Vampire] Stronghold opened, returning to Stronghold")
+            break
+        end
+
+        -- Pre-check 3: State == "Night"?
+        if workspace:GetAttribute("State") ~= "Night" then
+            task.wait(1)
+            continue
+        end
+
+        -- หา Monster ที่ไม่ใช่ Cultist
+        local monsters = findNightMonsters()
+        if #monsters == 0 then
+            task.wait(1)
+            continue
+        end
+
+        -- ตีทีละตัว
+        for _, monster in ipairs(monsters) do
+            if not (monster and monster.Parent) then continue end
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then break end
+
+            local root = monster:FindFirstChild("HumanoidRootPart")
+                or monster.PrimaryPart
+            if not root then continue end
+
+            -- วาร์ปไปเหนือ
+            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, 10, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.2)
+
+            -- ลด HP ตัวเองเหลือ 1 (ทุกตี — ต้องทำ Lifesteal)
+            keepHPOne()
+
+            -- ตีด้วย Vampire Scythe (ไม่ลดเลือดมอน)
+            if vampireScythe then
+                pcall(function()
+                    Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
+                end)
+            end
+
+            -- เช็ค Quest ทันทีหลังตี
+            if isVampireLifestealDone() then
+                print("[Vampire] Lifesteal quest done mid-loop, returning to Stronghold")
+                restoreHP()
+                return  -- ออกจาก vampireNightLoop ทันที
+            end
+
+            task.wait(0.2)
+        end
+
+        task.wait(1)
+    end
+
+    -- วาร์ปกลับ combatCenter
+    local hrp = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+            * CFrame.Angles(math.rad(-90), 0, 0)
+    end
+    print("[Vampire] Night loop ended, at Stronghold")
+end
+
+-- ============================================
+-- VAMPIRE HP WATCHER: ลด HP ตัวเองเหลือ 1 ตลอดเวลา
+-- ตราบเท่าที่ Quest LifestealHealing ยังไม่เสร็จ
+-- เมื่อครบแล้ว → เซ็ต HP กลับ 100 (ครั้งเดียว)
+-- ============================================
+if isVampire then
+    task.spawn(function()
+        local hpRestored = false
+        while isVampire do
+            if isVampireLifestealDone() then
+                if not hpRestored then
+                    restoreHP()
+                    hpRestored = true
+                    print("[Vampire] Lifesteal quest done - HP restored to 100")
+                end
+            else
+                hpRestored = false
+                keepHPOne()
+            end
+            task.wait(0.5)
+        end
+    end)
+end
+
 print("\n[Step 4] Waiting for Stronghold to open...")
 updateStatus("Waiting for Stronghold...")
 
@@ -3396,6 +3599,14 @@ while true do
         updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
         task.wait(1)
     end
+end
+
+-- ============================================
+-- VAMPIRE: ถ้าเป็น Class Vampire และ LifestealHealing ยังไม่เสร็จ
+-- ตี Monster ตอนกลางคืนก่อนเข้า Stronghold (Step 5+)
+-- ============================================
+if isVampire then
+    vampireNightLoop()
 end
 
 -- ============================================
@@ -3721,49 +3932,69 @@ local function doOneRound()
                 end
             end
 
-            -- Phase 1: วาร์ปเข้าไปหา "ทุกตัว" ทีละตัว -> ปรับเลือด -> ตีตัวนั้นทันทีจากจุดใกล้
-            -- (ตีจากจุดที่วาร์ปไปถึงเสมอ กัน server ปัด hit ด้วย range check)
+            -- Phase 1: คำนวณ centroid ของทุก cultist + ความสูงสูงสุด -> วาร์ปจุดเดียว
+            -- แล้วลดเลือดทุกตัวพร้อมกัน -> รอ 1 วิ -> ตีทุกตัวพร้อมกัน
+            -- (ลดเวลาจาก N iteration เหลือ 1 batch - เร็วขึ้นมาก)
+            local validCultists = {}
+            local centroid = Vector3.zero
+            local maxY = -math.huge
             for _, cultist in ipairs(cultists) do
                 if not cultist or not cultist.Parent then continue end
-                local cultistHum = cultist:FindFirstChildOfClass("Humanoid")
-                    or cultist:FindFirstChildWhichIsA("Humanoid", true)
-                if not cultistHum then continue end
                 local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
                 if not root then continue end
+                table.insert(validCultists, cultist)
+                centroid = centroid + root.Position
+                if root.Position.Y > maxY then maxY = root.Position.Y end
+            end
 
-                -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) + รอ 2 เฟรมให้เซิร์ฟทันเห็นตำแหน่งใหม่
-                hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
-                    * CFrame.Angles(math.rad(-90), 0, 0)
-                task.wait()
-                task.wait()
+            if #validCultists > 0 then
+                centroid = centroid / #validCultists
+                -- วาร์ปไปเหนือ centroid ให้สูงกว่าตัวที่สูงที่สุด HOVER_HEIGHT studs
+                local warpPos = Vector3.new(centroid.X, maxY + HOVER_HEIGHT, centroid.Z)
+                hrp.CFrame = CFrame.new(warpPos) * CFrame.Angles(math.rad(-90), 0, 0)
 
-                updateStatus("Fighting " .. #cultists .. " Cultists... (round " .. completedRounds+1 .. ")")
+                updateStatus("Fighting " .. #validCultists .. " Cultists... (round " .. completedRounds+1 .. ")")
 
-                -- ปรับเลือด -> "รอ 0.2 วิ" ให้ค่า settle -> เช็คว่าติด 0 ไหม (ลองได้สูงสุด 3 รอบ)
-                -- ตั้งทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health ผ่าน zeroEnemyHealth
+                -- รอ 0.2 วิ ก่อนลดเลือด (ให้เซิร์ฟทันเห็น CFrame ใหม่ก่อน)
+                task.wait(0.2)
+
+                -- ลดเลือดทุกตัวพร้อมกัน (1 ครั้งต่อตัว) - เร็วกว่าทีละตัวมาก
                 -- ทำเสมอ (ทั้ง cannon class และ axe class) - ให้ Cultist ตายเร็ว
-                local zeroed = false
-                for _ = 1, 3 do
+                for _, cultist in ipairs(validCultists) do
                     pcall(function() zeroEnemyHealth(cultist) end)
-                    task.wait(0.2)
-                    local attrZero = cultist:GetAttribute("Health") == 0
-                    local humZero = cultistHum.Parent ~= nil and cultistHum.Health == 0
-                    if attrZero or humZero then
-                        zeroed = true
-                        break
+                end
+
+                -- รอ 1 วิ ก่อนโจมตี (ให้เซิร์ฟทันเห็น CFrame ใหม่ + Health=0 replicate)
+                task.wait(1)
+
+                -- ตีทุกตัวพร้อมกันจากจุด centroid เดียวกัน
+                -- (ถ้า useCannon → skip - background loop ยิงให้แล้ว)
+                -- (Vampire: ใช้ Scythe แทน axe + keepHPOne ถ้า Lifesteal ยังไม่เสร็จ)
+                if not useCannon then
+                    -- เลือก weapon: Scythe ถ้า Vampire, axe ถ้า class อื่น
+                    local weapon = (isVampire and vampireScythe) or axe
+                    -- keepHPOne ก่อนตี (เฉพาะ Vampire + Lifesteal ยังไม่เสร็จ)
+                    if isVampire and weapon and not isVampireLifestealDone() then
+                        keepHPOne()
+                    end
+                    for _, cultist in ipairs(validCultists) do
+                        if cultist and cultist.Parent then
+                            pcall(function()
+                                Event:InvokeServer(cultist, weapon, ownerId, hrp.CFrame, false)
+                            end)
+                        end
                     end
                 end
 
-                -- ตีตัวนี้ 1 ครั้งจากจุดที่วาร์ปมา (server คืน false/error ก็ถือว่ารอบนี้ทำแล้ว)
-                -- ถ้า useCannon → skip (background loop ยิงให้แล้ว)
-                if not useCannon then
-                    pcall(function()
-                        Event:InvokeServer(cultist, axe, ownerId, hrp.CFrame, false)
-                    end)
-                end
-
                 -- นับรอบที่ตัวนี้ยังไม่ตาย: ปรับเลือดติด = +1, ปรับเลือดไม่ติด = +2 (ไม่ทำงาน = นับหนัก)
-                surviveCounts[cultist] = (surviveCounts[cultist] or 0) + (zeroed and 1 or 2)
+                for _, cultist in ipairs(validCultists) do
+                    local attrZero = cultist:GetAttribute("Health") == 0
+                    local hum = cultist:FindFirstChildOfClass("Humanoid")
+                        or cultist:FindFirstChildWhichIsA("Humanoid", true)
+                    local humZero = hum and hum.Parent ~= nil and hum.Health == 0
+                    local zeroed = attrZero or humZero
+                    surviveCounts[cultist] = (surviveCounts[cultist] or 0) + (zeroed and 1 or 2)
+                end
             end
 
             -- Phase 2: ตัวไหนทำครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย
@@ -3798,8 +4029,14 @@ local function doOneRound()
 
                         -- ปรับเลือดก่อนทุกตี (แบบเร็ว ไม่รอ settle) แล้วค่อยตีทันที
                         pcall(function() zeroEnemyHealth(cultist) end)
+                        -- เลือก weapon: Scythe ถ้า Vampire
+                        local weapon2 = (isVampire and vampireScythe) or axe
+                        -- keepHPOne ก่อนตี (Vampire + Lifesteal ยังไม่เสร็จ)
+                        if isVampire and weapon2 and not isVampireLifestealDone() then
+                            keepHPOne()
+                        end
                         pcall(function()
-                            Event:InvokeServer(cultist, axe, ownerId, hrp2.CFrame, false)
+                            Event:InvokeServer(cultist, weapon2, ownerId, hrp2.CFrame, false)
                         end)
                         task.wait(ATTACK_INTERVAL)
                     end
@@ -3824,7 +4061,7 @@ end
 local questReadyToLeave = false
 
 -- Quest progress watcher: แสดง % ทุกครั้งที่ quest stat อัปเดต (ทุกที่ - Lobby/Stronghold/ฟาร์ม)
-if Config.UpgradeClass and Config.UpgradeClass[1] then
+if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
     local mainClass = Config.UpgradeClass[1]
     local cp = LocalPlayer:FindFirstChild("ClassProgress")
     local folder = cp and cp:FindFirstChild(mainClass)
