@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 7.58")
+print("Version 1.2.5 / 8.07")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4146,64 +4146,24 @@ local function alienScientistNightLoop()
                 * CFrame.Angles(math.rad(-90), 0, 0)
             task.wait(0.2)
 
-            -- Hit loop: สูงสุด 3 ครั้ง → zero HP + fire dissolve remote
-            local hitCount = 0
-            while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
-                -- ลด HP มอนเหลือ 0 (ตาม spec)
-                pcall(zeroEnemyHealth, monster)
-                -- รอ 1 วิ ก่อนทำการ Dissolve
-                task.wait(1)
-                -- Fire dissolve remote + เก็บ server response
-                local serverOk = false
-                if dissolveRemote then
-                    local hitOk, hitResult = pcall(function()
-                        return dissolveRemote:InvokeServer(monster)
-                    end)
-                    if not hitOk then
-                        warn(string.format("[AlienScientist] InvokeServer error on %s: %s",
-                            monster.Name, tostring(hitResult)))
-                    elseif hitResult == true
-                        or (type(hitResult) == "table" and hitResult.Success) then
-                        serverOk = true
-                    end
-                else
-                    warn("[AlienScientist] No dissolveRemote - skipping hit")
-                end
-                hitCount = hitCount + 1
+            -- Quest check ก่อน hit (early exit ถ้า quest done)
+            local midOk, midDone = pcall(isAlienScientistAllQuestDone)
+            if midOk and midDone then
+                print("[AlienScientist] Quest done, exiting")
+                disableFloating()
+                warpBackToStronghold()
+                return
+            end
 
-                -- Re-check quest (early exit)
-                local midOk, midDone = pcall(isAlienScientistAllQuestDone)
-                if midOk and midDone then
-                    print("[AlienScientist] Quest done mid-loop, exiting")
-                    disableFloating()
-                    warpBackToStronghold()
-                    return
-                end
-
-                -- Check dead (3 วิธีรวมกัน: server response, parent removed, Humanoid recursive, attribute)
-                local isDead = false
-                if serverOk then isDead = true end
-                if not monster.Parent or monster.Parent == game.ReplicatedStorage then
-                    isDead = true
-                end
-                if monster:GetAttribute("Dead") == true then isDead = true end
-                if monster:GetAttribute("Health") == 0 then isDead = true end
-                local hum = monster:FindFirstChildOfClass("Humanoid")
-                    or monster:FindFirstChildWhichIsA("Humanoid", true)
-                if hum and hum.Health <= 0 then isDead = true end
-
-                if isDead then
-                    break
-                end
-
-                -- ตีครบ MAX แต่ยังไม่ตาย → skip ไปตัวถัดไปทันที (ไม่ retry, ไม่ grace)
-                if hitCount >= MAX_HITS_PER_TARGET then
-                    warn(string.format("[AlienScientist] [%d/%d] %s survived %d hits, skipping to next",
-                        monsterIdx, #monsters, monster.Name, MAX_HITS_PER_TARGET))
-                    break
-                end
-
-                task.wait(0.2)
+            -- Hit 1 ครั้ง: zero HP + รอ 1s + fire dissolve → ไปตัวถัดไปทันที
+            pcall(zeroEnemyHealth, monster)
+            task.wait(1)
+            if dissolveRemote then
+                pcall(function()
+                    dissolveRemote:InvokeServer(monster)
+                end)
+            else
+                warn("[AlienScientist] No dissolveRemote - skipping hit")
             end
         end
         task.wait(1)
