@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 7.27")
+print("Version 1.2.5 / 7.39")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4151,7 +4151,8 @@ local function alienScientistNightLoop()
             while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
                 -- ลด HP มอนเหลือ 0 (ตาม spec)
                 pcall(zeroEnemyHealth, monster)
-
+                -- รอ 1 วิ ก่อนทำการ Dissolve
+                task.wait(1)
                 -- Fire dissolve remote
                 if dissolveRemote then
                     local hitOk, hitErr = pcall(function()
