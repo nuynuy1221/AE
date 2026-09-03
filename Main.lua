@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5")
+print("Version 1.2.5 / 9.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4570,7 +4570,15 @@ local function doOneRound()
         while not anyCultistSpawned() do
             task.wait(WAIT_STEP)
             waited += WAIT_STEP
-            if waited >= SPAWN_TIMEOUT then
+            -- อัปเดต countdown ทุก 0.2s (เมื่อ Stronghold ยังไม่เปิด) — ไม่ re-warp
+            local remaining = getStrongholdTimeRemaining()
+            if remaining and remaining > 0 then
+                local mins = math.floor(remaining / 60)
+                local secs = math.floor(remaining % 60)
+                updateStatus(string.format("Stronghold opens in %02d:%02d", mins, secs))
+                waited = 0
+            elseif waited >= SPAWN_TIMEOUT then
+                -- Stronghold เปิดแล้ว แต่ Cultist ยังไม่ spawn → re-warp เพื่อกระตุ้น
                 print("[Round " .. completedRounds+1 .. "] Cultist not spawned - warping to Floor then back to TriggerZone")
                 updateStatus("Re-warp waiting for spawn...")
                 if floorPos2 then
