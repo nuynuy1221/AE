@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 7.39")
+print("Version 1.2.5 / 7.58")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4001,7 +4001,7 @@ local function alienScientistNightLoop()
     -- ต้อง hook ก่อนเริ่ม loop เพราะ return หลายจุด
 
     local lastLoggedState, wasNight = nil, false
-    local MAX_HITS_PER_TARGET = 3
+    local MAX_HITS_PER_TARGET = 1
 
     -- Pre-flight checks (warn only, don't abort - inventory may fill later)
     if not dissolveRay then
@@ -4153,14 +4153,18 @@ local function alienScientistNightLoop()
                 pcall(zeroEnemyHealth, monster)
                 -- รอ 1 วิ ก่อนทำการ Dissolve
                 task.wait(1)
-                -- Fire dissolve remote
+                -- Fire dissolve remote + เก็บ server response
+                local serverOk = false
                 if dissolveRemote then
-                    local hitOk, hitErr = pcall(function()
-                        dissolveRemote:InvokeServer(monster)
+                    local hitOk, hitResult = pcall(function()
+                        return dissolveRemote:InvokeServer(monster)
                     end)
                     if not hitOk then
                         warn(string.format("[AlienScientist] InvokeServer error on %s: %s",
-                            monster.Name, tostring(hitErr)))
+                            monster.Name, tostring(hitResult)))
+                    elseif hitResult == true
+                        or (type(hitResult) == "table" and hitResult.Success) then
+                        serverOk = true
                     end
                 else
                     warn("[AlienScientist] No dissolveRemote - skipping hit")
@@ -4172,16 +4176,22 @@ local function alienScientistNightLoop()
                 if midOk and midDone then
                     print("[AlienScientist] Quest done mid-loop, exiting")
                     disableFloating()
+                    warpBackToStronghold()
                     return
                 end
 
-                -- Check dead
-                local npc = monster:FindFirstChild("NPC")
+                -- Check dead (3 วิธีรวมกัน: server response, parent removed, Humanoid recursive, attribute)
                 local isDead = false
-                if npc then
-                    if npc:GetAttribute("Dead") == true then isDead = true end
-                    if npc:IsA("Humanoid") and npc.Health <= 0 then isDead = true end
+                if serverOk then isDead = true end
+                if not monster.Parent or monster.Parent == game.ReplicatedStorage then
+                    isDead = true
                 end
+                if monster:GetAttribute("Dead") == true then isDead = true end
+                if monster:GetAttribute("Health") == 0 then isDead = true end
+                local hum = monster:FindFirstChildOfClass("Humanoid")
+                    or monster:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Health <= 0 then isDead = true end
+
                 if isDead then
                     break
                 end
