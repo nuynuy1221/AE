@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 8.43")
+print("Version 1.2.5 / 8.51")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1962,10 +1962,10 @@ local dissolveRay = LocalPlayer.Inventory
 local isAlienScientist = currentClass == "Alien Scientist"
 
 -- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
--- หมายเหตุ: Client.Events ใน DissolveRay เป็น **table** จาก require() ไม่ใช่ Instance
--- ดังนั้นใช้ key access ตรง ๆ ไม่ใช่ :FindFirstChild
-local dissolveRemote = Client.Events
-    and Client.Events.RequestDissolveEnemy
+-- Remote อยู่ที่ ReplicatedStorage.RemoteEvents.RequestDissolveEnemy (ตามตัวอย่างจาก Cobalt)
+local dissolveRemote = game:GetService("ReplicatedStorage")
+    :FindFirstChild("RemoteEvents")
+    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
 
 -- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
 local function isAlienScientistAllQuestDone()
@@ -4202,31 +4202,28 @@ local function alienScientistNightLoop()
             -- รอ 1 วิก่อนเริ่ม dissolve (ให้ Player settle หลัง warp)
             task.wait(1)
 
-            -- Dissolve loop: zero HP + fire ทุก 0.2s จนกว่า monster จะหาย หรือเกิน 3 วินาที
+            -- Dissolve loop: zero HP + fire ทุก 0.2s จนกว่า server ตอบ Success=true หรือเกิน 3 วินาที
             local tStart = os.clock()
-            while monster and monster.Parent and (os.clock() - tStart) < DISSOLVE_TIMEOUT do
-                pcall(zeroEnemyHealth, monster)
-                if dissolveRemote then
-                    pcall(function()
-                        dissolveRemote:InvokeServer(monster)
-                    end)
-                else
-                    warn("[AlienScientist] No dissolveRemote - skipping hit")
+            while (os.clock() - tStart) < DISSOLVE_TIMEOUT do
+                if not (monster and monster.Parent) then
                     break
                 end
+                pcall(zeroEnemyHealth, monster)
 
-                -- Check dead (4 เงื่อนไข: parent removed, attribute, Humanoid recursive)
-                local isDead = false
-                if not monster.Parent or monster.Parent == game.ReplicatedStorage then
-                    isDead = true
-                end
-                if monster:GetAttribute("Dead") == true then isDead = true end
-                if monster:GetAttribute("Health") == 0 then isDead = true end
-                local hum = monster:FindFirstChildOfClass("Humanoid")
-                    or monster:FindFirstChildWhichIsA("Humanoid", true)
-                if hum and hum.Health <= 0 then isDead = true end
-
-                if isDead then
+                if dissolveRemote then
+                    local fireOk, fireResult = pcall(function()
+                        return dissolveRemote:InvokeServer(monster)
+                    end)
+                    if fireOk then
+                        -- เช็คจาก server response: Success=true → dissolve สำเร็จ
+                        if type(fireResult) == "table" and fireResult.Success == true then
+                            break
+                        end
+                    else
+                        warn(string.format("[AlienScientist] InvokeServer error: %s", tostring(fireResult)))
+                    end
+                else
+                    warn("[AlienScientist] No dissolveRemote - skipping hit")
                     break
                 end
 
