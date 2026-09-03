@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 8.22")
+print("Version 1.2.5 / 8.35")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4001,7 +4001,8 @@ local function alienScientistNightLoop()
     -- ต้อง hook ก่อนเริ่ม loop เพราะ return หลายจุด
 
     local lastLoggedState, wasNight = nil, false
-    local MAX_HITS_PER_TARGET = 1
+    local DISSOLVE_TIMEOUT = 3       -- วินาที — ถ้าเกินนี้ monster ยังไม่หาย → skip
+    local HIT_INTERVAL = 0.2         -- วินาที — ระยะห่างระหว่าง dissolve แต่ละรอบ
 
     -- Pre-flight checks (warn only, don't abort - inventory may fill later)
     if not dissolveRay then
@@ -4139,6 +4140,14 @@ local function alienScientistNightLoop()
                 return
             end
 
+            -- Skip Bunny / Bee / Cultist* (ไม่ dissolve — ไม่ใช่เป้าหมาย)
+            local skipDissolve = (monster.Name == "Bunny")
+                or (monster.Name == "Bee")
+                or string.find(monster.Name, "Cultist", 1, true)
+            if skipDissolve then
+                continue
+            end
+
             if not (monster and monster.Parent) then
                 continue
             end
@@ -4173,6 +4182,13 @@ local function alienScientistNightLoop()
             -- วาร์ปเหนือมอน 20 studs (airHeight)
             hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
+            -- Update floating target ทันที (กัน Player เด้งกลับจุดเดิมระหว่าง follow thread update)
+            if floatAP then
+                floatAP.Position = hrp.Position
+            end
+            if floatAO then
+                floatAO.CFrame = hrp.CFrame
+            end
             task.wait(0.2)
 
             -- Quest check ก่อน hit (early exit ถ้า quest done)
@@ -4183,16 +4199,35 @@ local function alienScientistNightLoop()
                 return
             end
 
-            -- Hit 1 ครั้ง: zero HP + รอ 1s + fire dissolve → ไปตัวถัดไปทันที
-            pcall(zeroEnemyHealth, monster)
-            task.wait(1)
+            -- Dissolve loop: zero HP + fire ทุก 0.2s จนกว่า monster จะหาย หรือเกิน 3 วินาที
+            local tStart = os.clock()
+            while monster and monster.Parent and (os.clock() - tStart) < DISSOLVE_TIMEOUT do
+                pcall(zeroEnemyHealth, monster)
+                if dissolveRemote then
+                    pcall(function()
+                        dissolveRemote:InvokeServer(monster)
+                    end)
+                else
+                    warn("[AlienScientist] No dissolveRemote - skipping hit")
+                    break
+                end
 
-            if dissolveRemote then
-                pcall(function()
-                    dissolveRemote:InvokeServer(monster)
-                end)
-            else
-                warn("[AlienScientist] No dissolveRemote - skipping hit")
+                -- Check dead (4 เงื่อนไข: parent removed, attribute, Humanoid recursive)
+                local isDead = false
+                if not monster.Parent or monster.Parent == game.ReplicatedStorage then
+                    isDead = true
+                end
+                if monster:GetAttribute("Dead") == true then isDead = true end
+                if monster:GetAttribute("Health") == 0 then isDead = true end
+                local hum = monster:FindFirstChildOfClass("Humanoid")
+                    or monster:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Health <= 0 then isDead = true end
+
+                if isDead then
+                    break
+                end
+
+                task.wait(HIT_INTERVAL)
             end
         end
         task.wait(1)
