@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 7.20")
+print("Version 1.2.5 / 7.27")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1962,8 +1962,10 @@ local dissolveRay = LocalPlayer.Inventory
 local isAlienScientist = currentClass == "Alien Scientist"
 
 -- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
+-- หมายเหตุ: Client.Events ใน DissolveRay เป็น **table** จาก require() ไม่ใช่ Instance
+-- ดังนั้นใช้ key access ตรง ๆ ไม่ใช่ :FindFirstChild
 local dissolveRemote = Client.Events
-    and Client.Events:FindFirstChild("RequestDissolveEnemy")
+    and Client.Events.RequestDissolveEnemy
 
 -- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
 local function isAlienScientistAllQuestDone()
