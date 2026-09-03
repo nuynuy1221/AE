@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 9.42")
+print("Version 1.2.5")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3662,69 +3662,7 @@ local function vampireNightLoop()
     end
 
     while isVampire do
-        -- Pre-check 1: Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ครบ?
-        local allOk, allErr = pcall(isVampireAllQuestDone)
-        if not allOk then
-            warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(allErr)))
-            task.wait(1)
-            continue
-        end
-        if allErr then -- pcall: ok, result = allOk, allErr
-        end
-        local ok1, result1 = pcall(isVampireAllQuestDone)
-        if ok1 and result1 then
-            -- Quest เสร็จ → print แค่ครั้งเดียว แล้ววาร์ปกลับ
-            print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
-                (classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0),
-                (CLASS_QUESTS["Vampire"]
-                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
-                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].LifestealHealing or 0),
-                (classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0),
-                (CLASS_QUESTS["Vampire"]
-                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
-                    and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].DealDamage or 0)))
-            local restoreOk, restoreErr = pcall(restoreHP)
-            if not restoreOk then
-                warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
-            end
-            disableFloating()  -- ลบ Align ก่อนออก
-
-            -- วาร์ปกลับ Stronghold ซ้ำๆ 3 ครั้ง (รวม ~2.4 วิ)
-            local hrpEnd = LocalPlayer.Character
-                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrpEnd then
-                local returnPos = finalGateBasePos or hrpEnd.Position
-                for i = 1, 3 do
-                    hrpEnd.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
-                        * CFrame.Angles(math.rad(-90), 0, 0)
-                    task.wait(0.8)
-                end
-            end
-            break
-        end
-        -- Quest ยังไม่เสร็จ → print บอก progress + เวลา (ทุกครั้งที่เข้า loop)
-        local lvlNow = LocalPlayer:GetAttribute("ClassLevel") or 1
-        local reqsNow = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvlNow + 1]
-        local lhNow = classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0
-        local ddNow = classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0
-        local lhGoalNow = (reqsNow and reqsNow.LifestealHealing) or 0
-        local ddGoalNow = (reqsNow and reqsNow.DealDamage) or 0
-        print(string.format("[Vampire] Quest: Lifesteal %d/%d, DealDamage %d/%d (ClassLevel=%d)",
-            lhNow, lhGoalNow, ddNow, ddGoalNow, lvlNow))
-
-        -- Pre-check 2: Stronghold เปิด?
-        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
-        if not cultistOk then
-            warn(string.format("[Vampire] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
-            task.wait(1)
-            continue
-        end
-        if cultistResult then
-            print("[Vampire] Stronghold opened (Cultist found), pausing NightLoop for Stronghold")
-            return  -- ออกจาก NightLoop — flow หลักจะทำ Stronghold แล้วเรียก NightLoop ใหม่
-        end
-
-        -- Pre-check 3: State == "Night"?
+        -- ===== State check (Daytime vs Night) — ไม่ break เมื่อ Daytime, ให้ loop ทำงานต่อ =====
         local currentState
         local stateOk, stateErr = pcall(function()
             currentState = workspace:GetAttribute("State")
@@ -3732,15 +3670,11 @@ local function vampireNightLoop()
         if not stateOk then
             warn(string.format("[Vampire] Failed to read workspace:GetAttribute('State'): %s", tostring(stateErr)))
             task.wait(1)
-            continue
-        end
-        if currentState == nil then
+        elseif currentState == nil then
             warn("[Vampire] workspace:GetAttribute('State') returned nil - game may not be initialized, waiting...")
             task.wait(1)
-            continue
-        end
-        if currentState ~= "Night" then
-            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → วาร์ปกลับ + รอ Night ถัดไป
+        elseif currentState ~= "Night" then
+            -- DAYTIME: วาร์ปกลับ + รอ Night ถัดไป (loop tick ใหม่)
             if wasNight then
                 disableFloating()
                 -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos) ซ้ำ 3 ครั้ง
@@ -3755,26 +3689,83 @@ local function vampireNightLoop()
                     end
                 end
                 wasNight = false
-                goto continue
             end
             -- print เฉพาะตอน state เปลี่ยน
             if lastLoggedState ~= currentState then
                 print(string.format("[Vampire] Waiting for night (State: %s)", tostring(currentState)))
                 lastLoggedState = currentState
             end
-            task.wait(1)
-            goto continue
+            task.wait(5)
+        else
+            -- ===== NIGHT: pre-checks + main work =====
+            wasNight = true
+            if lastLoggedState ~= "Night" then
+                print("[Vampire] State changed to Night")
+                lastLoggedState = "Night"
+            end
+
+            -- Pre-check 1: Quest ทั้ง 2 stat ครบ? → return (exit)
+            local ok1, result1 = pcall(isVampireAllQuestDone)
+            if not ok1 then
+                warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(result1)))
+            elseif result1 then
+                print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
+                    (classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0),
+                    (CLASS_QUESTS["Vampire"]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].LifestealHealing or 0),
+                    (classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0),
+                    (CLASS_QUESTS["Vampire"]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].DealDamage or 0)))
+                local restoreOk, restoreErr = pcall(restoreHP)
+                if not restoreOk then
+                    warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
+                end
+                disableFloating()
+                local hrpEnd = LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrpEnd then
+                    local returnPos = finalGateBasePos or hrpEnd.Position
+                    for i = 1, 3 do
+                        hrpEnd.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait(0.8)
+                    end
+                end
+                return
+            end
+
+            -- Quest ยังไม่เสร็จ → print progress
+            local lvlNow = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqsNow = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvlNow + 1]
+            local lhNow = classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0
+            local ddNow = classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0
+            local lhGoalNow = (reqsNow and reqsNow.LifestealHealing) or 0
+            local ddGoalNow = (reqsNow and reqsNow.DealDamage) or 0
+            print(string.format("[Vampire] Quest: Lifesteal %d/%d, DealDamage %d/%d (ClassLevel=%d)",
+                lhNow, lhGoalNow, ddNow, ddGoalNow, lvlNow))
+
+            -- Pre-check 2: Stronghold เปิด? → return (main flow handle)
+            local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+            if not cultistOk then
+                warn(string.format("[Vampire] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            elseif cultistResult then
+                print("[Vampire] Stronghold opened (Cultist found), pausing NightLoop for Stronghold")
+                disableFloating()
+                return
+            end
+
+            print("[Vampire] State=Night, scanning for monsters")
         end
-        wasNight = true  -- เริ่มเป็น Night
-        if lastLoggedState ~= "Night" then
-            print("[Vampire] State changed to Night")
-            lastLoggedState = "Night"
+        -- ===== end state check =====
+
+        -- ถ้าไม่ใช่ Night → ข้าม main work (กลับไปเช็ค state ใหม่)
+        if currentState ~= "Night" then
+            continue
         end
-        if lastLoggedState ~= "Night" then
-            print("[Vampire] State changed to Night")
-            lastLoggedState = "Night"
-        end
-        print("[Vampire] State=Night, scanning for monsters")
+
+        -- ===== Main work: หา Monster =====
 
         -- หา Monster ที่ไม่ใช่ Cultist
         local monsters
@@ -3911,7 +3902,6 @@ local function vampireNightLoop()
 
         -- (quiet - ไม่ print "Finished this batch")
         task.wait(1)
-        ::continue::
     end
 
     -- วาร์ปกลับ combatCenter
@@ -4029,68 +4019,68 @@ local function alienScientistNightLoop()
     end
 
     while true do
-        -- Pre-check 1: Quest done?
-        local questOk, questResult = pcall(isAlienScientistAllQuestDone)
-        if not questOk then
-            warn(string.format("[AlienScientist] isAlienScientistAllQuestDone() error: %s", tostring(questResult)))
-            task.wait(1)
-            continue
-        end
-        if questResult then
-            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-            local reqs = CLASS_QUESTS["Alien Scientist"] and CLASS_QUESTS["Alien Scientist"][lvl + 1]
-            local goal = (reqs and reqs.Dissolves) or 0
-            local have = classStatCache["Alien Scientist"]
-                and classStatCache["Alien Scientist"]["Dissolves"] or 0
-            print(string.format("[AlienScientist] Quest done: Dissolves %d/%d", have, goal))
-            disableFloating()
-            warpBackToStronghold()
-            break
-        end
-
-        -- Pre-check 2: Cultist spawned? → return เพื่อให้ main flow ทำ Stronghold
-        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
-        if not cultistOk then
-            warn(string.format("[AlienScientist] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
-            task.wait(1)
-            continue
-        end
-        if cultistResult then
-            print("[AlienScientist] Stronghold opened, pausing NightLoop")
-            disableFloating()
-            return
-        end
-
-        -- Pre-check 3: State == "Night"?
+        -- ===== State check (Daytime vs Night) — ไม่ break เมื่อ Daytime, ให้ loop ทำงานต่อ =====
         local stateOk, currentState = pcall(function()
             return workspace:GetAttribute("State")
         end)
         if not stateOk then
             warn(string.format("[AlienScientist] State read error: %s", tostring(currentState)))
             task.wait(1)
-            continue
-        end
-        if currentState ~= "Night" then
-            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → วาร์ปกลับ + รอ Night ถัดไป
+        elseif currentState ~= "Night" then
+            -- DAYTIME: วาร์ปกลับ + รอ Night ถัดไป (loop tick ใหม่)
             if wasNight then
                 print("[AlienScientist] Daytime arrived, warping back + waiting for next night")
                 disableFloating()
                 warpBackToStronghold()
                 wasNight = false
-                goto continue
             end
             if lastLoggedState ~= currentState then
                 print(string.format("[AlienScientist] Waiting for night (State: %s)", tostring(currentState)))
                 lastLoggedState = currentState
             end
-            task.wait(1)
-            goto continue
+            task.wait(5)
+        else
+            -- ===== NIGHT: pre-checks + main work =====
+            wasNight = true
+            if lastLoggedState ~= "Night" then
+                print("[AlienScientist] State=Night")
+                lastLoggedState = "Night"
+            end
+
+            -- Pre-check 1: Quest done? → return (exit)
+            local questOk, questResult = pcall(isAlienScientistAllQuestDone)
+            if not questOk then
+                warn(string.format("[AlienScientist] isAlienScientistAllQuestDone() error: %s", tostring(questResult)))
+            elseif questResult then
+                local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                local reqs = CLASS_QUESTS["Alien Scientist"] and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+                local goal = (reqs and reqs.Dissolves) or 0
+                local have = classStatCache["Alien Scientist"]
+                    and classStatCache["Alien Scientist"]["Dissolves"] or 0
+                print(string.format("[AlienScientist] Quest done: Dissolves %d/%d", have, goal))
+                disableFloating()
+                warpBackToStronghold()
+                return
+            end
+
+            -- Pre-check 2: Cultist spawned? → return (main flow handle)
+            local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+            if not cultistOk then
+                warn(string.format("[AlienScientist] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            elseif cultistResult then
+                print("[AlienScientist] Stronghold opened, pausing NightLoop")
+                disableFloating()
+                return
+            end
         end
-        wasNight = true
-        if lastLoggedState ~= "Night" then
-            print("[AlienScientist] State=Night")
-            lastLoggedState = "Night"
+        -- ===== end state check =====
+
+        -- ถ้าไม่ใช่ Night → ข้าม main work (กลับไปเช็ค state ใหม่)
+        if currentState ~= "Night" then
+            continue
         end
+
+        -- ===== Main work: หา Monster =====
 
         -- หา Monster
         local monsters
@@ -4235,7 +4225,6 @@ local function alienScientistNightLoop()
             end
         end
         task.wait(1)
-        ::continue::
     end
 
     disableFloating()  -- safety: cleanup ก่อนจบ function
