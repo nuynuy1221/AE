@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5")
+print("Version 1.2.5 / 7.20")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3929,6 +3929,75 @@ local function alienScientistNightLoop()
     if not isAlienScientist then return end
     print("[AlienScientist] Night loop started")
 
+    -- Floating helpers (duplicate จาก vampireNightLoop เพื่อกัน regression)
+    -- ใช้ AlignPosition + AlignOrientation ลอยค้างเหนือมอน ป้องกันตัวตกพื้นระหว่างยิง Dissolve Ray
+    local floatAP = nil  -- AlignPosition
+    local floatAO = nil  -- AlignOrientation
+    local followThread = nil  -- task.spawn อัปเดต Position
+    local function ensureFloating()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
+
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 5000
+            floatAP.Responsiveness = 50
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
+
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
+    end
+    local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
+    end
+
+    -- Cleanup floating เมื่อออกจาก function (ทุก exit path)
+    -- ต้อง hook ก่อนเริ่ม loop เพราะ return หลายจุด
+
     local lastLoggedState, wasNight = nil, false
     local MAX_HITS_PER_TARGET = 3
 
@@ -3968,6 +4037,7 @@ local function alienScientistNightLoop()
             local have = classStatCache["Alien Scientist"]
                 and classStatCache["Alien Scientist"]["Dissolves"] or 0
             print(string.format("[AlienScientist] Quest done: Dissolves %d/%d", have, goal))
+            disableFloating()
             warpBackToStronghold()
             break
         end
@@ -3981,6 +4051,7 @@ local function alienScientistNightLoop()
         end
         if cultistResult then
             print("[AlienScientist] Stronghold opened, pausing NightLoop")
+            disableFloating()
             return
         end
 
@@ -3997,6 +4068,7 @@ local function alienScientistNightLoop()
             -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิก + วาร์ปกลับ
             if wasNight then
                 print("[AlienScientist] Daytime arrived, ending NightLoop")
+                disableFloating()
                 warpBackToStronghold()
                 break
             end
@@ -4039,6 +4111,9 @@ local function alienScientistNightLoop()
                 warn("[AlienScientist] No HumanoidRootPart - cannot warp, breaking")
                 break
             end
+
+            -- ลอยตัวค้างเหนือมอน (AlignPosition+AlignOrientation) ป้องกันตกพื้นระหว่างยิง
+            ensureFloating()
 
             -- equip Dissolve Ray (async) + รอ tool เข้ามือ (≤ 3s)
             if dissolveRay then
@@ -4093,6 +4168,7 @@ local function alienScientistNightLoop()
                 local midOk, midDone = pcall(isAlienScientistAllQuestDone)
                 if midOk and midDone then
                     print("[AlienScientist] Quest done mid-loop, exiting")
+                    disableFloating()
                     return
                 end
 
@@ -4120,6 +4196,7 @@ local function alienScientistNightLoop()
         task.wait(1)
     end
 
+    disableFloating()  -- safety: cleanup ก่อนจบ function
     print("[AlienScientist] Night loop ended")
 end
 
