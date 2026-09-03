@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 8.35")
+print("Version 1.2.5 / 8.43")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4198,6 +4198,9 @@ local function alienScientistNightLoop()
                 warpBackToStronghold()
                 return
             end
+
+            -- รอ 1 วิก่อนเริ่ม dissolve (ให้ Player settle หลัง warp)
+            task.wait(1)
 
             -- Dissolve loop: zero HP + fire ทุก 0.2s จนกว่า monster จะหาย หรือเกิน 3 วินาที
             local tStart = os.clock()
