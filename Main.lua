@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 8.07")
+print("Version 1.2.5 / 8.13")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4102,9 +4102,12 @@ local function alienScientistNightLoop()
             continue
         end
 
-        -- ตีทีละตัว: equip Dissolve Ray + warp เหนือ + hit สูงสุด 3 ครั้ง
+        -- ตีทีละตัว: equip Dissolve Ray + warp เหนือ + hit 1 ครั้ง
+        print(string.format("[AlienScientist] Found %d monster(s) to dissolve", #monsters))
         for monsterIdx, monster in ipairs(monsters) do
             if not (monster and monster.Parent) then
+                print(string.format("[AlienScientist] [%d/%d] Monster already gone, skip",
+                    monsterIdx, #monsters))
                 continue
             end
             local hrp = LocalPlayer.Character
@@ -4114,23 +4117,38 @@ local function alienScientistNightLoop()
                 break
             end
 
+            print(string.format("[AlienScientist] [%d/%d] Targeting: %s",
+                monsterIdx, #monsters, monster.Name))
+
             -- ลอยตัวค้างเหนือมอน (AlignPosition+AlignOrientation) ป้องกันตกพื้นระหว่างยิง
             ensureFloating()
+            print("[AlienScientist] Floating enabled")
 
             -- equip Dissolve Ray (async) + รอ tool เข้ามือ (≤ 3s)
             if dissolveRay then
                 pcall(function()
                     Client.InventoryHandler.RequestEquipItem(dissolveRay)
                 end)
+                print("[AlienScientist] Requested equip Dissolve Ray, waiting for tool...")
                 local tStart = os.clock()
+                local equipped = false
                 while (os.clock() - tStart) < 3 do
                     local char = LocalPlayer.Character
                     local equippedTool = char and char:FindFirstChildOfClass("Tool")
                     if equippedTool and equippedTool.Name == "Dissolve Ray" then
+                        equipped = true
                         break
                     end
                     task.wait(0.1)
                 end
+                if equipped then
+                    print(string.format("[AlienScientist] Tool equipped in %.2fs",
+                        os.clock() - tStart))
+                else
+                    warn("[AlienScientist] Tool equip timeout (3s) - continuing anyway")
+                end
+            else
+                warn("[AlienScientist] dissolveRay is nil - cannot equip")
             end
 
             local root = monster:FindFirstChild("HumanoidRootPart")
@@ -4144,27 +4162,49 @@ local function alienScientistNightLoop()
             -- วาร์ปเหนือมอน 20 studs (airHeight)
             hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
                 * CFrame.Angles(math.rad(-90), 0, 0)
+            print(string.format("[AlienScientist] Warped to (%.1f, %.1f, %.1f)",
+                hrp.Position.X, hrp.Position.Y, hrp.Position.Z))
             task.wait(0.2)
 
             -- Quest check ก่อน hit (early exit ถ้า quest done)
             local midOk, midDone = pcall(isAlienScientistAllQuestDone)
             if midOk and midDone then
-                print("[AlienScientist] Quest done, exiting")
+                local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                local reqs = CLASS_QUESTS["Alien Scientist"]
+                    and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+                local goal = (reqs and reqs.Dissolves) or 0
+                local have = classStatCache["Alien Scientist"]
+                    and classStatCache["Alien Scientist"]["Dissolves"] or 0
+                print(string.format("[AlienScientist] Quest done: Dissolves %d/%d - exiting",
+                    have, goal))
                 disableFloating()
                 warpBackToStronghold()
                 return
             end
 
             -- Hit 1 ครั้ง: zero HP + รอ 1s + fire dissolve → ไปตัวถัดไปทันที
+            print(string.format("[AlienScientist] [%d/%d] Zeroing HP for %s",
+                monsterIdx, #monsters, monster.Name))
             pcall(zeroEnemyHealth, monster)
+            print("[AlienScientist] HP zeroed, waiting 1s before dissolve...")
             task.wait(1)
+
             if dissolveRemote then
-                pcall(function()
+                local fireOk, fireErr = pcall(function()
                     dissolveRemote:InvokeServer(monster)
                 end)
+                if fireOk then
+                    print(string.format("[AlienScientist] [%d/%d] Dissolve fired for %s",
+                        monsterIdx, #monsters, monster.Name))
+                else
+                    warn(string.format("[AlienScientist] [%d/%d] InvokeServer error: %s",
+                        monsterIdx, #monsters, tostring(fireErr)))
+                end
             else
                 warn("[AlienScientist] No dissolveRemote - skipping hit")
             end
+            print(string.format("[AlienScientist] [%d/%d] Moving to next",
+                monsterIdx, #monsters))
         end
         task.wait(1)
     end
