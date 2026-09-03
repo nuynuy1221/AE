@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5 / 8.51")
+print("Version 1.2.5")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2090,6 +2090,7 @@ local CRAFTING_BENCH_ITEMS = {
     ["Bolt"] = true,
     ["Broken Fan"] = true,
     ["Broken Microwave"] = true,
+    ["Log"] = true,
     ["Old Radio"] = true,
     ["Sheet Metal"] = true,
     ["Chair"] = true,
@@ -2399,7 +2400,7 @@ local function flyAndWarpItems()
 
             for _, item in ipairs(workspace.Items:GetChildren()) do
                 if not warpedItems[item] and item.Name ~= "Sapling" then
-                    if CRAFTING_BENCH_ITEMS[item.Name] or item.Name == "Log" then
+                    if CRAFTING_BENCH_ITEMS[item.Name] then
                         local tz = getCraftingTouchZone()
                         local tzPos = tz and tz:IsA("BasePart") and tz.Position
                             or (tz and tz:IsA("Model") and tz:GetPivot().Position)
@@ -2755,7 +2756,7 @@ if getTotalWood() < NEED_WOOD then
         -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ
         if craftPos then
             for _, item in ipairs(workspace.Items:GetChildren()) do
-                if item.Name == "Log" and not warpedItems[item] then
+                if CRAFTING_BENCH_ITEMS[item.Name] and not warpedItems[item] then
                     warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
                 end
             end
@@ -3739,7 +3740,7 @@ local function vampireNightLoop()
             continue
         end
         if currentState ~= "Night" then
-            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิกทันที + วาร์ปกลับ Stronghold
+            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → วาร์ปกลับ + รอ Night ถัดไป
             if wasNight then
                 disableFloating()
                 -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos) ซ้ำ 3 ครั้ง
@@ -3753,7 +3754,8 @@ local function vampireNightLoop()
                         task.wait(0.8)
                     end
                 end
-                break
+                wasNight = false
+                goto continue
             end
             -- print เฉพาะตอน state เปลี่ยน
             if lastLoggedState ~= currentState then
@@ -3761,7 +3763,7 @@ local function vampireNightLoop()
                 lastLoggedState = currentState
             end
             task.wait(1)
-            continue
+            goto continue
         end
         wasNight = true  -- เริ่มเป็น Night
         if lastLoggedState ~= "Night" then
@@ -3909,6 +3911,7 @@ local function vampireNightLoop()
 
         -- (quiet - ไม่ print "Finished this batch")
         task.wait(1)
+        ::continue::
     end
 
     -- วาร์ปกลับ combatCenter
@@ -4068,19 +4071,20 @@ local function alienScientistNightLoop()
             continue
         end
         if currentState ~= "Night" then
-            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิก + วาร์ปกลับ
+            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → วาร์ปกลับ + รอ Night ถัดไป
             if wasNight then
-                print("[AlienScientist] Daytime arrived, ending NightLoop")
+                print("[AlienScientist] Daytime arrived, warping back + waiting for next night")
                 disableFloating()
                 warpBackToStronghold()
-                break
+                wasNight = false
+                goto continue
             end
             if lastLoggedState ~= currentState then
                 print(string.format("[AlienScientist] Waiting for night (State: %s)", tostring(currentState)))
                 lastLoggedState = currentState
             end
             task.wait(1)
-            continue
+            goto continue
         end
         wasNight = true
         if lastLoggedState ~= "Night" then
@@ -4231,6 +4235,7 @@ local function alienScientistNightLoop()
             end
         end
         task.wait(1)
+        ::continue::
     end
 
     disableFloating()  -- safety: cleanup ก่อนจบ function
@@ -4834,8 +4839,15 @@ while completedRounds < TOTAL_ROUNDS do
     completedRounds += 1
 
     -- เช็ค quest ของ class ที่ equip อยู่ ถ้าครบตาม level → ตั้ง flag (รอจบ loop + เก็บเพชรก่อน)
-    if Config.UpgradeClass and Config.UpgradeClass[1] and not questReadyToLeave then
-        local mainClass = Config.UpgradeClass[1]
+    if Config.UpgradeClass and #Config.UpgradeClass > 0 and not questReadyToLeave then
+        local equippedClass = LocalPlayer:GetAttribute("Class")
+        -- ตรวจเฉพาะ class ที่ equip อยู่ และอยู่ใน UpgradeClass list
+        local mainClass = nil
+        if equippedClass and table.find(Config.UpgradeClass, equippedClass) then
+            mainClass = equippedClass
+        else
+            mainClass = Config.UpgradeClass[1]
+        end
         local isLobby = game.PlaceId == 79546208627805
 
         -- ใน Lobby: ใช้ ClassProgress folder (อ่านจาก attribute ของ folder - แม่นยำ)
