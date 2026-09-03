@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.4 / 11.02")
+print("Version 1.2.5")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -53,71 +53,86 @@ local function CheckGoals()
     local upgradeGoal = Config.UpgradeClass and #Config.UpgradeClass > 0
     local isLobby = game.PlaceId == 79546208627805
 
-    -- Check real-time diamonds from game
-    local diamondsMet = true
-    if diamondsGoal then
-        local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-        diamondsMet = currentDiamonds >= Config.Diamonds
+    local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    local diamondsMet = (not diamondsGoal) or (currentDiamonds >= Config.Diamonds)
+
+    -- ใน Lobby: เช็ค Class ได้ (BuyClass + UpgradeClass)
+    -- ในแมพฟาร์ม: เช็ค Diamonds ได้อย่างเดียว (Class เช็คที่ Lobby)
+    if not isLobby then
+        -- ในแมพฟาร์ม: เช็คเฉพาะ Diamonds
+        if diamondsMet then
+            if _G.Horst_AccountChangeDone then
+                _G.Horst_AccountChangeDone()
+            end
+            return true
+        end
+        return false
     end
 
-    -- Check real-time classes from game (only in Lobby)
+    -- ใน Lobby: เช็ค Diamonds + BuyClass + UpgradeClass
     local classesMet = true
-    if (classesGoal or upgradeGoal) and isLobby then
-        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
-        if ClassProgress then
-            -- Check BuyClass: ต้อง owned ครบทุกตัว
-            if classesGoal then
-                for _, className in ipairs(Config.BuyClass) do
-                    if not ClassProgress:FindFirstChild(className) then
-                        classesMet = false
-                        break
-                    end
-                end
-            end
-            -- Check UpgradeClass: ทุก class ใน list ต้องถึง Lv.3
-            -- (ถ้าไม่มี class ไหน Lv.3 สักตัว = ยังไม่达成 - เรียงตาม priority)
-            if upgradeGoal and classesMet then
-                local allAtMax = true
-                local anyValid = false
-                for _, clsName in ipairs(Config.UpgradeClass) do
-                    if type(clsName) == "string" then
-                        anyValid = true
-                        local folder = ClassProgress:FindFirstChild(clsName)
-                        if not folder then
-                            allAtMax = false
-                            break
-                        else
-                            local lvl = folder:GetAttribute("Level") or 1
-                            if lvl < 3 then
-                                allAtMax = false
-                                break
-                            end
-                        end
-                    end
-                end
-                if not anyValid or not allAtMax then
+    local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+
+    if classesGoal then
+        if not ClassProgress then
+            classesMet = false
+        else
+            for _, className in ipairs(Config.BuyClass) do
+                if not ClassProgress:FindFirstChild(className) then
                     classesMet = false
+                    break
                 end
             end
         end
     end
 
-    -- In farm map: ignore classes goal
-    if not isLobby and (classesGoal or upgradeGoal) then
-        return false
+    if upgradeGoal and classesMet then
+        if not ClassProgress then
+            classesMet = false
+        else
+            for _, clsName in ipairs(Config.UpgradeClass) do
+                if type(clsName) ~= "string" then continue end
+                local folder = ClassProgress:FindFirstChild(clsName)
+                if not folder then
+                    classesMet = false
+                    break
+                end
+                local lvl = folder:GetAttribute("Level") or 1
+                if lvl < 3 then
+                    classesMet = false
+                    break
+                end
+            end
+        end
     end
 
-    -- Send DONE only if all goals met
+    -- ส่ง DONE เมื่อ Diamonds + Classes (BuyClass + UpgradeClass) ครบ
     if diamondsMet and classesMet then
         if _G.Horst_AccountChangeDone then
             _G.Horst_AccountChangeDone()
         end
-        return true  -- Goals met
+        return true
     end
 
-    return false  -- Goals not met
+    return false
 end
 
+
+-- ============================================
+-- Force Teleport Lobby (เมื่อ Diamonds ถึงกำหนดในแมพฟาร์ม)
+-- ใช้สำหรับกรณี BuyClass + Diamonds (ต้องกลับ Lobby เช็ค Multi-Class)
+-- ============================================
+local function forceTeleportLobby()
+    local LOBBY_PLACE_ID = 79546208627805
+    print("[Teleport] Forcing teleport to Lobby (Diamonds met or Lv.3 reached)")
+    updateStatus("Teleporting to Lobby...")
+    task.wait(2)
+    pcall(function()
+        local TS = game:GetService("TeleportService")
+        TS:Teleport(LOBBY_PLACE_ID, LocalPlayer)
+    end)
+    task.wait(5)
+end
 
 -- ============================================
 -- Anti-AFK (prevent Roblox from kicking for inactivity)
@@ -1891,7 +1906,8 @@ local vampireScythe = LocalPlayer.Inventory
     and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
 local currentClass = LocalPlayer:GetAttribute("Class")
 local isVampire = currentClass == "Vampire"
-print(string.format("[Class] Using: %s", tostring(currentClass)))
+local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
+print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
 -- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
@@ -1935,6 +1951,29 @@ end
 -- เช็คทั้ง 2 stat ครบไหม (ใช้สำหรับ HP Watcher / keepMap / Stronghold flow)
 local function isVampireAllQuestDone()
     return isVampireLifestealDone() and isVampireDealDamageDone()
+end
+
+-- ============================================
+-- ALIEN SCIENTIST CLASS HELPERS
+-- ============================================
+-- Pre-load Dissolve Ray tool from Inventory
+local dissolveRay = LocalPlayer.Inventory
+    and LocalPlayer.Inventory:FindFirstChild("Dissolve Ray")
+local isAlienScientist = currentClass == "Alien Scientist"
+
+-- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
+local dissolveRemote = Client.Events
+    and Client.Events:FindFirstChild("RequestDissolveEnemy")
+
+-- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
+local function isAlienScientistAllQuestDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Alien Scientist"]
+        and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+    if not reqs or not reqs.Dissolves then return true end
+    local have = classStatCache["Alien Scientist"]
+        and classStatCache["Alien Scientist"]["Dissolves"] or 0
+    return have >= reqs.Dissolves
 end
 
 -- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
@@ -3450,7 +3489,9 @@ do
 
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
-    local keepMap = isVampire and not isVampireAllQuestDone()
+    -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
+    local keepMap = (isVampire and not isVampireAllQuestDone())
+        or (isAlienScientist and not isAlienScientistAllQuestDone())
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -3879,6 +3920,210 @@ local function vampireNightLoop()
 end
 
 -- ============================================
+-- ALIEN SCIENTIST NIGHT LOOP
+-- ฟาร์ม quest Dissolves: equip Dissolve Ray + zeroEnemyHealth + fire RequestDissolveEnemy
+-- MAX_HITS_PER_TARGET = 3 (ถ้ายังไม่ตาย → skip ไปตัวถัดไปทันที ไม่ retry ไม่ grace)
+-- Reuse: zeroEnemyHealth, findNightMonsters, checkAnyCultistSpawned, airHeight, finalGateBasePos
+-- ============================================
+local function alienScientistNightLoop()
+    if not isAlienScientist then return end
+    print("[AlienScientist] Night loop started")
+
+    local lastLoggedState, wasNight = nil, false
+    local MAX_HITS_PER_TARGET = 3
+
+    -- Pre-flight checks (warn only, don't abort - inventory may fill later)
+    if not dissolveRay then
+        warn("[AlienScientist] Dissolve Ray not found in Inventory")
+    end
+    if not dissolveRemote then
+        warn("[AlienScientist] RequestDissolveEnemy remote not resolved")
+    end
+
+    -- Helper: วาร์ปกลับ Stronghold (ใช้ตอนจบ loop / กลางวันมา)
+    local function warpBackToStronghold()
+        local hrp = LocalPlayer.Character
+            and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local returnPos = finalGateBasePos or hrp.Position
+        for _ = 1, 3 do
+            hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.8)
+        end
+    end
+
+    while true do
+        -- Pre-check 1: Quest done?
+        local questOk, questResult = pcall(isAlienScientistAllQuestDone)
+        if not questOk then
+            warn(string.format("[AlienScientist] isAlienScientistAllQuestDone() error: %s", tostring(questResult)))
+            task.wait(1)
+            continue
+        end
+        if questResult then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqs = CLASS_QUESTS["Alien Scientist"] and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+            local goal = (reqs and reqs.Dissolves) or 0
+            local have = classStatCache["Alien Scientist"]
+                and classStatCache["Alien Scientist"]["Dissolves"] or 0
+            print(string.format("[AlienScientist] Quest done: Dissolves %d/%d", have, goal))
+            warpBackToStronghold()
+            break
+        end
+
+        -- Pre-check 2: Cultist spawned? → return เพื่อให้ main flow ทำ Stronghold
+        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+        if not cultistOk then
+            warn(string.format("[AlienScientist] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            task.wait(1)
+            continue
+        end
+        if cultistResult then
+            print("[AlienScientist] Stronghold opened, pausing NightLoop")
+            return
+        end
+
+        -- Pre-check 3: State == "Night"?
+        local stateOk, currentState = pcall(function()
+            return workspace:GetAttribute("State")
+        end)
+        if not stateOk then
+            warn(string.format("[AlienScientist] State read error: %s", tostring(currentState)))
+            task.wait(1)
+            continue
+        end
+        if currentState ~= "Night" then
+            -- ถ้าเคยเป็น Night แล้ว (ตอนนี้ไม่ใช่ Night = กลางวันมา) → เลิก + วาร์ปกลับ
+            if wasNight then
+                print("[AlienScientist] Daytime arrived, ending NightLoop")
+                warpBackToStronghold()
+                break
+            end
+            if lastLoggedState ~= currentState then
+                print(string.format("[AlienScientist] Waiting for night (State: %s)", tostring(currentState)))
+                lastLoggedState = currentState
+            end
+            task.wait(1)
+            continue
+        end
+        wasNight = true
+        if lastLoggedState ~= "Night" then
+            print("[AlienScientist] State=Night")
+            lastLoggedState = "Night"
+        end
+
+        -- หา Monster
+        local monsters
+        local findOk, findResult = pcall(findNightMonsters)
+        if not findOk then
+            warn(string.format("[AlienScientist] findNightMonsters() error: %s", tostring(findResult)))
+            task.wait(1)
+            continue
+        end
+        monsters = findResult
+        if #monsters == 0 then
+            warn("[AlienScientist] No hittable monsters found - waiting 1s")
+            task.wait(1)
+            continue
+        end
+
+        -- ตีทีละตัว: equip Dissolve Ray + warp เหนือ + hit สูงสุด 3 ครั้ง
+        for monsterIdx, monster in ipairs(monsters) do
+            if not (monster and monster.Parent) then
+                continue
+            end
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                warn("[AlienScientist] No HumanoidRootPart - cannot warp, breaking")
+                break
+            end
+
+            -- equip Dissolve Ray (async) + รอ tool เข้ามือ (≤ 3s)
+            if dissolveRay then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(dissolveRay)
+                end)
+                local tStart = os.clock()
+                while (os.clock() - tStart) < 3 do
+                    local char = LocalPlayer.Character
+                    local equippedTool = char and char:FindFirstChildOfClass("Tool")
+                    if equippedTool and equippedTool.Name == "Dissolve Ray" then
+                        break
+                    end
+                    task.wait(0.1)
+                end
+            end
+
+            local root = monster:FindFirstChild("HumanoidRootPart")
+                or monster.PrimaryPart
+            if not root then
+                warn(string.format("[AlienScientist] [%d/%d] %s has no root, skipping",
+                    monsterIdx, #monsters, monster.Name))
+                continue
+            end
+
+            -- วาร์ปเหนือมอน 20 studs (airHeight)
+            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.2)
+
+            -- Hit loop: สูงสุด 3 ครั้ง → zero HP + fire dissolve remote
+            local hitCount = 0
+            while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
+                -- ลด HP มอนเหลือ 0 (ตาม spec)
+                pcall(zeroEnemyHealth, monster)
+
+                -- Fire dissolve remote
+                if dissolveRemote then
+                    local hitOk, hitErr = pcall(function()
+                        dissolveRemote:InvokeServer(monster)
+                    end)
+                    if not hitOk then
+                        warn(string.format("[AlienScientist] InvokeServer error on %s: %s",
+                            monster.Name, tostring(hitErr)))
+                    end
+                else
+                    warn("[AlienScientist] No dissolveRemote - skipping hit")
+                end
+                hitCount = hitCount + 1
+
+                -- Re-check quest (early exit)
+                local midOk, midDone = pcall(isAlienScientistAllQuestDone)
+                if midOk and midDone then
+                    print("[AlienScientist] Quest done mid-loop, exiting")
+                    return
+                end
+
+                -- Check dead
+                local npc = monster:FindFirstChild("NPC")
+                local isDead = false
+                if npc then
+                    if npc:GetAttribute("Dead") == true then isDead = true end
+                    if npc:IsA("Humanoid") and npc.Health <= 0 then isDead = true end
+                end
+                if isDead then
+                    break
+                end
+
+                -- ตีครบ MAX แต่ยังไม่ตาย → skip ไปตัวถัดไปทันที (ไม่ retry, ไม่ grace)
+                if hitCount >= MAX_HITS_PER_TARGET then
+                    warn(string.format("[AlienScientist] [%d/%d] %s survived %d hits, skipping to next",
+                        monsterIdx, #monsters, monster.Name, MAX_HITS_PER_TARGET))
+                    break
+                end
+
+                task.wait(0.2)
+            end
+        end
+        task.wait(1)
+    end
+
+    print("[AlienScientist] Night loop ended")
+end
+
+-- ============================================
 -- VAMPIRE HP WATCHER: ลด HP ตัวเองเหลือ 1 ตลอดเวลา
 -- ตราบเท่าที่ Quest LifestealHealing ยังไม่เสร็จ
 -- เมื่อครบแล้ว → เซ็ต HP กลับ 100 (ครั้งเดียว)
@@ -3904,9 +4149,12 @@ end
 
 -- ============================================
 -- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
+-- ALIEN SCIENTIST: เช่นเดียวกัน - ฟาร์ม Dissolves จนกว่า Cultist จะ spawn
 -- ============================================
 if isVampire and not isVampireAllQuestDone() then
     task.spawn(vampireNightLoop)
+elseif isAlienScientist and not isAlienScientistAllQuestDone() then
+    task.spawn(alienScientistNightLoop)
 end
 
 print("\n[Step 4] Waiting for Stronghold to open...")
@@ -4437,6 +4685,8 @@ if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "str
     end
 end
 
+local diamondsReadyToTeleport = false  -- flag: รอให้จบรอบ แล้ว Teleport
+
 while completedRounds < TOTAL_ROUNDS do
     print(string.format("\n[Step 6] Round %d/%d", completedRounds+1, TOTAL_ROUNDS))
     updateStatus(string.format("Round %d/%d - Fighting...", completedRounds+1, TOTAL_ROUNDS))
@@ -4683,6 +4933,36 @@ while completedRounds < TOTAL_ROUNDS do
     print(("[OK] Collected %d diamonds (round %d)"):format(collected, completedRounds))
     updateStatus(("✅ Collected %d Diamonds"):format(collected))
 
+    -- เช็คเงื่อนไข Teleport Lobby (Diamonds + Class Lv.3 ต้องครบทั้งคู่)
+    -- ถ้าตั้ง Diamonds > 0 + BuyClass + UpgradeClass → ต้องครบทั้ง Diamonds ถึง AND Class Lv.3
+    local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    local currentLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local hasBuy = Config.BuyClass and #Config.BuyClass > 0
+    local hasUpgrade = Config.UpgradeClass and #Config.UpgradeClass > 0
+    local hasDiamonds = Config.Diamonds and Config.Diamonds > 0
+
+    if hasBuy and hasUpgrade and hasDiamonds then
+        -- ต้องครบทั้ง Diamonds ถึง AND Class Lv.3
+        if currentDiamonds >= Config.Diamonds and currentLvl >= 3 then
+            print(string.format("[Teleport] Diamonds %d/%d + Class Lv.%d - teleport to Lobby",
+                currentDiamonds, Config.Diamonds, currentLvl))
+            diamondsReadyToTeleport = true
+        end
+    elseif hasBuy and hasUpgrade and not hasDiamonds then
+        -- ไม่ตั้ง Diamonds → แค่ Class Lv.3 ก็พอ
+        if currentLvl >= 3 then
+            print(string.format("[Teleport] Class Lv.%d - teleport to Lobby", currentLvl))
+            diamondsReadyToTeleport = true
+        end
+    elseif hasDiamonds and not hasBuy and not hasUpgrade then
+        -- แค่ Diamonds
+        if currentDiamonds >= Config.Diamonds then
+            print(string.format("[Teleport] Diamonds %d/%d - teleport to Lobby",
+                currentDiamonds, Config.Diamonds))
+            diamondsReadyToTeleport = true
+        end
+    end
+
     -- ถ้า quest พร้อมอัปแล้ว → ออกจาก Stronghold กลับ lobby (หลังเก็บเพชรเสร็จ)
     if questReadyToLeave then
         local mainClass = Config.UpgradeClass and Config.UpgradeClass[1] or "?"
@@ -4699,15 +4979,26 @@ while completedRounds < TOTAL_ROUNDS do
         return
     end
 
+    -- ถ้า Diamonds/Lv.3 ถึง → Teleport Lobby หลังจบรอบ
+    if diamondsReadyToTeleport then
+        forceTeleportLobby()
+        return
+    end
+
     -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
     if completedRounds < TOTAL_ROUNDS then
         -- VAMPIRE: ถ้า Quest Lifesteal ยังไม่เสร็จ → เริ่ม NightLoop ทำเรื่อยๆ จนกว่า Cultist จะ spawn
+        -- ALIEN SCIENTIST: เช่นเดียวกัน - ฟาร์ม Dissolves จนกว่า Cultist จะ spawn
         -- NightLoop จะหยุดเองเมื่อ checkAnyCultistSpawned() = true
         if isVampire and not isVampireAllQuestDone() then
             print("[Vampire] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             -- เริ่ม NightLoop — มันจะรอจนกว่า Cultist จะ spawn แล้ว return
             vampireNightLoop()
+        elseif isAlienScientist and not isAlienScientistAllQuestDone() then
+            print("[AlienScientist] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            alienScientistNightLoop()
         else
             -- ไม่ใช่ Vampire หรือ Quest ครบแล้ว → ใช้ logic เดิม
             print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
