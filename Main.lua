@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.5")
+print("Version 1.2.6")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1951,6 +1951,217 @@ end
 -- เช็คทั้ง 2 stat ครบไหม (ใช้สำหรับ HP Watcher / keepMap / Stronghold flow)
 local function isVampireAllQuestDone()
     return isVampireLifestealDone() and isVampireDealDamageDone()
+end
+
+-- ============================================
+-- BIG GAME HUNTER CLASS HELPERS
+-- ============================================
+-- (อ้างอิงจาก decompile ของ BigGameHunterClass module)
+-- ใช้ axe ตีมอนที่ดรอปของ BGH กินได้ (Wolf, Alpha Wolf, Bear, Polar Bear, Boar,
+--  Arctic Fox, Mammoth, Scorpion, Blue Frog, Bunny) — skip Cultist ทั้งหมด
+-- ถ้า WolfKills ยังไม่ครบ → ตีเฉพาะ "Wolf" ธรรมดาก่อน
+local isBigGameHunter = currentClass == "Big Game Hunter"
+
+-- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
+local BGH_MONSTER_PRIORITY = {
+    "Wolf", "Scorpion", "Alpha Wolf", "Mammoth", "Bear",
+    "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
+}
+local BGH_PRIORITY_INDEX = {}
+for i, n in ipairs(BGH_MONSTER_PRIORITY) do
+    BGH_PRIORITY_INDEX[n] = i
+end
+
+-- Pelt names ที่ BigGameHunterClass กินได้ (จาก decompile u19)
+local BGH_PELT_ITEMS = {
+    ["Bunny Foot"] = true,
+    ["Wolf Pelt"] = true,
+    ["Arctic Fox Pelt"] = true,
+    ["Alpha Wolf Pelt"] = true,
+    ["Bear Pelt"] = true,
+    ["Mammoth Tusk"] = true,
+    ["Polar Bear Pelt"] = true,
+    ["Scorpion Shell"] = true,
+    ["Boar Tusk"] = true,
+    ["Blue Frog Leg"] = true,
+}
+-- Skip Cultist King Antler (user: "ไม่สนใจมัน")
+local BGH_PELT_SKIP = {
+    ["Cultist King Antler"] = true,
+}
+
+-- เช็ค Quest ConsumePelt + WolfKills ครบทั้งคู่ (Lv ถัดไป)
+local function isBigGameHunterAllQuestDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Big Game Hunter"]
+        and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+    if not reqs then return true end
+    local have_consume = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+    local have_wolves = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+    return have_consume >= (reqs.ConsumePelt or 0)
+        and have_wolves >= (reqs.WolfKills or 0)
+end
+
+-- เช็ค quest WolfKills ของ Lv ถัดไป (ใช้สำหรับ Wolf-only gate)
+local function isWolfKillsQuestDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Big Game Hunter"]
+        and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+    if not reqs or not reqs.WolfKills then return true end
+    local have = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+    return have >= reqs.WolfKills
+end
+
+-- BGH-specific monster finder:
+-- - skip "Cultist*" (ใช้ shouldSkipName เดิม)
+-- - skip StrongholdEnemy
+-- - **ไม่ skip HP > 100** (BGH ตี Mammoth/Bear/Polar Bear ได้)
+-- - **ไม่ skip** Friendly/Pet/Ally (BGH ตีได้ทุกอย่างที่ดรอปของได้)
+-- - WolfKills gate: ถ้ายังไม่ครบ → คืน Wolf ธรรมดาก่อนตัวเดียว
+-- - เรียงตาม BGH_MONSTER_PRIORITY (Wolf = 1, Bunny = 10)
+local function findBGHMonsters()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+
+    local wolfOnlyMode = not isWolfKillsQuestDone()
+
+    for _, model in ipairs(chars:GetChildren()) do
+        if not shouldSkipName(model.Name) then
+            if model:GetAttribute("StrongholdEnemy") ~= true then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                    or model:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Parent and hum.Health > 0 then
+                    if BGH_PRIORITY_INDEX[model.Name] then
+                        if wolfOnlyMode then
+                            if model.Name == "Wolf" then
+                                table.insert(list, model)
+                            end
+                        else
+                            table.insert(list, model)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not wolfOnlyMode then
+        table.sort(list, function(a, b)
+            return (BGH_PRIORITY_INDEX[a.Name] or 999) < (BGH_PRIORITY_INDEX[b.Name] or 999)
+        end)
+    end
+    return list
+end
+
+-- กิน pelt ตัวเดียว (pattern เดียวกับ decompile AttemptConsumePelt)
+local function consumeBGHPelt(peltModel)
+    if not (peltModel and peltModel.Parent) then return false end
+    local name = peltModel.Name
+    if not BGH_PELT_ITEMS[name] or BGH_PELT_SKIP[name] then return false end
+    local parent = peltModel.Parent
+    pcall(function() peltModel.Parent = ReplicatedStorage.TempStorage end)
+    pcall(function()
+        Client.Events.RequestBGHConsumePelt:FireServer(peltModel)
+    end)
+    return true
+end
+
+-- หา pelt ใกล้ origin ที่กินได้
+local function findBGHPelts(origin, radius)
+    local found = {}
+    radius = radius or 50
+    pcall(function()
+        local items = workspace:FindFirstChild("Items")
+        if not items then return end
+        for _, item in ipairs(items:GetChildren()) do
+            if BGH_PELT_ITEMS[item.Name] and not BGH_PELT_SKIP[item.Name] then
+                local pos
+                if item:IsA("Model") then
+                    pos = item.PrimaryPart and item.PrimaryPart.Position or item:GetPivot().Position
+                elseif item:IsA("BasePart") then
+                    pos = item.Position
+                end
+                if pos and (pos - origin).Magnitude <= radius then
+                    table.insert(found, item)
+                end
+            end
+        end
+    end)
+    return found
+end
+
+-- ดึง pelt มาใกล้ตัว (pattern เดียวกับ pullItem ใน Auto-Eat)
+-- ใช้ RequestStartDraggingItem + PivotTo + StopDraggingItem
+local function pullBGHPelt(peltModel)
+    local hrp = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp or not (peltModel and peltModel.Parent) then return false end
+
+    local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+    local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+    if not (StartDrag and StopDrag) then return false end
+
+    local ok = pcall(function()
+        StartDrag:FireServer(peltModel)
+        task.wait(0.1)
+        if peltModel:IsA("Model") then
+            peltModel:PivotTo(CFrame.new(hrp.Position))
+        else
+            peltModel.CFrame = CFrame.new(hrp.Position)
+        end
+        task.wait(0.1)
+        StopDrag:FireServer(peltModel)
+    end)
+    return ok
+end
+
+-- กิน pelt 1 ตัว พร้อม retry: กินตรงๆ → ถ้า fail (ConsumePelt stat ไม่ขยับ) → pull มาใกล้ → กินใหม่
+-- คืน true ถ้ากินสำเร็จ (stat เพิ่มขึ้น) — false ถ้า 2 tries หมดแล้วยังไม่ได้
+local function consumeBGHPeltWithRetry(peltModel)
+    if not (peltModel and peltModel.Parent) then return false end
+    local name = peltModel.Name
+    if not BGH_PELT_ITEMS[name] or BGH_PELT_SKIP[name] then return false end
+
+    -- เช็ค ConsumePelt stat ก่อน
+    local have_before = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+
+    -- Try 1: กินตรงๆ
+    consumeBGHPelt(peltModel)
+    task.wait(0.5)
+    local have_after = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+    if have_after > have_before then
+        return true
+    end
+
+    -- Try 2: pull มาใกล้ตัว แล้วกินใหม่
+    if not (peltModel and peltModel.Parent) then
+        return false  -- หายไปแล้ว (server อาจ consume สำเร็จหลัง delay)
+    end
+    pullBGHPelt(peltModel)
+    task.wait(0.3)
+    consumeBGHPelt(peltModel)
+    task.wait(0.5)
+    have_after = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+    return have_after > have_before
+end
+
+-- กิน pelt ทุกตัวใกล้ origin (พร้อม pull retry)
+local function consumeBGHPeltsNear(origin, radius)
+    local pelts = findBGHPelts(origin, radius)
+    local eaten = 0
+    for _, p in ipairs(pelts) do
+        if consumeBGHPeltWithRetry(p) then
+            eaten = eaten + 1
+        end
+    end
+    return eaten
 end
 
 -- ============================================
@@ -4255,13 +4466,244 @@ if isVampire then
 end
 
 -- ============================================
+-- BIG GAME HUNTER LOOP
+-- ทำ Quest ConsumePelt + WolfKills ตีได้ทั้ง Day และ Night
+-- ลำดับความสำคัญ: Wolf > Scorpion > Alpha Wolf > Mammoth > Bear > Polar Bear > Boar > Arctic Fox > Blue Frog > Bunny
+-- WolfKills ยังไม่ครบ → ตีเฉพาะ Wolf ธรรมดา
+-- Hit pattern: zero -> wait 1s -> axe hit (เหมือน Cultist fight loop)
+-- ลอยค้างเหนือเป้า 10 studs ด้วย AlignPosition + AlignOrientation (เหมือน Vampire/Alien)
+-- หยุดเมื่อ: Quest done / Cultist spawned (Stronghold เริ่ม)
+-- ============================================
+local function bigGameHunterNightLoop()
+    if not isBigGameHunter then return end
+    print("[BigGameHunter] Loop started")
+
+    local MAX_HITS_PER_TARGET = 5
+    local PELT_SEARCH_RADIUS = 50
+    local HOVER_HEIGHT = 10
+
+    -- Floating helpers (เหมือน Vampire/Alien pattern)
+    local floatAP = nil
+    local floatAO = nil
+    local followThread = nil
+
+    local function ensureFloating()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
+
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 5000
+            floatAP.Responsiveness = 50
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
+
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
+    end
+
+    local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
+    end
+
+    -- หา Stronghold Floor position เพื่อ warp กลับตอนจบ loop / กลางวัน
+    local function warpBackToStronghold()
+        local hrp = LocalPlayer.Character
+            and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local returnPos = finalGateBasePos or hrp.Position
+        for _ = 1, 3 do
+            hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.8)
+        end
+    end
+
+    while isBigGameHunter do
+        -- Pre-check 1: Quest done? → return (exit)
+        if isBigGameHunterAllQuestDone() then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+            local goal_consume = (reqs and reqs.ConsumePelt) or 0
+            local goal_wolves = (reqs and reqs.WolfKills) or 0
+            local have_consume = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+            local have_wolves = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+            print(string.format("[BigGameHunter] Quests done: ConsumePelt %d/%d, WolfKills %d/%d",
+                have_consume, goal_consume, have_wolves, goal_wolves))
+            disableFloating()
+            warpBackToStronghold()
+            return
+        end
+
+        -- Pre-check 2: Cultist spawned? → return (Stronghold flow takes over)
+        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+        if not cultistOk then
+            warn(string.format("[BigGameHunter] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+        elseif cultistResult then
+            print("[BigGameHunter] Stronghold opened, pausing NightLoop")
+            disableFloating()
+            return
+        end
+
+        -- หา monster ตาม priority
+        local monsters
+        local findOk, findResult = pcall(findBGHMonsters)
+        if not findOk then
+            warn(string.format("[BigGameHunter] findBGHMonsters() error: %s", tostring(findResult)))
+            task.wait(1)
+        else
+            monsters = findResult
+            if #monsters == 0 then
+                task.wait(1)
+            else
+                for monsterIdx, monster in ipairs(monsters) do
+                    -- Re-check ใน for loop
+                    if isBigGameHunterAllQuestDone() then
+                        disableFloating()
+                        warpBackToStronghold()
+                        return
+                    end
+                    if checkAnyCultistSpawned() then
+                        disableFloating()
+                        return
+                    end
+
+                    if not (monster and monster.Parent) then continue end
+                    local hrp = LocalPlayer.Character
+                        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if not hrp then
+                        warn("[BigGameHunter] No HumanoidRootPart - cannot warp, breaking")
+                        break
+                    end
+
+                    local root = monster:FindFirstChild("HumanoidRootPart")
+                        or monster.PrimaryPart
+                    if not root then
+                        warn(string.format("[BigGameHunter] [%d/%d] %s has no root, skipping",
+                            monsterIdx, #monsters, monster.Name))
+                        continue
+                    end
+
+                    -- ลอยค้างเหนือเป้า 10 studs
+                    ensureFloating()
+                    hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                        * CFrame.Angles(math.rad(-90), 0, 0)
+                    if floatAP then floatAP.Position = hrp.Position end
+                    if floatAO then floatAO.CFrame = hrp.CFrame end
+                    task.wait(0.2)
+
+                    -- Quest check ก่อนตี (early exit)
+                    if isBigGameHunterAllQuestDone() then
+                        disableFloating()
+                        warpBackToStronghold()
+                        return
+                    end
+
+                    -- Hit pattern: zero -> wait 1s -> axe (เหมือน Cultist)
+                    pcall(zeroEnemyHealth, monster)
+                    task.wait(1)
+                    pcall(function()
+                        Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
+                    end)
+                    task.wait(0.3)
+
+                    -- ตีซ้ำจนกว่าจะตาย หรือครบ MAX_HITS_PER_TARGET
+                    local hitCount = 1
+                    while hitCount < MAX_HITS_PER_TARGET do
+                        if isBigGameHunterAllQuestDone() then
+                            disableFloating()
+                            warpBackToStronghold()
+                            return
+                        end
+                        if checkAnyCultistSpawned() then
+                            disableFloating()
+                            return
+                        end
+                        if not (monster and monster.Parent) then break end
+
+                        pcall(zeroEnemyHealth, monster)
+                        task.wait(0.5)
+                        pcall(function()
+                            Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
+                        end)
+                        hitCount = hitCount + 1
+                        task.wait(0.2)
+                    end
+
+                    -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
+                    if not (monster and monster.Parent) then
+                        local dropPos = root.Position  -- ใช้ตำแหน่งเดิม (monster หายไปแล้ว)
+                        local eaten = consumeBGHPeltsNear(dropPos, PELT_SEARCH_RADIUS)
+                        if eaten > 0 then
+                            print(string.format("[BigGameHunter] ate %d pelt(s) at %s",
+                                eaten, monster.Name))
+                        end
+                    end
+                end
+                task.wait(0.5)
+            end
+        end
+    end
+
+    disableFloating()  -- safety cleanup
+end
+
+-- ============================================
 -- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
 -- ALIEN SCIENTIST: เช่นเดียวกัน - ฟาร์ม Dissolves จนกว่า Cultist จะ spawn
+-- BIG GAME HUNTER: เช่นเดียวกัน - ตี Wolf/Pelt mobs จนกว่า Cultist จะ spawn
 -- ============================================
 if isVampire and not isVampireAllQuestDone() then
     task.spawn(vampireNightLoop)
 elseif isAlienScientist and not isAlienScientistAllQuestDone() then
     task.spawn(alienScientistNightLoop)
+elseif isBigGameHunter and not isBigGameHunterAllQuestDone() then
+    task.spawn(bigGameHunterNightLoop)
 end
 
 print("\n[Step 4] Waiting for Stronghold to open...")
@@ -5121,8 +5563,12 @@ while completedRounds < TOTAL_ROUNDS do
             print("[AlienScientist] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             alienScientistNightLoop()
+        elseif isBigGameHunter and not isBigGameHunterAllQuestDone() then
+            print("[BigGameHunter] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            bigGameHunterNightLoop()
         else
-            -- ไม่ใช่ Vampire หรือ Quest ครบแล้ว → ใช้ logic เดิม
+            -- ไม่ใช่ Vampire/AlienScientist/BigGameHunter หรือ Quest ครบแล้ว → ใช้ logic เดิม
             print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
             warpToStrongholdFloor(1)
             local WAIT_SECONDS = 20 * 60
