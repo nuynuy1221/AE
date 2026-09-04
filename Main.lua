@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 9.42")
+print("Version - 1.2.6 / 9.57")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1970,7 +1970,7 @@ BGH.isBigGameHunter = currentClass == "Big Game Hunter"
 
 -- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
 BGH.MONSTER_PRIORITY = {
-    "Wolf", "Scorpion", "Alpha Wolf", "Mammoth", "Bear",
+    "Scorpion", "Wolf", "Alpha Wolf", "Mammoth", "Bear",
     "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
 }
 BGH.PRIORITY_INDEX = {}
@@ -1998,16 +1998,13 @@ BGH.PELT_SKIP = {
 
 -- Forward declarations ของ functions (จะถูก assign ใน do block ข้างล่าง)
 -- ตัวแปรเหล่านี้อยู่ใน outer chunk เพื่อให้ bigGameHunterNightLoop เรียกได้
-local isBigGameHunterAllQuestDone
-local isWolfKillsQuestDone
-local findBGHMonsters
-local consumeBGHPeltsNear
+-- *** เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers ***
 
 -- สร้าง functions ทั้งหมดใน do block เพื่อไม่ให้ locals ไปนับใน outer chunk
 do
 
 -- เช็ค Quest ConsumePelt + WolfKills ครบทั้งคู่ (Lv ถัดไป)
-isBigGameHunterAllQuestDone = function()
+BGH.isBigGameHunterAllQuestDone = function()
     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
     local reqs = CLASS_QUESTS["Big Game Hunter"]
         and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
@@ -2021,7 +2018,7 @@ isBigGameHunterAllQuestDone = function()
 end
 
 -- เช็ค quest WolfKills ของ Lv ถัดไป (ใช้สำหรับ Wolf-only gate)
-isWolfKillsQuestDone = function()
+BGH.isWolfKillsQuestDone = function()
     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
     local reqs = CLASS_QUESTS["Big Game Hunter"]
         and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
@@ -2038,12 +2035,12 @@ end
 -- - **ไม่ skip** Friendly/Pet/Ally (BGH ตีได้ทุกอย่างที่ดรอปของได้)
 -- - WolfKills gate: ถ้ายังไม่ครบ → คืน Wolf ธรรมดาก่อนตัวเดียว
 -- - เรียงตาม BGH.MONSTER_PRIORITY (Wolf = 1, Bunny = 10)
-findBGHMonsters = function()
+BGH.findMonsters = function()
     local list = {}
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return list end
 
-    local wolfOnlyMode = not isWolfKillsQuestDone()
+    local wolfOnlyMode = not BGH.isWolfKillsQuestDone()
 
     for _, model in ipairs(chars:GetChildren()) do
         if not shouldSkipName(model.Name) then
@@ -2138,7 +2135,7 @@ end
 local function consumeBGHPeltWithRetry(peltModel)
     if not (peltModel and peltModel.Parent) then return false end
     local name = peltModel.Name
-    if not BGH_PELT_ITEMS[name] or BGH_PELT_SKIP[name] then return false end
+    if not BGH.PELT_ITEMS[name] or BGH.PELT_SKIP[name] then return false end
 
     -- เช็ค ConsumePelt stat ก่อน
     local have_before = classStatCache["Big Game Hunter"]
@@ -2167,7 +2164,7 @@ local function consumeBGHPeltWithRetry(peltModel)
 end
 
 -- กิน pelt ทุกตัวใกล้ origin (พร้อม pull retry)
-consumeBGHPeltsNear = function(origin, radius)
+BGH.consumePeltsNear = function(origin, radius)
     local pelts = findBGHPelts(origin, radius)
     local eaten = 0
     for _, p in ipairs(pelts) do
@@ -3723,7 +3720,7 @@ do
     -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
     local keepMap = (isVampire and not isVampireAllQuestDone())
         or (isAlienScientist and not isAlienScientistAllQuestDone())
-        or (BGH.isBigGameHunter and not isBigGameHunterAllQuestDone())
+        or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -4583,7 +4580,7 @@ local function bigGameHunterNightLoop()
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
         -- Pre-check 1: Quest done? → cleanup + return (exit)
-        if isBigGameHunterAllQuestDone() then
+        if BGH.isBigGameHunterAllQuestDone() then
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
             local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
             local goal_consume = (reqs and reqs.ConsumePelt) or 0
@@ -4639,7 +4636,7 @@ local function bigGameHunterNightLoop()
 
         -- หา monster ตาม priority
         local monsters
-        local findOk, findResult = pcall(findBGHMonsters)
+        local findOk, findResult = pcall(BGH.findMonsters)
         if not findOk then
             warn(string.format("[BigGameHunter] findBGHMonsters() error: %s", tostring(findResult)))
             task.wait(1)
@@ -4654,7 +4651,7 @@ local function bigGameHunterNightLoop()
 
         for monsterIdx, monster in ipairs(monsters) do
             -- Re-check ใน for loop
-            if isBigGameHunterAllQuestDone() then
+            if BGH.isBigGameHunterAllQuestDone() then
                 disableFloating()
                 warpBackToStronghold()
                 return false
@@ -4689,7 +4686,7 @@ local function bigGameHunterNightLoop()
             task.wait(0.2)
 
             -- Quest check ก่อนตี (early exit)
-            if isBigGameHunterAllQuestDone() then
+            if BGH.isBigGameHunterAllQuestDone() then
                 disableFloating()
                 warpBackToStronghold()
                 return false
@@ -4706,7 +4703,7 @@ local function bigGameHunterNightLoop()
             -- ตีซ้ำจนกว่าจะตาย หรือครบ MAX_HITS_PER_TARGET
             local hitCount = 1
             while hitCount < MAX_HITS_PER_TARGET do
-                if isBigGameHunterAllQuestDone() then
+                if BGH.isBigGameHunterAllQuestDone() then
                     disableFloating()
                     warpBackToStronghold()
                     return false
@@ -4729,7 +4726,7 @@ local function bigGameHunterNightLoop()
             -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
             if not (monster and monster.Parent) then
                 local dropPos = root.Position
-                local eaten = consumeBGHPeltsNear(dropPos, PELT_SEARCH_RADIUS)
+                local eaten = BGH.consumePeltsNear(dropPos, PELT_SEARCH_RADIUS)
                 if eaten > 0 then
                     print(string.format("[BigGameHunter] ate %d pelt(s) at %s",
                         eaten, monster.Name))
@@ -4756,7 +4753,7 @@ if isVampire and not isVampireAllQuestDone() then
     task.spawn(vampireNightLoop)
 elseif isAlienScientist and not isAlienScientistAllQuestDone() then
     task.spawn(alienScientistNightLoop)
-elseif BGH.isBigGameHunter and not isBigGameHunterAllQuestDone() then
+elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
     task.spawn(bigGameHunterNightLoop)
 end
 
@@ -5617,7 +5614,7 @@ while completedRounds < TOTAL_ROUNDS do
             print("[AlienScientist] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             alienScientistNightLoop()
-        elseif BGH.isBigGameHunter and not isBigGameHunterAllQuestDone() then
+        elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
             print("[BigGameHunter] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             bigGameHunterNightLoop()
