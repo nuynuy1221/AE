@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 9.57")
+print("Version - 1.2.6 / 10.15")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1954,6 +1954,50 @@ local function isVampireAllQuestDone()
 end
 
 -- ============================================
+-- ALIEN SCIENTIST CLASS HELPERS
+-- ============================================
+-- Pre-load Dissolve Ray tool from Inventory
+local dissolveRay = LocalPlayer.Inventory
+    and LocalPlayer.Inventory:FindFirstChild("Dissolve Ray")
+local isAlienScientist = currentClass == "Alien Scientist"
+
+-- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
+-- Remote อยู่ที่ ReplicatedStorage.RemoteEvents.RequestDissolveEnemy (ตามตัวอย่างจาก Cobalt)
+local dissolveRemote = game:GetService("ReplicatedStorage")
+    :FindFirstChild("RemoteEvents")
+    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
+
+-- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
+local function isAlienScientistAllQuestDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Alien Scientist"]
+        and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+    if not reqs or not reqs.Dissolves then return true end
+    local have = classStatCache["Alien Scientist"]
+        and classStatCache["Alien Scientist"]["Dissolves"] or 0
+    return have >= reqs.Dissolves
+end
+
+-- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
+-- ข้าม: Deer, Owl, ชื่อที่มีคำว่า "Cultist", NPC HP > 100, Friendly tag, Pet tag, StrongholdEnemy
+local SKIP_EXACT = {
+    ["Deer"] = true,
+    ["Owl"] = true,
+}
+local SKIP_KEYWORDS = {
+    "Cultist",  -- ข้ามทุกชื่อที่มีคำว่า Cultist (Cultist, Ice Cultist, Cultist Brute, etc.)
+}
+local function shouldSkipName(name)
+    if SKIP_EXACT[name] then return true end
+    for _, keyword in ipairs(SKIP_KEYWORDS) do
+        if string.find(name, keyword, 1, true) then  -- 1, true = plain text (case-sensitive)
+            return true
+        end
+    end
+    return false
+end
+
+-- ============================================
 -- BIG GAME HUNTER CLASS HELPERS
 -- ============================================
 -- (อ้างอิงจาก decompile ของ BigGameHunterClass module)
@@ -1961,8 +2005,8 @@ end
 --  Arctic Fox, Mammoth, Scorpion, Blue Frog, Bunny) — skip Cultist ทั้งหมด
 -- ถ้า WolfKills ยังไม่ครบ → ตีเฉพาะ "Wolf" ธรรมดาก่อน
 --
--- *** เก็บ locals/data ใน _G.BGH เพื่อไม่ให้นับเป็น chunk-level registers
---     (กัน Luau 200-register limit ใน outer chunk) ***
+-- *** ประกาศหลัง shouldSkipName เพื่อให้ upvalue resolve ถูกต้อง
+--     (locals เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers) ***
 _G.BGH = _G.BGH or {}
 local BGH = _G.BGH
 
@@ -1970,7 +2014,7 @@ BGH.isBigGameHunter = currentClass == "Big Game Hunter"
 
 -- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
 BGH.MONSTER_PRIORITY = {
-    "Scorpion", "Wolf", "Alpha Wolf", "Mammoth", "Bear",
+    "Wolf", "Scorpion", "Alpha Wolf", "Mammoth", "Bear",
     "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
 }
 BGH.PRIORITY_INDEX = {}
@@ -1995,10 +2039,6 @@ BGH.PELT_ITEMS = {
 BGH.PELT_SKIP = {
     ["Cultist King Antler"] = true,
 }
-
--- Forward declarations ของ functions (จะถูก assign ใน do block ข้างล่าง)
--- ตัวแปรเหล่านี้อยู่ใน outer chunk เพื่อให้ bigGameHunterNightLoop เรียกได้
--- *** เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers ***
 
 -- สร้าง functions ทั้งหมดใน do block เพื่อไม่ให้ locals ไปนับใน outer chunk
 do
@@ -2175,51 +2215,8 @@ BGH.consumePeltsNear = function(origin, radius)
     return eaten
 end
 
-end  -- end of BGH do block (locals ไม่นับเข้า outer chunk)
+end  -- end of BGH do block
 
--- ============================================
--- ALIEN SCIENTIST CLASS HELPERS
--- ============================================
--- Pre-load Dissolve Ray tool from Inventory
-local dissolveRay = LocalPlayer.Inventory
-    and LocalPlayer.Inventory:FindFirstChild("Dissolve Ray")
-local isAlienScientist = currentClass == "Alien Scientist"
-
--- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
--- Remote อยู่ที่ ReplicatedStorage.RemoteEvents.RequestDissolveEnemy (ตามตัวอย่างจาก Cobalt)
-local dissolveRemote = game:GetService("ReplicatedStorage")
-    :FindFirstChild("RemoteEvents")
-    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
-
--- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
-local function isAlienScientistAllQuestDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Alien Scientist"]
-        and CLASS_QUESTS["Alien Scientist"][lvl + 1]
-    if not reqs or not reqs.Dissolves then return true end
-    local have = classStatCache["Alien Scientist"]
-        and classStatCache["Alien Scientist"]["Dissolves"] or 0
-    return have >= reqs.Dissolves
-end
-
--- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, ชื่อที่มีคำว่า "Cultist", NPC HP > 100, Friendly tag, Pet tag, StrongholdEnemy
-local SKIP_EXACT = {
-    ["Deer"] = true,
-    ["Owl"] = true,
-}
-local SKIP_KEYWORDS = {
-    "Cultist",  -- ข้ามทุกชื่อที่มีคำว่า Cultist (Cultist, Ice Cultist, Cultist Brute, etc.)
-}
-local function shouldSkipName(name)
-    if SKIP_EXACT[name] then return true end
-    for _, keyword in ipairs(SKIP_KEYWORDS) do
-        if string.find(name, keyword, 1, true) then  -- 1, true = plain text (case-sensitive)
-            return true
-        end
-    end
-    return false
-end
 local HP_SKIP_THRESHOLD = 100  -- ข้าม NPC ที่ HP > 100 (Mossy Mammoth, etc.)
 
 local function findNightMonsters()
@@ -3717,7 +3714,7 @@ do
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
     -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
-    -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
+    -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เก็บ Campground + Ground + Landmarks (MainFire/CraftingBench/Items)
     local keepMap = (isVampire and not isVampireAllQuestDone())
         or (isAlienScientist and not isAlienScientistAllQuestDone())
         or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
@@ -3729,9 +3726,17 @@ do
             "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
         }
         for _, folderName in ipairs(mapFolderNames) do
-            -- ข้าม "Ground" + "Landmarks" ถ้า Vampire ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
-            if keepMap and (folderName == "Ground" or folderName == "Landmarks") then
-                continue
+            -- ข้าม "Ground" + "Landmarks" ถ้า Vampire/AlienScientist ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
+            -- ข้าม "Campground" + "Ground" + "Landmarks" ถ้า Big Game Hunter ยังทำ Quest (ต้องใช้ MainFire/CraftingBench/Items)
+            if keepMap then
+                if folderName == "Ground" or folderName == "Landmarks" then
+                    continue
+                end
+                if BGH.isBigGameHunter
+                    and not BGH.isBigGameHunterAllQuestDone()
+                    and folderName == "Campground" then
+                    continue
+                end
             end
             local folder = map:FindFirstChild(folderName)
             if folder then
@@ -4645,8 +4650,46 @@ local function bigGameHunterNightLoop()
 
         monsters = findResult
         if #monsters == 0 then
-            task.wait(1)
-            return true
+            -- ไม่เจอมอนที่ตีได้ → บินวน 1 รอบ (pattern เดียวกับ flyAndWarpItems แต่แค่ 1 รอบ)
+            -- ใช้ finalGateBasePos เป็น center (กลาง Stronghold) เพราะอยู่ใน Stronghold
+            print("[BigGameHunter] No hittable monsters - flying 1 lap to find more")
+            updateStatus("Scanning for monsters...")
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local center = finalGateBasePos or hrp.Position
+                local scanRadius = 500
+                local scanSteps = 40
+                local circumference = 2 * math.pi * scanRadius
+                local speed = 800
+                local duration = circumference / speed
+                for i = 0, scanSteps do
+                    -- Re-check ระหว่าง fly (อาจเจอมอนแล้ว)
+                    if BGH.isBigGameHunterAllQuestDone() then
+                        return false
+                    end
+                    if checkAnyCultistSpawned() then
+                        disableFloating()
+                        return false
+                    end
+                    local angle = (i / scanSteps) * math.pi * 2
+                    local scanPos = center + Vector3.new(
+                        math.cos(angle) * scanRadius,
+                        airHeight,
+                        math.sin(angle) * scanRadius
+                    )
+                    hrp.CFrame = CFrame.new(scanPos)
+                    if floatAP then floatAP.Position = hrp.Position end
+                    if floatAO then floatAO.CFrame = hrp.CFrame end
+                    task.wait(duration / scanSteps)
+                    -- เช็คอีกครั้งหลัง fly 1 รอบ เผื่อเจอมอนระหว่างทาง
+                    if i % 10 == 5 then
+                        local ok2, recheck = pcall(BGH.findMonsters)
+                        if ok2 and recheck and #recheck > 0 then break end
+                    end
+                end
+            end
+            return true  -- continue (วน loop ใหม่)
         end
 
         for monsterIdx, monster in ipairs(monsters) do
