@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version 1.2.6 / 9.35")
+print("Version - 1.2.6 / 9.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3720,8 +3720,10 @@ do
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
     -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
+    -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
     local keepMap = (isVampire and not isVampireAllQuestDone())
         or (isAlienScientist and not isAlienScientistAllQuestDone())
+        or (BGH.isBigGameHunter and not isBigGameHunterAllQuestDone())
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -4580,7 +4582,7 @@ local function bigGameHunterNightLoop()
     -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
-        -- Pre-check 1: Quest done? → return (exit)
+        -- Pre-check 1: Quest done? → cleanup + return (exit)
         if isBigGameHunterAllQuestDone() then
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
             local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
@@ -4594,6 +4596,34 @@ local function bigGameHunterNightLoop()
                 have_consume, goal_consume, have_wolves, goal_wolves))
             disableFloating()
             warpBackToStronghold()
+            -- ลบ map/chars (เลียนแบบ pattern เดียวกับ Step 3.7) — เก็บไว้เฉพาะ Stronghold
+            pcall(function()
+                local map = workspace:FindFirstChild("Map")
+                if map then
+                    local mapFolderNames = {
+                        "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+                        "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+                        "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+                    }
+                    for _, folderName in ipairs(mapFolderNames) do
+                        local folder = map:FindFirstChild(folderName)
+                        if folder then
+                            for _, child in ipairs(folder:GetChildren()) do
+                                if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                                    pcall(function() child:Destroy() end)
+                                end
+                            end
+                        end
+                    end
+                end
+                local chars = workspace:FindFirstChild("Characters")
+                if chars then
+                    for _, child in ipairs(chars:GetChildren()) do
+                        pcall(function() child:Destroy() end)
+                    end
+                end
+                print("[BigGameHunter] Cleanup done after Quest complete")
+            end)
             return false  -- signal: stop loop
         end
 
