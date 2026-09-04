@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 10.22")
+print("Version - 1.2.6 / 10.39")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4498,7 +4498,6 @@ local function bigGameHunterNightLoop()
     if not BGH.isBigGameHunter then return end
     print("[BigGameHunter] Loop started")
 
-    local MAX_HITS_PER_TARGET = 5
     local PELT_SEARCH_RADIUS = 50
     local HOVER_HEIGHT = 10
 
@@ -4751,9 +4750,8 @@ local function bigGameHunterNightLoop()
             end)
             task.wait(0.3)
 
-            -- ตีซ้ำจนกว่าจะตาย หรือครบ MAX_HITS_PER_TARGET
-            local hitCount = 1
-            while hitCount < MAX_HITS_PER_TARGET do
+            -- ตีซ้ำจนกว่าจะตาย (ไม่มี cap — recheck ทุก hit)
+            while monster and monster.Parent do
                 if BGH.isBigGameHunterAllQuestDone() then
                     disableFloating()
                     warpBackToStronghold()
@@ -4763,25 +4761,19 @@ local function bigGameHunterNightLoop()
                     disableFloating()
                     return false
                 end
-                if not (monster and monster.Parent) then break end
 
                 pcall(zeroEnemyHealth, monster)
                 task.wait(0.5)
                 pcall(function()
                     Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
                 end)
-                hitCount = hitCount + 1
                 task.wait(0.2)
             end
 
             -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
             if not (monster and monster.Parent) then
                 local dropPos = root.Position
-                local eaten = BGH.consumePeltsNear(dropPos, PELT_SEARCH_RADIUS)
-                if eaten > 0 then
-                    print(string.format("[BigGameHunter] ate %d pelt(s) at %s",
-                        eaten, monster.Name))
-                end
+                BGH.consumePeltsNear(dropPos, PELT_SEARCH_RADIUS)
             end
         end
         task.wait(0.5)
