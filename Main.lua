@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 10.15")
+print("Version - 1.2.6 / 10.22")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4718,6 +4718,14 @@ local function bigGameHunterNightLoop()
                 warn(string.format("[BigGameHunter] [%d/%d] %s has no root, skipping",
                     monsterIdx, #monsters, monster.Name))
                 continue
+            end
+
+            -- Equip axe ก่อนตี (กันของหลุด/ถูก unequip ระหว่างรอ — pattern เดียวกับ fight loop)
+            if axe then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(axe)
+                end)
+                task.wait(0.2)
             end
 
             -- ลอยค้างเหนือเป้า 10 studs
