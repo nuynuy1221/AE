@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 12.42")
+print("Version - 1.2.6")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4692,9 +4692,24 @@ local function bigGameHunterNightLoop()
         end
     end
 
-    -- Helper: BGH loop จบ — disable floating + warp กลับ + cleanup map/chars
-    -- เรียกเมื่อ Quest done / PeltList หมด (BGH ทำงานเสร็จแล้ว ไม่ต้องใช้ map อีก)
-    local function bghExitAndCleanup()
+    -- Helper: BGH loop จบ — disable floating + warp + cleanup map/chars
+    -- เรียกเมื่อ Quest done / PeltList done (BGH ทำงานเสร็จแล้ว)
+    -- reason: "quest" หรือ "peltlist" — ใช้ print ที่เหมาะสม
+    local function bghExitAndCleanup(reason)
+        if reason == "quest" then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+            local goal_consume = (reqs and reqs.ConsumePelt) or 0
+            local goal_wolves = (reqs and reqs.WolfKills) or 0
+            local have_consume = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+            local have_wolves = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+            print(string.format("[BigGameHunter] Quests done: ConsumePelt %d/%d, WolfKills %d/%d",
+                have_consume, goal_consume, have_wolves, goal_wolves))
+        elseif reason == "peltlist" then
+            print("[BigGameHunter] All PeltList types Complete - exiting")
+        end
         disableFloating()
         warpBackToStronghold()
         pcall(function()
@@ -4737,25 +4752,14 @@ local function bigGameHunterNightLoop()
     local function runBGHIteration()
         -- Pre-check 1: Quest done? → cleanup เต็มรูปแบบ + return (exit) — เช็คก่อน Pre-check 0
         if BGH.isBigGameHunterAllQuestDone() then
-            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-            local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
-            local goal_consume = (reqs and reqs.ConsumePelt) or 0
-            local goal_wolves = (reqs and reqs.WolfKills) or 0
-            local have_consume = classStatCache["Big Game Hunter"]
-                and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
-            local have_wolves = classStatCache["Big Game Hunter"]
-                and classStatCache["Big Game Hunter"]["WolfKills"] or 0
-            print(string.format("[BigGameHunter] Quests done: ConsumePelt %d/%d, WolfKills %d/%d",
-                have_consume, goal_consume, have_wolves, goal_wolves))
-            bghExitAndCleanup()
+            bghExitAndCleanup("quest")
             return false  -- signal: stop loop
         end
 
         -- Pre-check 0: PeltList ครบทุก type แล้ว? → cleanup + warp + exit
         local activePeltTypes = BGH.getActivePeltTypes()
         if #activePeltTypes == 0 then
-            print("[BigGameHunter] All PeltList types Complete - exiting")
-            bghExitAndCleanup()
+            bghExitAndCleanup("peltlist")
             return false  -- signal: stop loop
         end
 
@@ -4796,7 +4800,7 @@ local function bigGameHunterNightLoop()
                 for i = 0, scanSteps do
                     -- Re-check ระหว่าง fly (อาจเจอมอนแล้ว)
                     if BGH.isBigGameHunterAllQuestDone() then
-                        bghExitAndCleanup()
+                        bghExitAndCleanup("quest")
                         return false
                     end
                     if checkAnyCultistSpawned() then
@@ -4826,7 +4830,7 @@ local function bigGameHunterNightLoop()
         for monsterIdx, monster in ipairs(monsters) do
             -- Re-check ใน for loop
             if BGH.isBigGameHunterAllQuestDone() then
-                bghExitAndCleanup()
+                bghExitAndCleanup("quest")
                 return false
             end
             if checkAnyCultistSpawned() then
@@ -4874,7 +4878,7 @@ local function bigGameHunterNightLoop()
 
             -- Quest check ก่อนตี (early exit)
             if BGH.isBigGameHunterAllQuestDone() then
-                bghExitAndCleanup()
+                bghExitAndCleanup("quest")
                 return false
             end
 
@@ -4889,7 +4893,7 @@ local function bigGameHunterNightLoop()
             -- ตีซ้ำจนกว่าจะตาย (ไม่มี cap — recheck ทุก hit)
             while monster and monster.Parent do
                 if BGH.isBigGameHunterAllQuestDone() then
-                    bghExitAndCleanup()
+                    bghExitAndCleanup("quest")
                     return false
                 end
                 if checkAnyCultistSpawned() then
