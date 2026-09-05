@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 11.45")
+print("Version - 1.2.6 / 11.55")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4681,16 +4681,7 @@ local function bigGameHunterNightLoop()
     -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
-        -- Pre-check 0: PeltList ครบทุก type แล้ว? → warp กลับ Stronghold + exit
-        local activePeltTypes = BGH.getActivePeltTypes()
-        if #activePeltTypes == 0 then
-            print("[BigGameHunter] All PeltList types Complete - warping back to Stronghold")
-            disableFloating()
-            warpBackToStronghold()
-            return false
-        end
-
-        -- Pre-check 1: Quest done? → cleanup + return (exit)
+        -- Pre-check 1: Quest done? → cleanup เต็มรูปแบบ + return (exit) — เช็คก่อน Pre-check 0
         if BGH.isBigGameHunterAllQuestDone() then
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
             local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
@@ -4730,9 +4721,17 @@ local function bigGameHunterNightLoop()
                         pcall(function() child:Destroy() end)
                     end
                 end
-                print("[BigGameHunter] Cleanup done after Quest complete")
             end)
             return false  -- signal: stop loop
+        end
+
+        -- Pre-check 0: PeltList ครบทุก type แล้ว? → แค่ warp กลับ Stronghold + exit (ไม่ cleanup เต็ม)
+        local activePeltTypes = BGH.getActivePeltTypes()
+        if #activePeltTypes == 0 then
+            print("[BigGameHunter] All PeltList types Complete - warping back to Stronghold")
+            disableFloating()
+            warpBackToStronghold()
+            return false
         end
 
         -- Pre-check 2: Cultist spawned? → return (Stronghold flow takes over)
