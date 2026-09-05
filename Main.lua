@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 11.38")
+print("Version - 1.2.6 / 11.45")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2414,6 +2414,35 @@ local function warpItemToTarget(item, targetPos)
     warpedItems[item] = true
 end
 
+-- ดึง item ทีละชิ้นไปยังตำแหน่งเป้าหมาย (sequential — รอ Drag เสร็จก่อนตัวถัดไป)
+-- Pattern เดียวกับ pullBGHPelt: RequestStartDraggingItem → PivotTo → StopDraggingItem
+local function dragItemToTarget(item, targetPos)
+    if warpedItems[item] then return end
+    if not (item and item.Parent) then return end
+
+    local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+    local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+    if not (StartDrag and StopDrag) then return end
+
+    pcall(function()
+        StartDrag:FireServer(item)
+        task.wait(0.1)
+        if item:IsA("Model") then
+            item:PivotTo(CFrame.new(targetPos))
+        else
+            item.CFrame = CFrame.new(targetPos)
+        end
+        task.wait(0.1)
+        StopDrag:FireServer(item)
+    end)
+    warpedItems[item] = true
+end
+
+-- ดึง item ไปยัง CraftingBench (เรียก dragItemToTarget แบบ sequential)
+local function dragItemToCraftingBench(item, craftPos)
+    dragItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
+end
+
 local function warpItemToFire(item)
     warpItemToTarget(item, firePos + Vector3.new(0, 10, 0))
 end
@@ -3039,15 +3068,19 @@ if getTotalWood() < NEED_WOOD then
         end
 
         hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ
+        -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ (ทีละชิ้น, รอ Drag เสร็จก่อน)
         if craftPos then
             for _, item in ipairs(workspace.Items:GetChildren()) do
                 if CRAFTING_BENCH_ITEMS[item.Name] and not warpedItems[item] then
-                    warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
+                    dragItemToCraftingBench(item, craftPos)
                 end
             end
         end
         updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+        -- ถ้า Wood ถึง NEED_WOOD แล้ว → ออก loop ทันที (ไม่ต้องตัดต้นต่อไป)
+        if getTotalWood() >= NEED_WOOD then
+            break
+        end
         tIdx += 1
         if tIdx > #trees then break end
     end
