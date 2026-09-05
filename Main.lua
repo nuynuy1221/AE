@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 7.28")
+print("Version - 1.2.6 / 8.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2482,9 +2482,6 @@ local function collectLostChildren()
                 if kidAlreadyRescued(c) then
                     -- mark ว่าจบแล้ว (ปลอดภัย: ตัวที่ช่วยแล้วไม่มีวันอยู่ใน ItemBag) - ห้ามยิง prompt
                     collectedChildren[name] = true
-                    local count = 0
-                    for _ in pairs(collectedChildren) do count += 1 end
-                    print(string.format("[LostChild] %s already rescued - skipped (%d/%d)", name, count, LOST_CHILD_TOTAL))
                 elseif kidStillLost(c) then
                     local head = c:FindFirstChild("Head")
                     local attachment = head and head:FindFirstChild("ProximityAttachment")
@@ -2634,7 +2631,6 @@ local function dropAllLostChildren(retryDepth)
 
         if remainingChildren == 0 then
             collectedChildren = {}
-            print("Successfully dropped all", droppedCount, "children at campfire")
         else
             warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
         end
@@ -2716,7 +2712,7 @@ local treeIndex = 1
 local function flyAndWarpItems()
     updateStatus("Flying & Warping Items...")
 
-    for radius = 20, 1000, 40 do
+    for radius = 20, 1500, 40 do
         local steps = 50 + math.floor(radius / 40) * 5
         local circumference = 2 * math.pi * radius
         local speed = 1000
@@ -2753,7 +2749,7 @@ local function flyAndWarpItems()
         end
     end
 
-    print("✅ Flight complete")
+    -- (silent — ไม่ print Flight complete เพราะถี่เกินไป)
 
     -- Warp back to fire after flight
     humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
@@ -2794,7 +2790,7 @@ flyAndWarpItems()
 
 local currentLevel = getCurrentLevel()
 task.wait(0.3)
-print(string.format("📊 Current Level: %d", currentLevel))
+print(string.format("📊 Current Level: %d — flying to gather more items", currentLevel))
 updateStatus("Upgrading Fire...")
 
 local levelChanged = false
@@ -2828,7 +2824,6 @@ task.spawn(function()
 
 end)
 
-print("🔄 Starting main loop...")
 local treesSinceFlight = 0
 
 while currentLevel < maxLevel do
@@ -2867,7 +2862,6 @@ while currentLevel < maxLevel do
         end
     else
         if treesSinceFlight >= 3 then
-            print(string.format("🔄 Cut 3 trees but level still %d, flying...", currentLevel))
             updateStatus("Flying for Items...")
             treesSinceFlight = 0
 
