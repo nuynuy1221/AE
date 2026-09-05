@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 11.26")
+print("Version - 1.2.6 / 11.38")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2085,7 +2085,6 @@ end
 -- คืน list ของ monster names ที่ยัง active (PeltList ยังไม่ Complete)
 -- ถ้า PeltList ยังไม่ replicate → fallback คืน priority list ทั้งหมด
 -- ลำดับตาม BGH.PELT_ORDER (Wolf → Scorpion → ... → Bunny)
--- Debug: print สถานะทุก type ทุกครั้งที่ถูกเรียก
 BGH.getActivePeltTypes = function()
     local peltToMonster = {
         ["Wolf Pelt"] = "Wolf",
@@ -2101,40 +2100,30 @@ BGH.getActivePeltTypes = function()
 
     local PeltList = LocalPlayer:FindFirstChild("PeltList")
     local active = {}
-    local debugLines = {"[BGH PeltList Status]"}
 
     if not PeltList then
-        debugLines[#debugLines + 1] = "  PeltList: not replicated (fallback: all types active)"
         for _, peltName in ipairs(BGH.PELT_ORDER) do
             table.insert(active, peltToMonster[peltName])
-            debugLines[#debugLines + 1] = string.format("  %s: fallback (active)", peltName)
         end
-        print(table.concat(debugLines, "\n"))
         return active
     end
 
     for _, peltName in ipairs(BGH.PELT_ORDER) do
         local peltObj = PeltList:FindFirstChild(peltName)
         if peltObj then
-            local count = peltObj:GetAttribute("Count")
-            local complete = peltObj:GetAttribute("Complete")
-            local isComplete = (complete == true)
-            local status
-            if isComplete then
-                status = "COMPLETE (skip)"
-            else
-                status = string.format("active (Count=%s)", tostring(count))
+            -- Attribute "Complete" จะปรากฏเมื่อกินครบ limit เท่านั้น
+            -- ก่อนหน้านั้น attribute เป็น nil → ถือว่ายัง active
+            local complete = peltObj:GetAttribute("Complete") == true
+            if not complete then
                 table.insert(active, peltToMonster[peltName])
             end
-            debugLines[#debugLines + 1] = string.format("  %s: %s", peltName, status)
+            -- ถ้า Complete = true → ไม่ใส่ใน active (skip — เลิกตี type นี้)
         else
+            -- ไม่มีใน PeltList → น่าจะ unlock แล้ว (ถือว่า active)
             table.insert(active, peltToMonster[peltName])
-            debugLines[#debugLines + 1] = string.format("  %s: not in PeltList (active)", peltName)
         end
     end
 
-    debugLines[#debugLines + 1] = string.format("  → Active monsters: %s", table.concat(active, ", "))
-    print(table.concat(debugLines, "\n"))
     return active
 end
 
@@ -4575,7 +4564,7 @@ local function bigGameHunterNightLoop()
     print("[BigGameHunter] Loop started")
 
     local PELT_SEARCH_RADIUS = 50
-    local HOVER_HEIGHT = 10
+    local HOVER_HEIGHT = 20
 
     -- Floating helpers (เหมือน Vampire/Alien pattern) — แยก scope ด้วย do block
     -- เพื่อลด local register count ของ outer function (กัน Luau 200-register limit)
@@ -4791,7 +4780,6 @@ local function bigGameHunterNightLoop()
             -- Re-check active types (กรณี PeltList Complete เปลี่ยนระหว่าง for loop)
             local activeNow = BGH.getActivePeltTypes()
             if not table.find(activeNow, monster.Name) then
-                print("[BigGameHunter] " .. monster.Name .. " type now Complete, skipping")
                 continue
             end
 
