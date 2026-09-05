@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6")
+print("Version - 1.2.6 / 1.13")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4824,6 +4824,16 @@ local function bigGameHunterNightLoop()
                     end
                 end
             end
+            -- หลัง fly scan 1 รอบ: ถ้า WolfKills ยังไม่ครบ + Wolf Pelt Complete + ไม่เจอ Wolf → ออก (ทำไม่ได้แล้ว)
+            if not BGH.isWolfKillsQuestDone() then
+                local active = BGH.getActivePeltTypes()
+                if not table.find(active, "Wolf") then
+                    -- Wolf Pelt Complete แต่ WolfKills ยังไม่ครบ + ไม่เจอ Wolf = ทำไม่ได้แล้ว
+                    print("[BigGameHunter] WolfKills quest incomplete but no Wolf available - exiting")
+                    bghExitAndCleanup("peltlist")
+                    return false
+                end
+            end
             return true  -- continue (วน loop ใหม่)
         end
 
@@ -4839,9 +4849,13 @@ local function bigGameHunterNightLoop()
             end
 
             -- Re-check active types (กรณี PeltList Complete เปลี่ยนระหว่าง for loop)
-            local activeNow = BGH.getActivePeltTypes()
-            if not table.find(activeNow, monster.Name) then
-                continue
+            -- ยกเว้น Wolf gate (ถ้า WolfKills ยังไม่ครบ ต้องตี Wolf ต่อแม้ Wolf Pelt จะ Complete)
+            local wolfOnlyMode = not BGH.isWolfKillsQuestDone()
+            if not (wolfOnlyMode and monster.Name == "Wolf") then
+                local activeNow = BGH.getActivePeltTypes()
+                if not table.find(activeNow, monster.Name) then
+                    continue
+                end
             end
 
             if not (monster and monster.Parent) then continue end
