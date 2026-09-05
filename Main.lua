@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 10.39")
+print("Version - 1.2.6 / 11.05")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2013,8 +2013,9 @@ local BGH = _G.BGH
 BGH.isBigGameHunter = currentClass == "Big Game Hunter"
 
 -- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
+-- ไม่รวม Mammoth (user ไม่ต้องการตี/เก็บ Mammoth Tusk)
 BGH.MONSTER_PRIORITY = {
-    "Wolf", "Scorpion", "Alpha Wolf", "Mammoth", "Bear",
+    "Wolf", "Scorpion", "Alpha Wolf", "Bear",
     "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
 }
 BGH.PRIORITY_INDEX = {}
@@ -2022,14 +2023,27 @@ for i, n in ipairs(BGH.MONSTER_PRIORITY) do
     BGH.PRIORITY_INDEX[n] = i
 end
 
+-- Pelt types ตามลำดับความสำคัญ (ใช้เช็ค Complete ใน PeltList)
+BGH.PELT_ORDER = {
+    "Wolf Pelt",
+    "Scorpion Shell",
+    "Alpha Wolf Pelt",
+    "Bear Pelt",
+    "Polar Bear Pelt",
+    "Boar Tusk",
+    "Arctic Fox Pelt",
+    "Blue Frog Leg",
+    "Bunny Foot",
+}
+
 -- Pelt names ที่ BigGameHunterClass กินได้ (จาก decompile u19)
+-- ไม่รวม Mammoth Tusk (user ไม่ต้องการ)
 BGH.PELT_ITEMS = {
     ["Bunny Foot"] = true,
     ["Wolf Pelt"] = true,
     ["Arctic Fox Pelt"] = true,
     ["Alpha Wolf Pelt"] = true,
     ["Bear Pelt"] = true,
-    ["Mammoth Tusk"] = true,
     ["Polar Bear Pelt"] = true,
     ["Scorpion Shell"] = true,
     ["Boar Tusk"] = true,
@@ -2068,19 +2082,64 @@ BGH.isWolfKillsQuestDone = function()
     return have >= reqs.WolfKills
 end
 
+-- คืน list ของ monster names ที่ยัง active (PeltList ยังไม่ Complete)
+-- ถ้า PeltList ยังไม่ replicate → fallback คืน priority list ทั้งหมด
+-- ลำดับตาม BGH.PELT_ORDER (Wolf → Scorpion → ... → Bunny)
+BGH.getActivePeltTypes = function()
+    local peltToMonster = {
+        ["Wolf Pelt"] = "Wolf",
+        ["Scorpion Shell"] = "Scorpion",
+        ["Alpha Wolf Pelt"] = "Alpha Wolf",
+        ["Bear Pelt"] = "Bear",
+        ["Polar Bear Pelt"] = "Polar Bear",
+        ["Boar Tusk"] = "Boar",
+        ["Arctic Fox Pelt"] = "Arctic Fox",
+        ["Blue Frog Leg"] = "Blue Frog",
+        ["Bunny Foot"] = "Bunny",
+    }
+
+    local PeltList = LocalPlayer:FindFirstChild("PeltList")
+    local active = {}
+
+    if not PeltList then
+        -- PeltList ยังไม่ replicate → fallback: ตีทุก type
+        for _, peltName in ipairs(BGH.PELT_ORDER) do
+            table.insert(active, peltToMonster[peltName])
+        end
+        return active
+    end
+
+    for _, peltName in ipairs(BGH.PELT_ORDER) do
+        local peltObj = PeltList:FindFirstChild(peltName)
+        if peltObj then
+            local complete = peltObj:GetAttribute("Complete") == true
+            if not complete then
+                table.insert(active, peltToMonster[peltName])
+            end
+        else
+            -- ไม่มีใน PeltList → น่าจะ unlock แล้ว (ถือว่า active)
+            table.insert(active, peltToMonster[peltName])
+        end
+    end
+
+    return active
+end
+
 -- BGH-specific monster finder:
 -- - skip "Cultist*" (ใช้ shouldSkipName เดิม)
 -- - skip StrongholdEnemy
--- - **ไม่ skip HP > 100** (BGH ตี Mammoth/Bear/Polar Bear ได้)
+-- - **ไม่ skip HP > 100** (BGH ตี Bear/Polar Bear ได้)
 -- - **ไม่ skip** Friendly/Pet/Ally (BGH ตีได้ทุกอย่างที่ดรอปของได้)
--- - WolfKills gate: ถ้ายังไม่ครบ → คืน Wolf ธรรมดาก่อนตัวเดียว
--- - เรียงตาม BGH.MONSTER_PRIORITY (Wolf = 1, Bunny = 10)
+-- - WolfKills gate: ถ้ายังไม่ครบ → คืน Wolf ธรรมดาก่อนตัวเดียว (override PeltList)
+-- - PeltList filter: ตีเฉพาะ monster ที่ PeltList ยังไม่ Complete
+-- - เรียงตาม BGH.MONSTER_PRIORITY
 BGH.findMonsters = function()
     local list = {}
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return list end
 
     local wolfOnlyMode = not BGH.isWolfKillsQuestDone()
+    local activeMonsters = BGH.getActivePeltTypes()
 
     for _, model in ipairs(chars:GetChildren()) do
         if not shouldSkipName(model.Name) then
@@ -2090,11 +2149,15 @@ BGH.findMonsters = function()
                 if hum and hum.Parent and hum.Health > 0 then
                     if BGH.PRIORITY_INDEX[model.Name] then
                         if wolfOnlyMode then
+                            -- Wolf gate: override PeltList (ตีเฉพาะ Wolf)
                             if model.Name == "Wolf" then
                                 table.insert(list, model)
                             end
                         else
-                            table.insert(list, model)
+                            -- filter ตาม PeltList active
+                            if table.find(activeMonsters, model.Name) then
+                                table.insert(list, model)
+                            end
                         end
                     end
                 end
@@ -4583,6 +4646,15 @@ local function bigGameHunterNightLoop()
     -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
+        -- Pre-check 0: PeltList ครบทุก type แล้ว? → warp กลับ Stronghold + exit
+        local activePeltTypes = BGH.getActivePeltTypes()
+        if #activePeltTypes == 0 then
+            print("[BigGameHunter] All PeltList types Complete - warping back to Stronghold")
+            disableFloating()
+            warpBackToStronghold()
+            return false
+        end
+
         -- Pre-check 1: Quest done? → cleanup + return (exit)
         if BGH.isBigGameHunterAllQuestDone() then
             local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
