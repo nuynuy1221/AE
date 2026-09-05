@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 5.43")
+print("Version - 1.2.6 / 5.52")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4981,16 +4981,29 @@ local function bigGameHunterNightLoop()
                 task.wait(0.2)
             end
 
-            -- ลอยค้างเหนือเป้า 10 studs
+            -- ลอยค้างเหนือเป้า (ใช้ followThread แบบ real-time — ติดตาม monster ทุก frame)
             ensureFloating()
-            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, HOVER_HEIGHT, 0))
-                * CFrame.Angles(math.rad(-90), 0, 0)
-            if floatAP then floatAP.Position = hrp.Position end
-            if floatAO then floatAO.CFrame = hrp.CFrame end
+
+            -- Spawn task ติดตาม monster position (อัปเดต HRP ทุก 0.1s — ตาม monster ขยับ)
+            local trackThread = task.spawn(function()
+                while monster and monster.Parent and hrp and hrp.Parent do
+                    local currentRoot = monster:FindFirstChild("HumanoidRootPart")
+                        or monster.PrimaryPart
+                    if currentRoot then
+                        local targetPos = currentRoot.Position + Vector3.new(0, HOVER_HEIGHT, 0)
+                        hrp.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.rad(-90), 0, 0)
+                        if floatAP then floatAP.Position = hrp.Position end
+                        if floatAO then floatAO.CFrame = hrp.CFrame end
+                    end
+                    task.wait(0.1)
+                end
+            end)
+
             task.wait(0.2)
 
             -- Quest check ก่อนตี (early exit)
             if BGH.isBigGameHunterAllQuestDone() then
+                pcall(function() task.cancel(trackThread) end)
                 bghExitAndCleanup("quest")
                 return false
             end
@@ -5008,10 +5021,12 @@ local function bigGameHunterNightLoop()
             local noDamageStreak = 0
             while monster and monster.Parent do
                 if BGH.isBigGameHunterAllQuestDone() then
+                    pcall(function() task.cancel(trackThread) end)
                     bghExitAndCleanup("quest")
                     return false
                 end
                 if checkAnyCultistSpawned() then
+                    pcall(function() task.cancel(trackThread) end)
                     bghExitForStronghold()
                     return false
                 end
@@ -5046,6 +5061,9 @@ local function bigGameHunterNightLoop()
                     end
                 end
             end
+
+            -- ยกเลิก track thread เมื่อจบ (monster ตายหรือเปลี่ยนตัว)
+            pcall(function() task.cancel(trackThread) end)
 
             -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
             if not (monster and monster.Parent) then
