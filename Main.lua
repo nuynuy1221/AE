@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 7.12")
+print("Version - 1.2.6 / 7.28")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2901,36 +2901,6 @@ while currentLevel < maxLevel do
                 print("✅ Max level reached")
                 updateStatus("✅ Fire Complete!")
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
-                break
-            end
-
-            -- ตัดต้นไม้หลายต้นใน main loop (จนกว่า level 7 หรือต้นหมด)
-            for treeIndex = treeIndex, #trees do
-                if getCurrentLevel() >= maxLevel then break end
-
-                local tree = trees[treeIndex]
-                if not (tree and tree.Parent) then continue end
-                local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
-
-                -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
-                local cutPos = treePos + Vector3.new(5, 0, 0)
-                humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
-                platform.Position = cutPos - Vector3.new(0, 3, 0)
-                task.wait(0.1)
-
-                -- ตีต้นไม้จนกว่าจะตาย (backstop 500 ตี)
-                local hitCount = 0
-                local failStreak = 0
-                while tree.Parent and hitCount < 500 do
-                if getCurrentLevel() >= maxLevel then
-                    print("✅ Max level reached")
-                    pcall(updateStatus, "✅ Fire Complete!")
-                    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
-                    break
-                end
-            end
-
-            if getCurrentLevel() >= maxLevel then
                 break
             end
 
