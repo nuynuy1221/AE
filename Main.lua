@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 4.56")
+print("Version - 1.2.6 / 5.31")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2371,18 +2371,6 @@ local function getCurrentLevel()
     return tonumber(levelMatch) or 1
 end
 
-local function isTimerExceeded()
-    local timerText = timerLabel.Text
-    local minutes, seconds = string.match(timerText, "(%d+):(%d+)")
-
-    if minutes and seconds then
-        local totalMinutes = tonumber(minutes)
-        return totalMinutes >= 20
-    end
-
-    return false
-end
-
 local warpedItems = {}
 local collectedChildren = {}
 
@@ -2797,11 +2785,8 @@ local function flyAndWarpItems()
 
     dropAllLostChildren()
 
-    if isTimerExceeded() then
-        return true
-    end
-
-    return false
+    -- Timer check ถูกลบออกแล้ว — ทำจนถึง level 7 เท่านั้น
+    return true
 end
 
 updateStatus("Initial Flight...")
@@ -2814,7 +2799,7 @@ updateStatus("Upgrading Fire...")
 
 local levelChanged = false
 task.spawn(function()
-    while currentLevel < maxLevel and not isTimerExceeded() do
+    while currentLevel < maxLevel do
         task.wait(0.1)
         local newLevel = getCurrentLevel()
         if newLevel ~= currentLevel then
@@ -2836,24 +2821,19 @@ task.spawn(function()
             end
         end
 
-        if isTimerExceeded() then
-            print("⏰ Timer exceeded 20:00!")
-            updateStatus("✅ Fire Complete!")
-            break
-        end
+        -- Timer check ถูกลบออก — ทำจนถึง level 7 เท่านั้น
     end
 
-    if isTimerExceeded() then
-        updateStatus("✅ Fire Complete!")
-    end
+    -- Timer check ถูกลบออก
+
 end)
 
 print("🔄 Starting main loop...")
 local treesSinceFlight = 0
 
-while currentLevel < maxLevel and not isTimerExceeded() do
+while currentLevel < maxLevel do
     currentLevel = getCurrentLevel()
-    if currentLevel >= maxLevel or isTimerExceeded() then
+    if currentLevel >= maxLevel then
         print("✅ Max level reached")
         updateStatus("✅ Fire Complete!")
         humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
@@ -2877,10 +2857,10 @@ while currentLevel < maxLevel and not isTimerExceeded() do
         print(string.format("🎉 Level increased to %d!", currentLevel))
         updateStatus("Upgrading Fire...")
 
-        local timerExceeded = flyAndWarpItems()
+        flyAndWarpItems()
 
-        if timerExceeded or getCurrentLevel() >= maxLevel or isTimerExceeded() then
-            print("✅ Max level reached or timer exceeded")
+        if getCurrentLevel() >= maxLevel then
+            print("✅ Max level reached")
             updateStatus("✅ Fire Complete!")
             humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
             break
@@ -2891,10 +2871,10 @@ while currentLevel < maxLevel and not isTimerExceeded() do
             updateStatus("Flying for Items...")
             treesSinceFlight = 0
 
-            local timerExceeded = flyAndWarpItems()
+            flyAndWarpItems()
 
-            if timerExceeded or getCurrentLevel() >= maxLevel or isTimerExceeded() then
-                print("✅ Max level reached or timer exceeded")
+            if getCurrentLevel() >= maxLevel then
+                print("✅ Max level reached")
                 updateStatus("✅ Fire Complete!")
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                 break
@@ -2944,13 +2924,11 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                     humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                     break
                 end
+            end
 
-                if isTimerExceeded() then
-                    print("⏰ Timer exceeded 20:00! (stopped mid-tree)")
-                    pcall(updateStatus, "✅ Fire Complete!")
-                    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
-                    break
-                end
+            if getCurrentLevel() >= maxLevel then
+                break
+            end
 
                 -- อัพเดท axe ทุกครั้งก่อนตี
                 local char = LocalPlayer.Character
@@ -2998,7 +2976,7 @@ while currentLevel < maxLevel and not isTimerExceeded() do
                 warn("Hit cap (500) reached on one tree - skipping")
             end
 
-            if getCurrentLevel() >= maxLevel or isTimerExceeded() then
+            if getCurrentLevel() >= maxLevel then
                 break
             end
 
