@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 11.55")
+print("Version - 1.2.6")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2058,15 +2058,29 @@ BGH.PELT_SKIP = {
 do
 
 -- เช็ค Quest ConsumePelt + WolfKills ครบทั้งคู่ (Lv ถัดไป)
+-- ลอง cache ก่อน → fallback อ่านจาก ClassProgress folder (server replicate)
 BGH.isBigGameHunterAllQuestDone = function()
     local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
     local reqs = CLASS_QUESTS["Big Game Hunter"]
         and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
     if not reqs then return true end
-    local have_consume = classStatCache["Big Game Hunter"]
-        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
-    local have_wolves = classStatCache["Big Game Hunter"]
-        and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+
+    local function getStat(statKey)
+        -- 1. ลอง classStatCache ก่อน (real-time จาก ClassStatUpdated)
+        if classStatCache["Big Game Hunter"] and classStatCache["Big Game Hunter"][statKey] then
+            return classStatCache["Big Game Hunter"][statKey]
+        end
+        -- 2. Fallback: อ่านจาก ClassProgress folder
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        local folder = cp and cp:FindFirstChild("Big Game Hunter")
+        if folder then
+            return folder:GetAttribute(statKey) or 0
+        end
+        return 0
+    end
+
+    local have_consume = getStat("ConsumePelt")
+    local have_wolves = getStat("WolfKills")
     return have_consume >= (reqs.ConsumePelt or 0)
         and have_wolves >= (reqs.WolfKills or 0)
 end
@@ -3068,16 +3082,16 @@ if getTotalWood() < NEED_WOOD then
         end
 
         hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        -- ดึงไม้ทั้งหมดใน workspace.Items ไปโต๊ะคราฟ (ทีละชิ้น, รอ Drag เสร็จก่อน)
+        -- ดึงไม้ที่อยู่ใน workspace.Items ไปโต๊ะคราฟทันที (async ไม่ block — ไปต้นต่อไปได้เลย)
         if craftPos then
             for _, item in ipairs(workspace.Items:GetChildren()) do
                 if CRAFTING_BENCH_ITEMS[item.Name] and not warpedItems[item] then
-                    dragItemToCraftingBench(item, craftPos)
+                    warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
                 end
             end
         end
         updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
-        -- ถ้า Wood ถึง NEED_WOOD แล้ว → ออก loop ทันที (ไม่ต้องตัดต้นต่อไป)
+        -- ถ้า Wood ถึง NEED_WOOD แล้ว → ออก loop ทันที
         if getTotalWood() >= NEED_WOOD then
             break
         end
@@ -4725,13 +4739,40 @@ local function bigGameHunterNightLoop()
             return false  -- signal: stop loop
         end
 
-        -- Pre-check 0: PeltList ครบทุก type แล้ว? → แค่ warp กลับ Stronghold + exit (ไม่ cleanup เต็ม)
+        -- Pre-check 0: PeltList ครบทุก type แล้ว? → cleanup + warp + exit
         local activePeltTypes = BGH.getActivePeltTypes()
         if #activePeltTypes == 0 then
-            print("[BigGameHunter] All PeltList types Complete - warping back to Stronghold")
+            print("[BigGameHunter] All PeltList types Complete - exiting")
             disableFloating()
             warpBackToStronghold()
-            return false
+            -- cleanup map/chars (เหมือน Quest done)
+            pcall(function()
+                local map = workspace:FindFirstChild("Map")
+                if map then
+                    local mapFolderNames = {
+                        "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+                        "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+                        "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+                    }
+                    for _, folderName in ipairs(mapFolderNames) do
+                        local folder = map:FindFirstChild(folderName)
+                        if folder then
+                            for _, child in ipairs(folder:GetChildren()) do
+                                if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                                    pcall(function() child:Destroy() end)
+                                end
+                            end
+                        end
+                    end
+                end
+                local chars = workspace:FindFirstChild("Characters")
+                if chars then
+                    for _, child in ipairs(chars:GetChildren()) do
+                        pcall(function() child:Destroy() end)
+                    end
+                end
+            end)
+            return false  -- signal: stop loop
         end
 
         -- Pre-check 2: Cultist spawned? → return (Stronghold flow takes over)
@@ -5770,6 +5811,14 @@ while completedRounds < TOTAL_ROUNDS do
             warpToStrongholdFloor(1)
             alienScientistNightLoop()
         elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
+            -- BGH: ถ้า PeltList ทุก type Complete แต่ Quest ยังไม่ done → ออก Lobby ทันที
+            -- (BGH ทำไม่ได้แล้ว — limit per type = 3, total < Quest goal 50)
+            local activeAfterRound = BGH.getActivePeltTypes()
+            if #activeAfterRound == 0 then
+                print("[BigGameHunter] PeltList all Complete but Quest not done - leaving for Lobby")
+                forceTeleportLobby()
+                return
+            end
             print("[BigGameHunter] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             bigGameHunterNightLoop()
