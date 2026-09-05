@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6")
+print("Version - 1.2.6 / 12.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4692,6 +4692,46 @@ local function bigGameHunterNightLoop()
         end
     end
 
+    -- Helper: BGH loop จบ — disable floating + warp กลับ + cleanup map/chars
+    -- เรียกเมื่อ Quest done / PeltList หมด (BGH ทำงานเสร็จแล้ว ไม่ต้องใช้ map อีก)
+    local function bghExitAndCleanup()
+        disableFloating()
+        warpBackToStronghold()
+        pcall(function()
+            local map = workspace:FindFirstChild("Map")
+            if map then
+                local mapFolderNames = {
+                    "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+                    "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+                    "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+                }
+                for _, folderName in ipairs(mapFolderNames) do
+                    local folder = map:FindFirstChild(folderName)
+                    if folder then
+                        for _, child in ipairs(folder:GetChildren()) do
+                            if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                                pcall(function() child:Destroy() end)
+                            end
+                        end
+                    end
+                end
+            end
+            local chars = workspace:FindFirstChild("Characters")
+            if chars then
+                for _, child in ipairs(chars:GetChildren()) do
+                    pcall(function() child:Destroy() end)
+                end
+            end
+        end)
+    end
+
+    -- Helper: BGH loop จบเพื่อเข้า Stronghold fight — แค่ disable floating + warp กลับ
+    -- ไม่ cleanup เพราะ Cultist + map folders ต้องใช้ใน Stronghold fight
+    local function bghExitForStronghold()
+        disableFloating()
+        warpBackToStronghold()
+    end
+
     -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
@@ -4707,35 +4747,7 @@ local function bigGameHunterNightLoop()
                 and classStatCache["Big Game Hunter"]["WolfKills"] or 0
             print(string.format("[BigGameHunter] Quests done: ConsumePelt %d/%d, WolfKills %d/%d",
                 have_consume, goal_consume, have_wolves, goal_wolves))
-            disableFloating()
-            warpBackToStronghold()
-            -- ลบ map/chars (เลียนแบบ pattern เดียวกับ Step 3.7) — เก็บไว้เฉพาะ Stronghold
-            pcall(function()
-                local map = workspace:FindFirstChild("Map")
-                if map then
-                    local mapFolderNames = {
-                        "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
-                        "ExplodableModels", "FishingSpots", "Foliage", "Ground",
-                        "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
-                    }
-                    for _, folderName in ipairs(mapFolderNames) do
-                        local folder = map:FindFirstChild(folderName)
-                        if folder then
-                            for _, child in ipairs(folder:GetChildren()) do
-                                if not (folderName == "Landmarks" and child.Name == "Stronghold") then
-                                    pcall(function() child:Destroy() end)
-                                end
-                            end
-                        end
-                    end
-                end
-                local chars = workspace:FindFirstChild("Characters")
-                if chars then
-                    for _, child in ipairs(chars:GetChildren()) do
-                        pcall(function() child:Destroy() end)
-                    end
-                end
-            end)
+            bghExitAndCleanup()
             return false  -- signal: stop loop
         end
 
@@ -4743,35 +4755,7 @@ local function bigGameHunterNightLoop()
         local activePeltTypes = BGH.getActivePeltTypes()
         if #activePeltTypes == 0 then
             print("[BigGameHunter] All PeltList types Complete - exiting")
-            disableFloating()
-            warpBackToStronghold()
-            -- cleanup map/chars (เหมือน Quest done)
-            pcall(function()
-                local map = workspace:FindFirstChild("Map")
-                if map then
-                    local mapFolderNames = {
-                        "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
-                        "ExplodableModels", "FishingSpots", "Foliage", "Ground",
-                        "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
-                    }
-                    for _, folderName in ipairs(mapFolderNames) do
-                        local folder = map:FindFirstChild(folderName)
-                        if folder then
-                            for _, child in ipairs(folder:GetChildren()) do
-                                if not (folderName == "Landmarks" and child.Name == "Stronghold") then
-                                    pcall(function() child:Destroy() end)
-                                end
-                            end
-                        end
-                    end
-                end
-                local chars = workspace:FindFirstChild("Characters")
-                if chars then
-                    for _, child in ipairs(chars:GetChildren()) do
-                        pcall(function() child:Destroy() end)
-                    end
-                end
-            end)
+            bghExitAndCleanup()
             return false  -- signal: stop loop
         end
 
@@ -4781,7 +4765,7 @@ local function bigGameHunterNightLoop()
             warn(string.format("[BigGameHunter] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
         elseif cultistResult then
             print("[BigGameHunter] Stronghold opened, pausing NightLoop")
-            disableFloating()
+            bghExitForStronghold()
             return false
         end
 
@@ -4812,10 +4796,11 @@ local function bigGameHunterNightLoop()
                 for i = 0, scanSteps do
                     -- Re-check ระหว่าง fly (อาจเจอมอนแล้ว)
                     if BGH.isBigGameHunterAllQuestDone() then
+                        bghExitAndCleanup()
                         return false
                     end
                     if checkAnyCultistSpawned() then
-                        disableFloating()
+                        bghExitForStronghold()
                         return false
                     end
                     local angle = (i / scanSteps) * math.pi * 2
@@ -4841,12 +4826,11 @@ local function bigGameHunterNightLoop()
         for monsterIdx, monster in ipairs(monsters) do
             -- Re-check ใน for loop
             if BGH.isBigGameHunterAllQuestDone() then
-                disableFloating()
-                warpBackToStronghold()
+                bghExitAndCleanup()
                 return false
             end
             if checkAnyCultistSpawned() then
-                disableFloating()
+                bghExitForStronghold()
                 return false
             end
 
@@ -4890,8 +4874,7 @@ local function bigGameHunterNightLoop()
 
             -- Quest check ก่อนตี (early exit)
             if BGH.isBigGameHunterAllQuestDone() then
-                disableFloating()
-                warpBackToStronghold()
+                bghExitAndCleanup()
                 return false
             end
 
@@ -4906,12 +4889,11 @@ local function bigGameHunterNightLoop()
             -- ตีซ้ำจนกว่าจะตาย (ไม่มี cap — recheck ทุก hit)
             while monster and monster.Parent do
                 if BGH.isBigGameHunterAllQuestDone() then
-                    disableFloating()
-                    warpBackToStronghold()
+                    bghExitAndCleanup()
                     return false
                 end
                 if checkAnyCultistSpawned() then
-                    disableFloating()
+                    bghExitForStronghold()
                     return false
                 end
 
