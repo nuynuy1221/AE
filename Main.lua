@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6")
+print("Version - 1.2.6 / 11.26")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4786,6 +4786,13 @@ local function bigGameHunterNightLoop()
             if checkAnyCultistSpawned() then
                 disableFloating()
                 return false
+            end
+
+            -- Re-check active types (กรณี PeltList Complete เปลี่ยนระหว่าง for loop)
+            local activeNow = BGH.getActivePeltTypes()
+            if not table.find(activeNow, monster.Name) then
+                print("[BigGameHunter] " .. monster.Name .. " type now Complete, skipping")
+                continue
             end
 
             if not (monster and monster.Parent) then continue end
