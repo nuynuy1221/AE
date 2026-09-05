@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 1.38")
+print("Version - 1.2.6 / 4.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2562,21 +2562,38 @@ local function dropAllLostChildren(retryDepth)
         end
 
         -- วาร์ปไปยืน "ด้านหน้ากองไฟ" (+5 stud = จุดยืนมาตรฐานเดียวกับที่ใช้ทั่วสคริปต์)
-        local targetPos = firePos + Vector3.new(5, 3, 0)
-        local warpSuccess, warpErr = pcall(function()
-            humanoidRootPart.CFrame = CFrame.new(targetPos)
-        end)
+        -- ลองหลายมุม ถ้ามุมแรกไม่ได้ (เช่น user วาร์ปไปไกล + BodyVelocity drift)
+        local offsets = {
+            Vector3.new(5, 3, 0),    -- มุมหลัก (ตรงข้างกองไฟ)
+            Vector3.new(-5, 3, 0),   -- มุมตรงข้าม
+            Vector3.new(0, 3, 5),    -- มุมหน้า
+            Vector3.new(0, 3, -5),   -- มุมหลัง
+            Vector3.new(0, 3, 0),    -- ตรงกลาง (fallback)
+        }
+        local warped = false
+        for _, offset in ipairs(offsets) do
+            local targetPos = firePos + offset
+            for _ = 1, 5 do
+                pcall(function()
+                    humanoidRootPart.CFrame = CFrame.new(targetPos)
+                end)
+                task.wait(0.3)
+                if (humanoidRootPart.Position - targetPos).Magnitude < 10 then
+                    warped = true
+                    break
+                end
+            end
+            if warped then break end
+        end
 
-        if not warpSuccess then
-            warn("Failed to warp to campfire:", warpErr)
+        if not warped then
+            warn("Failed to warp close to campfire - last distance:", (humanoidRootPart.Position - firePos).Magnitude)
             return 0, {}
         end
 
-        task.wait(0.1)
-
         -- ตรวจสอบว่าวาร์ปสำเร็จจริง
         local currentPos = humanoidRootPart.Position
-        local distance = (currentPos - targetPos).Magnitude
+        local distance = (currentPos - firePos).Magnitude
         if distance > 10 then
             warn("Warp to campfire failed! Distance from target:", distance)
             return 0, {}
@@ -4747,6 +4764,10 @@ local function bigGameHunterNightLoop()
         warpBackToStronghold()
     end
 
+    -- counter สำหรับนับจำนวนครั้งที่ "ไม่เจอ monster" (กัน infinite loop ถ้า server delay replicate)
+    local noMonsterCount = 0
+    local NO_MONSTER_LIMIT = 3  -- ถ้า 3 รอบติดกันไม่เจอ → exit (BGH ทำไม่ได้แล้ว)
+
     -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
     -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
     local function runBGHIteration()
@@ -4830,6 +4851,24 @@ local function bigGameHunterNightLoop()
             end
             -- ถ้าเจอระหว่าง fly → ไม่ต้องเข้า "รอ" mode (เด้งไป for loop เลย)
             if not foundDuringScan then
+                -- นับครั้งที่ไม่เจอ monster (กัน infinite loop)
+                noMonsterCount = noMonsterCount + 1
+                if noMonsterCount >= NO_MONSTER_LIMIT then
+                    -- Double-check PeltList Complete (กัน false positive จาก server delay replicate)
+                    task.wait(2)  -- รอให้ server replicate
+                    local recheck = BGH.getActivePeltTypes()
+                    if #recheck == 0 then
+                        -- ยืนยัน: PeltList ครบจริง → exit
+                        print("[BigGameHunter] No monsters found " .. NO_MONSTER_LIMIT
+                            .. " times in a row + PeltList confirmed complete - exiting")
+                        bghExitAndCleanup("peltlist")
+                        return false
+                    else
+                        -- PeltList ยังมี type active → server replicate แล้ว → monster spawn ใหม่ → วน loop ใหม่
+                        print("[BigGameHunter] PeltList still has " .. #recheck .. " active types - resetting counter")
+                        noMonsterCount = 0
+                    end
+                end
                 -- หลัง fly scan 1 รอบ: ถ้า WolfKills ยังไม่ครบ + Wolf Pelt Complete + ไม่เจอ Wolf
                 -- → เปลี่ยนไปทำ Pelt อื่นแทน (ถ้ามี) — รอ Wolf spawn ใหม่
                 if not BGH.isWolfKillsQuestDone() then
@@ -5010,6 +5049,7 @@ local function bigGameHunterNightLoop()
             if not (monster and monster.Parent) then
                 local dropPos = root.Position
                 BGH.consumePeltsNear(dropPos, PELT_SEARCH_RADIUS)
+                noMonsterCount = 0  -- reset (kill monster สำเร็จ = โค้ดยังทำงานได้)
             end
         end
         task.wait(0.5)
