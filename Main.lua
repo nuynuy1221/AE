@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 5.52")
+print("Version - 1.2.6 / 6.23")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2904,20 +2904,24 @@ while currentLevel < maxLevel do
                 break
             end
 
-            local tree = trees[treeIndex]
-            local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+            -- ตัดต้นไม้หลายต้นใน main loop (จนกว่า level 7 หรือต้นหมด)
+            for treeIndex = treeIndex, #trees do
+                if getCurrentLevel() >= maxLevel then break end
 
-            -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
-            local cutPos = treePos + Vector3.new(5, 0, 0)
-            humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
-            platform.Position = cutPos - Vector3.new(0, 3, 0)
+                local tree = trees[treeIndex]
+                if not (tree and tree.Parent) then continue end
+                local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
 
-            task.wait(0.1)
+                -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
+                local cutPos = treePos + Vector3.new(5, 0, 0)
+                humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
+                platform.Position = cutPos - Vector3.new(0, 3, 0)
+                task.wait(0.1)
 
-            local hitCount = 0
-            local failStreak = 0
-            -- backstop 500 ตี: กันต้นที่เซิร์ฟปัด damage เงียบๆ จนลูปฟาร์มหลักค้าง
-            while tree.Parent and hitCount < 500 do
+                -- ตีต้นไม้จนกว่าจะตาย (backstop 500 ตี)
+                local hitCount = 0
+                local failStreak = 0
+                while tree.Parent and hitCount < 500 do
                 if getCurrentLevel() >= maxLevel then
                     print("✅ Max level reached")
                     pcall(updateStatus, "✅ Fire Complete!")
@@ -2930,61 +2934,82 @@ while currentLevel < maxLevel do
                 break
             end
 
-                -- อัพเดท axe ทุกครั้งก่อนตี
-                local char = LocalPlayer.Character
-                local th = char and char:FindFirstChild("ToolHandle")
-                local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+            -- ตัดต้นไม้หลายต้น: for loop วนจนกว่า level 7 หรือต้นหมด
+            for treeIndex = treeIndex, #trees do
+                if getCurrentLevel() >= maxLevel then break end
 
-                if not currentAxe then
-                    warn("Axe lost, re-equipping...")
-                    Client.InventoryHandler.RequestEquipItem(bestAxe)
-                    task.wait(0.3)
-                    char = LocalPlayer.Character
-                    th = char and char:FindFirstChild("ToolHandle")
-                    currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                local tree = trees[treeIndex]
+                if not (tree and tree.Parent) then continue end
+                local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+
+                -- วาร์ปไปข้างต้นไม้ 5 studs
+                local cutPos = treePos + Vector3.new(5, 0, 0)
+                humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
+                platform.Position = cutPos - Vector3.new(0, 3, 0)
+                task.wait(0.1)
+
+                -- ตีต้นไม้จนกว่าจะตาย (backstop 500 ตี)
+                local hitCount = 0
+                local failStreak = 0
+                while tree.Parent and hitCount < 500 do
+                    if getCurrentLevel() >= maxLevel then break end
+
+                    -- อัพเดท axe ทุกครั้งก่อนตี
+                    local char = LocalPlayer.Character
+                    local th = char and char:FindFirstChild("ToolHandle")
+                    local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+
                     if not currentAxe then
-                        warn("Cannot equip axe")
-                        break
+                        warn("Axe lost, re-equipping...")
+                        Client.InventoryHandler.RequestEquipItem(bestAxe)
+                        task.wait(0.3)
+                        char = LocalPlayer.Character
+                        th = char and char:FindFirstChild("ToolHandle")
+                        currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                        if not currentAxe then break end
                     end
+
+                    humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if not humanoidRootPart then break end
+
+                    local success, err = pcall(function()
+                        Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
+                    end)
+
+                    if success then
+                        failStreak = 0
+                    else
+                        failStreak = failStreak + 1
+                        if hitCount == 0 then
+                            warn("First hit failed:", err)
+                        end
+                        if failStreak >= 5 then
+                            warn("Tree not taking damage after 5 consecutive failed hits - skipping")
+                            break
+                        end
+                    end
+
+                    task.wait(0.18)
+                    hitCount = hitCount + 1
                 end
 
-                -- ใช้ remote event อย่างเดียว
-                local success, err = pcall(function()
-                    Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
-                end)
-
-                if success then
-                    failStreak = 0
-                else
-                    -- เงื่อนไขเดิม (hitCount > 5 and not tree.Parent) ขัดกับเงื่อนไขลูป = เงื่อนไขตาย
-                    -- เปลี่ยนเป็นนับ invoke error ติดกัน 5 ครั้งแล้วข้ามต้นนี้
-                    failStreak += 1
-                    if hitCount == 0 then
-                        warn("First hit failed:", err)
-                    end
-                    if failStreak >= 5 then
-                        warn("Tree not taking damage after 5 consecutive failed hits - skipping")
-                        break
-                    end
+                if tree.Parent and hitCount >= 500 then
+                    warn("Hit cap (500) reached on one tree - skipping")
                 end
 
-                task.wait(0.18)
-                hitCount = hitCount + 1
+                if getCurrentLevel() >= maxLevel then
+                    break
+                end
+
+                treesSinceFlight = treesSinceFlight + 1
+
+                -- ตัดครบ 3 ต้น → fly + ออก for loop
+                if treesSinceFlight >= 3 then
+                    break
+                end
+
+                task.wait(0.1)
             end
-
-            if tree.Parent and hitCount >= 500 then
-                warn("Hit cap (500) reached on one tree - skipping")
-            end
-
-            if getCurrentLevel() >= maxLevel then
-                break
-            end
-
-            print(string.format("✅ Tree %d destroyed (%d hits)", treeIndex, hitCount))
-            treeIndex = treeIndex + 1
-            treesSinceFlight = treesSinceFlight + 1
-
-            task.wait(0.1)
         end
 end
 
