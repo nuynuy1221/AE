@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 1.13")
+print("Version - 1.2.6 / 1.30")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4784,21 +4784,21 @@ local function bigGameHunterNightLoop()
 
         monsters = findResult
         if #monsters == 0 then
-            -- ไม่เจอมอนที่ตีได้ → บินวน 1 รอบ (pattern เดียวกับ flyAndWarpItems แต่แค่ 1 รอบ)
+            -- ไม่เจอมอนที่ตีได้ → บินวน 1 รอบ radius 500 จนกว่าจะเจอ
             -- ใช้ finalGateBasePos เป็น center (กลาง Stronghold) เพราะอยู่ใน Stronghold
-            print("[BigGameHunter] No hittable monsters - flying 1 lap to find more")
+            print("[BigGameHunter] No hittable monsters - flying to find more")
             updateStatus("Scanning for monsters...")
             local hrp = LocalPlayer.Character
                 and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local center = finalGateBasePos or hrp.Position
                 local scanRadius = 500
-                local scanSteps = 40
+                local scanSteps = 60
                 local circumference = 2 * math.pi * scanRadius
                 local speed = 800
                 local duration = circumference / speed
                 for i = 0, scanSteps do
-                    -- Re-check ระหว่าง fly (อาจเจอมอนแล้ว)
+                    -- Re-check ระหว่าง fly
                     if BGH.isBigGameHunterAllQuestDone() then
                         bghExitAndCleanup("quest")
                         return false
@@ -4817,21 +4817,100 @@ local function bigGameHunterNightLoop()
                     if floatAP then floatAP.Position = hrp.Position end
                     if floatAO then floatAO.CFrame = hrp.CFrame end
                     task.wait(duration / scanSteps)
-                    -- เช็คอีกครั้งหลัง fly 1 รอบ เผื่อเจอมอนระหว่างทาง
+                    -- เช็คทุก 10 steps เผื่อเจอมอน
                     if i % 10 == 5 then
                         local ok2, recheck = pcall(BGH.findMonsters)
-                        if ok2 and recheck and #recheck > 0 then break end
+                        if ok2 and recheck and #recheck > 0 then
+                            goto foundMonster
+                        end
                     end
                 end
+                ::foundMonster::
             end
-            -- หลัง fly scan 1 รอบ: ถ้า WolfKills ยังไม่ครบ + Wolf Pelt Complete + ไม่เจอ Wolf → ออก (ทำไม่ได้แล้ว)
+            -- หลัง fly scan 1 รอบ: ถ้า WolfKills ยังไม่ครบ + Wolf Pelt Complete + ไม่เจอ Wolf
+            -- → เปลี่ยนไปทำ Pelt อื่นแทน (ถ้ามี) — รอ Wolf spawn ใหม่
             if not BGH.isWolfKillsQuestDone() then
                 local active = BGH.getActivePeltTypes()
                 if not table.find(active, "Wolf") then
-                    -- Wolf Pelt Complete แต่ WolfKills ยังไม่ครบ + ไม่เจอ Wolf = ทำไม่ได้แล้ว
-                    print("[BigGameHunter] WolfKills quest incomplete but no Wolf available - exiting")
-                    bghExitAndCleanup("peltlist")
-                    return false
+                    -- Wolf Pelt Complete แต่ WolfKills ยังไม่ครบ + ไม่เจอ Wolf
+                    -- → เปลี่ยนโหมด: ตี Pelt อื่นแทน (กิน ConsumePelt เพิ่ม ระหว่างรอ Wolf)
+                    -- override wolfOnlyMode ชั่วคราวใน loop นี้
+                    local otherMonsters = {}
+                    pcall(function()
+                        local chars = workspace:FindFirstChild("Characters")
+                        if not chars then return end
+                        for _, model in ipairs(chars:GetChildren()) do
+                            if not shouldSkipName(model.Name) then
+                                if model:GetAttribute("StrongholdEnemy") ~= true then
+                                    local hum = model:FindFirstChildOfClass("Humanoid")
+                                        or model:FindFirstChildWhichIsA("Humanoid", true)
+                                    if hum and hum.Parent and hum.Health > 0 then
+                                        if BGH.PRIORITY_INDEX[model.Name] then
+                                            if model.Name ~= "Wolf" then
+                                                if table.find(active, model.Name) then
+                                                    table.insert(otherMonsters, model)
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    if #otherMonsters > 0 then
+                        -- มี Pelt อื่นให้ตี → ตีเลย
+                        table.sort(otherMonsters, function(a, b)
+                            return (BGH.PRIORITY_INDEX[a.Name] or 999) < (BGH.PRIORITY_INDEX[b.Name] or 999)
+                        end)
+                        for _, otherMonster in ipairs(otherMonsters) do
+                            if not (otherMonster and otherMonster.Parent) then continue end
+                            local otherRoot = otherMonster:FindFirstChild("HumanoidRootPart")
+                                or otherMonster.PrimaryPart
+                            if not otherRoot then continue end
+                            if axe then
+                                pcall(function() Client.InventoryHandler.RequestEquipItem(axe) end)
+                                task.wait(0.2)
+                            end
+                            ensureFloating()
+                            local hrp2 = LocalPlayer.Character
+                                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            if not hrp2 then break end
+                            hrp2.CFrame = CFrame.new(otherRoot.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                                * CFrame.Angles(math.rad(-90), 0, 0)
+                            if floatAP then floatAP.Position = hrp2.Position end
+                            if floatAO then floatAO.CFrame = hrp2.CFrame end
+                            task.wait(0.2)
+                            pcall(zeroEnemyHealth, otherMonster)
+                            task.wait(1)
+                            pcall(function()
+                                Event:InvokeServer(otherMonster, axe, ownerId, hrp2.CFrame, false)
+                            end)
+                            while otherMonster and otherMonster.Parent do
+                                if BGH.isBigGameHunterAllQuestDone() then
+                                    bghExitAndCleanup("quest")
+                                    return false
+                                end
+                                if checkAnyCultistSpawned() then
+                                    bghExitForStronghold()
+                                    return false
+                                end
+                                pcall(zeroEnemyHealth, otherMonster)
+                                task.wait(0.5)
+                                pcall(function()
+                                    Event:InvokeServer(otherMonster, axe, ownerId, hrp2.CFrame, false)
+                                end)
+                                task.wait(0.2)
+                            end
+                            if not (otherMonster and otherMonster.Parent) then
+                                BGH.consumePeltsNear(otherRoot.Position, PELT_SEARCH_RADIUS)
+                            end
+                            task.wait(0.3)
+                        end
+                    else
+                        -- ไม่มี Pelt อื่นให้ตี + ไม่มี Wolf → รอ (ไม่ exit — แค่ continue)
+                        -- เพราะอาจมี Cultist spawn ระหว่างนี้
+                        print("[BigGameHunter] No Wolf + no other pelts - waiting for spawn")
+                    end
                 end
             end
             return true  -- continue (วน loop ใหม่)
