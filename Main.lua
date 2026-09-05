@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 11.05")
+print("Version - 1.2.6")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2085,6 +2085,7 @@ end
 -- คืน list ของ monster names ที่ยัง active (PeltList ยังไม่ Complete)
 -- ถ้า PeltList ยังไม่ replicate → fallback คืน priority list ทั้งหมด
 -- ลำดับตาม BGH.PELT_ORDER (Wolf → Scorpion → ... → Bunny)
+-- Debug: print สถานะทุก type ทุกครั้งที่ถูกเรียก
 BGH.getActivePeltTypes = function()
     local peltToMonster = {
         ["Wolf Pelt"] = "Wolf",
@@ -2100,28 +2101,40 @@ BGH.getActivePeltTypes = function()
 
     local PeltList = LocalPlayer:FindFirstChild("PeltList")
     local active = {}
+    local debugLines = {"[BGH PeltList Status]"}
 
     if not PeltList then
-        -- PeltList ยังไม่ replicate → fallback: ตีทุก type
+        debugLines[#debugLines + 1] = "  PeltList: not replicated (fallback: all types active)"
         for _, peltName in ipairs(BGH.PELT_ORDER) do
             table.insert(active, peltToMonster[peltName])
+            debugLines[#debugLines + 1] = string.format("  %s: fallback (active)", peltName)
         end
+        print(table.concat(debugLines, "\n"))
         return active
     end
 
     for _, peltName in ipairs(BGH.PELT_ORDER) do
         local peltObj = PeltList:FindFirstChild(peltName)
         if peltObj then
-            local complete = peltObj:GetAttribute("Complete") == true
-            if not complete then
+            local count = peltObj:GetAttribute("Count")
+            local complete = peltObj:GetAttribute("Complete")
+            local isComplete = (complete == true)
+            local status
+            if isComplete then
+                status = "COMPLETE (skip)"
+            else
+                status = string.format("active (Count=%s)", tostring(count))
                 table.insert(active, peltToMonster[peltName])
             end
+            debugLines[#debugLines + 1] = string.format("  %s: %s", peltName, status)
         else
-            -- ไม่มีใน PeltList → น่าจะ unlock แล้ว (ถือว่า active)
             table.insert(active, peltToMonster[peltName])
+            debugLines[#debugLines + 1] = string.format("  %s: not in PeltList (active)", peltName)
         end
     end
 
+    debugLines[#debugLines + 1] = string.format("  → Active monsters: %s", table.concat(active, ", "))
+    print(table.concat(debugLines, "\n"))
     return active
 end
 
