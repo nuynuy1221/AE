@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 4.30")
+print("Version - 1.2.6 / 4.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2564,11 +2564,11 @@ local function dropAllLostChildren(retryDepth)
         -- วาร์ปไปยืน "ด้านหน้ากองไฟ" (+5 stud = จุดยืนมาตรฐานเดียวกับที่ใช้ทั่วสคริปต์)
         -- ลองหลายมุม ถ้ามุมแรกไม่ได้ (เช่น user วาร์ปไปไกล + BodyVelocity drift)
         local offsets = {
-            Vector3.new(5, 3, 0),    -- มุมหลัก (ตรงข้างกองไฟ)
-            Vector3.new(-5, 3, 0),   -- มุมตรงข้าม
-            Vector3.new(0, 3, 5),    -- มุมหน้า
-            Vector3.new(0, 3, -5),   -- มุมหลัง
-            Vector3.new(0, 3, 0),    -- ตรงกลาง (fallback)
+            Vector3.new(20, 3, 0),    -- มุมหลัก (ตรงข้างกองไฟ)
+            Vector3.new(-20, 3, 0),   -- มุมตรงข้าม
+            Vector3.new(0, 3, 20),    -- มุมหน้า
+            Vector3.new(0, 3, -20),   -- มุมหลัง
+            Vector3.new(0, 3, 0),     -- ตรงกลาง (fallback)
         }
         local warped = false
         for _, offset in ipairs(offsets) do
@@ -2591,10 +2591,10 @@ local function dropAllLostChildren(retryDepth)
             return 0, {}
         end
 
-        -- ตรวจสอบว่าวาร์ปสำเร็จจริง
+        -- ตรวจสอบว่าวาร์ปสำเร็จจริง (distance ≤ 25 studs จาก firePos)
         local currentPos = humanoidRootPart.Position
         local distance = (currentPos - firePos).Magnitude
-        if distance > 10 then
+        if distance > 25 then
             warn("Warp to campfire failed! Distance from target:", distance)
             return 0, {}
         end
@@ -5027,6 +5027,8 @@ local function bigGameHunterNightLoop()
             task.wait(0.3)
 
             -- ตีซ้ำจนกว่าจะตาย (ไม่มี cap — recheck ทุก hit)
+            -- Protection: ถ้าตี 5 ครั้งติด HP ไม่ลด → เปลี่ยนตัว (กันตีค้าง)
+            local noDamageStreak = 0
             while monster and monster.Parent do
                 if BGH.isBigGameHunterAllQuestDone() then
                     bghExitAndCleanup("quest")
@@ -5037,12 +5039,35 @@ local function bigGameHunterNightLoop()
                     return false
                 end
 
+                -- เช็ค HP ก่อนตี
+                local humBefore = monster:FindFirstChildOfClass("Humanoid")
+                    or monster:FindFirstChildWhichIsA("Humanoid", true)
+                local hpBefore = humBefore and humBefore.Health or 0
+
                 pcall(zeroEnemyHealth, monster)
                 task.wait(0.5)
                 pcall(function()
                     Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
                 end)
                 task.wait(0.2)
+
+                -- เช็ค HP หลังตี
+                if monster and monster.Parent and humBefore then
+                    local humAfter = monster:FindFirstChildOfClass("Humanoid")
+                        or monster:FindFirstChildWhichIsA("Humanoid", true)
+                    local hpAfter = humAfter and humAfter.Health or 0
+                    if hpAfter >= hpBefore then
+                        noDamageStreak = noDamageStreak + 1
+                        if noDamageStreak >= 5 then
+                            -- ตี 5 ครั้ง HP ไม่ลด → เปลี่ยนตัว
+                            warn(string.format("[BigGameHunter] %s not taking damage after 5 hits - skipping",
+                                monster.Name))
+                            break
+                        end
+                    else
+                        noDamageStreak = 0  -- reset (มี damage แล้ว)
+                    end
+                end
             end
 
             -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
