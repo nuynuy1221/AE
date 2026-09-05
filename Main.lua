@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.6 / 6.23")
+print("Version - 1.2.6 / 7.12")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3011,6 +3011,7 @@ while currentLevel < maxLevel do
                 task.wait(0.1)
             end
         end
+    end
 end
 
 print("🎉 Fire reached max level!")
