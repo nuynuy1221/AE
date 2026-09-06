@@ -4,7 +4,7 @@ if game.PlaceId ~= 84515722934860 then
     return
 end
 
-print("Version 1.2.14 / 6.57")
+print("Version 1.2.14 / 7.15")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -123,6 +123,26 @@ local hasSummonConfig = _G.Config.SummonUnits and (
     (type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits ~= "") or
     (type(_G.Config.SummonUnits) == "table" and #_G.Config.SummonUnits > 0)
 )
+
+-- Redeem Codes Config
+-- รองรับ: table หรือ CSV string เท่านั้น
+-- ถ้าไม่มี หรือ empty หรือรูปแบบผิด → skip
+local REDEEM_CODES = nil
+if type(_G.Config.Codes) == "table" and #_G.Config.Codes > 0 then
+    REDEEM_CODES = _G.Config.Codes
+elseif type(_G.Config.Codes) == "string" and _G.Config.Codes ~= "" then
+    -- แปลง CSV string เป็น table
+    REDEEM_CODES = {}
+    for code in string.gmatch(_G.Config.Codes, "[^,]+") do
+        local trimmed = code:match("^%s*(.-)%s*$")
+        if trimmed ~= "" then
+            table.insert(REDEEM_CODES, trimmed)
+        end
+    end
+    if #REDEEM_CODES == 0 then
+        REDEEM_CODES = nil
+    end
+end
 
 -- Trait Reroll Config
 local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
@@ -2417,32 +2437,35 @@ task.wait(1)
 printStep("Redeeming Codes...")
 
 do
-    local CODES = {
-        "sorry4longmaintenance",
-        "warriorsaga",
-        "update1",
-        "ballin!",
-        "2.5mgroup!",
-    }
+    -- ใช้ REDEEM_CODES จาก Config
+    if not REDEEM_CODES or #REDEEM_CODES == 0 then
+        print("   ℹ️ No codes configured - skipping")
+    else
+        print(string.format("   📋 Codes to redeem: %d", #REDEEM_CODES))
 
-    local successCount = 0
-    local failCount = 0
+        local successCount = 0
+        local failCount = 0
 
-    -- Redeem ทีละโค้ด (เพิ่มเวลาระหว่างโค้ด)
-    for i, code in ipairs(CODES) do
-        local success, result = pcall(function()
-            local request = Nodes.CLAIM_CODE:Request(code)
-            request:Timeout(5)
-            return request:Wait()
-        end)
+        -- Redeem ทีละโค้ด (เพิ่มเวลาระหว่างโค้ด)
+        for i, code in ipairs(REDEEM_CODES) do
+            local success, result = pcall(function()
+                local request = Nodes.CLAIM_CODE:Request(code)
+                request:Timeout(5)
+                return request:Wait()
+            end)
 
-        if success and result and result.Success then
-            successCount = successCount + 1
-        else
-            failCount = failCount + 1
+            if success and result and result.Success then
+                successCount = successCount + 1
+                print(string.format("   ✅ [%d/%d] %s", i, #REDEEM_CODES, code))
+            else
+                failCount = failCount + 1
+                print(string.format("   ⚠️ [%d/%d] %s - failed", i, #REDEEM_CODES, code))
+            end
+
+            task.wait(1.1)  -- รอ 5 วิต่อโค้ด
         end
 
-        task.wait(1.1)  -- รอ 5 วิต่อโค้ด
+        print(string.format("   📊 Result: %d success, %d failed", successCount, failCount))
     end
 
     -- รอเพิ่มอีกนิด
