@@ -4,7 +4,7 @@ if game.PlaceId ~= 84515722934860 then
     return
 end
 
-print("Version 1.2.14")
+print("Version 1.2.14 / 6.57")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2325,97 +2325,44 @@ end
 task.wait(1)
 
 -- ========================================
--- 3. AutoClaimStarter (Node Hook - เลือก Goku)
+-- 3. AutoClaimStarter (FireServer ตรง - บังคับเลือก Goku)
 -- ========================================
 printStep("Claiming Starter Unit (Goku)...")
 
 local STARTER_UNIT = "Goku"
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- รอให้ PlayerGui โหลด
 task.wait(2)
 
-local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 10)
-if not playerGui then
-    warn("⚠️ PlayerGui not found - skipping Starter Unit claim")
+-- ส่ง FireServer ตรงเลย (ไม่ต้องรอ hook)
+local fireSuccess, fireErr = pcall(function()
+    Nodes.CHOOSE_STARTER_UNIT:FireServer(STARTER_UNIT)
+end)
+
+if not fireSuccess then
+    warn("❌ [Starter] FireServer failed: " .. tostring(fireErr))
 else
-    -- Hook PROMPT_CHOOSE_STARTER_UNIT เพื่อดัก units list ก่อน UI แสดง
-    local starterReceived = false
-    local hookConnection = nil
+    print("✅ [Starter] Sent FireServer: " .. STARTER_UNIT)
+end
 
-    local hookSuccess, hookErr = pcall(function()
-        hookConnection = Nodes.PROMPT_CHOOSE_STARTER_UNIT:Connect(function(units)
-            if starterReceived then return end
+-- รอ 5 วิ ให้ Server process + popup แสดง (ถ้ามี)
+task.wait(5)
 
-            -- units เป็น table ของ asset names เช่น {"Luffy", "Sasuke", "Goku"}
-            local unitListStr = ""
-            for i, unit in ipairs(units) do
-                if i > 1 then unitListStr = unitListStr .. ", " end
-                unitListStr = unitListStr .. tostring(unit)
-            end
-            print("🔍 [Starter] Server sent units: " .. unitListStr)
-
-            -- เช็คว่า Goku มีอยู่ใน list ไหม
-            local hasTarget = false
-            for _, unit in ipairs(units) do
-                if unit == STARTER_UNIT then
-                    hasTarget = true
-                    break
-                end
-            end
-
-            if hasTarget then
-                -- ส่งเลือก Goku กลับ server
-                local success, err = pcall(function()
-                    Nodes.CHOOSE_STARTER_UNIT:FireServer(STARTER_UNIT)
-                end)
-
-                if success then
-                    print("✅ [Starter] Selected: " .. STARTER_UNIT)
-                    starterReceived = true
-                else
-                    warn("❌ [Starter] FireServer failed: " .. tostring(err))
-                end
-            else
-                warn("⚠️ [Starter] " .. STARTER_UNIT .. " not in list: " .. unitListStr)
-            end
-        end)
-    end)
-
-    if not hookSuccess then
-        warn("❌ [Starter] Hook failed: " .. tostring(hookErr))
-    end
-
-    -- รอให้ Popup แสดง + เลือก (สูงสุด 60 วิ)
-    local startTime = tick()
-    while not starterReceived and (tick() - startTime) < 60 do
-        task.wait(1)
-    end
-
-    if starterReceived then
-        -- รอให้ ObtainedRewards popup แสดง + ปิด
-        task.wait(3)
-
-        -- ปิด popup (คลิกมุมซ้ายบน)
-        for i = 1, 10 do
-            pcall(function()
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                task.wait(0.05)
-                VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-            end)
-            task.wait(0.1)
+-- เช็คว่าได้ Goku จริงไหม
+local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+if playerGui then
+    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+    if replica and replica.Data and replica.Data.HotbarData then
+        -- เช็ค slot 1 (Starter Unit มักอยู่ slot 1 ถ้ายังไม่ unequip)
+        local hotbar1 = replica.Data.HotbarData["1"]
+        if hotbar1 and hotbar1:lower():find(STARTER_UNIT:lower()) then
+            print("✅ [Starter] Claim completed: " .. STARTER_UNIT)
+        else
+            warn("⚠️ [Starter] Failed to claim " .. STARTER_UNIT .. " within 5s - may already be claimed or not available")
         end
-
-        print("✅ [Starter] Claim completed: " .. STARTER_UNIT)
     else
-        warn("⚠️ [Starter] Timeout - popup may not have appeared (already claimed?)")
-    end
-
-    -- Disconnect hook
-    if hookConnection then
-        pcall(function() hookConnection:Disconnect() end)
+        warn("⚠️ [Starter] Cannot verify - Replica not available")
     end
 end
 
