@@ -4,7 +4,7 @@ if game.PlaceId ~= 84515722934860 then
     return
 end
 
-print("Version 1.2.14 / 7.15")
+print("Version 1.2.14 / 7.27")
 -- ========================================
 -- Main Script - รวมทุกฟังก์ชันตามลำดับ
 -- ========================================
@@ -2264,14 +2264,46 @@ local settings = {
     StrictPhantomPlacement = false
 }
 
-for settingName, value in pairs(settings) do
-    task.spawn(function()
-        pcall(function()
-            Nodes.CLIENT_CHANGE_SETTING:FireServer(settingName, value)
-        end)
-    end)
-    task.wait(0.5)
+-- ดึง Settings ปัจจุบันจาก Replica (ถ้ามี)
+local currentSettings = {}
+local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+if replica and replica.Data and replica.Data.Settings then
+    currentSettings = replica.Data.Settings
+    local existingCount = 0
+    for _ in pairs(currentSettings) do existingCount = existingCount + 1 end
+    print("   📋 Loaded " .. existingCount .. " existing settings from Replica")
+else
+    print("   ⚠️ Replica.Settings not found - will set all")
 end
+
+-- เช็คแต่ละ setting ก่อนส่ง
+local setCount, skipCount, failCount = 0, 0, 0
+for settingName, desiredValue in pairs(settings) do
+    local currentValue = currentSettings[settingName]
+
+    -- เช็คว่าค่าปัจจุบันตรงกับที่ต้องการหรือไม่
+    if currentValue == desiredValue then
+        skipCount = skipCount + 1
+        -- log เฉพาะ verbose mode
+        -- print(string.format("   ⏭️ Skip: %s (already %s)", settingName, tostring(currentValue)))
+    else
+        local success, err = pcall(function()
+            Nodes.CLIENT_CHANGE_SETTING:FireServer(settingName, desiredValue)
+        end)
+
+        if success then
+            setCount = setCount + 1
+            print(string.format("   🔧 Set: %s = %s (was %s)", settingName, tostring(desiredValue), tostring(currentValue)))
+        else
+            failCount = failCount + 1
+            warn(string.format("   ❌ Failed: %s - %s", settingName, tostring(err)))
+        end
+
+        task.wait(0.3)
+    end
+end
+
+print(string.format("   📊 Settings: %d set, %d skipped, %d failed", setCount, skipCount, failCount))
 
 -- AutoSell Settings
 task.wait(1)
@@ -2355,34 +2387,55 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 -- รอให้ PlayerGui โหลด
 task.wait(2)
 
--- ส่ง FireServer ตรงเลย (ไม่ต้องรอ hook)
-local fireSuccess, fireErr = pcall(function()
-    Nodes.CHOOSE_STARTER_UNIT:FireServer(STARTER_UNIT)
-end)
-
-if not fireSuccess then
-    warn("❌ [Starter] FireServer failed: " .. tostring(fireErr))
-else
-    print("✅ [Starter] Sent FireServer: " .. STARTER_UNIT)
+-- เช็คว่ามี Goku อยู่ใน UnitData แล้วหรือยัง
+local hasStarter = false
+local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+if unitData then
+    for fullKey, _ in pairs(unitData) do
+        local internalName = fullKey:match("^(.+)#") or fullKey
+        if internalName == STARTER_UNIT then
+            hasStarter = true
+            break
+        end
+    end
 end
 
--- รอ 5 วิ ให้ Server process + popup แสดง (ถ้ามี)
-task.wait(5)
+if hasStarter then
+    print("   ⏭️ [Starter] " .. STARTER_UNIT .. " already owned - skip")
+else
+    -- ส่ง FireServer ตรงเลย
+    local fireSuccess, fireErr = pcall(function()
+        Nodes.CHOOSE_STARTER_UNIT:FireServer(STARTER_UNIT)
+    end)
 
--- เช็คว่าได้ Goku จริงไหม
-local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-if playerGui then
-    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-    if replica and replica.Data and replica.Data.HotbarData then
-        -- เช็ค slot 1 (Starter Unit มักอยู่ slot 1 ถ้ายังไม่ unequip)
-        local hotbar1 = replica.Data.HotbarData["1"]
-        if hotbar1 and hotbar1:lower():find(STARTER_UNIT:lower()) then
-            print("✅ [Starter] Claim completed: " .. STARTER_UNIT)
-        else
-            warn("⚠️ [Starter] Failed to claim " .. STARTER_UNIT .. " within 5s - may already be claimed or not available")
-        end
+    if not fireSuccess then
+        warn("❌ [Starter] FireServer failed: " .. tostring(fireErr))
     else
-        warn("⚠️ [Starter] Cannot verify - Replica not available")
+        print("✅ [Starter] Sent FireServer: " .. STARTER_UNIT)
+
+        -- รอ 5 วิ ให้ Server process
+        task.wait(5)
+
+        -- เช็คว่าได้ Goku จริงไหม
+        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
+        if replica and replica.Data then
+            local unitData2 = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
+            if unitData2 then
+                local gotIt = false
+                for fullKey, _ in pairs(unitData2) do
+                    local internalName = fullKey:match("^(.+)#") or fullKey
+                    if internalName == STARTER_UNIT then
+                        gotIt = true
+                        break
+                    end
+                end
+                if gotIt then
+                    print("✅ [Starter] Claim completed: " .. STARTER_UNIT)
+                else
+                    warn("⚠️ [Starter] Failed to claim " .. STARTER_UNIT .. " within 5s")
+                end
+            end
+        end
     end
 end
 
