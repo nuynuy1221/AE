@@ -1,3896 +1,6131 @@
 repeat wait() until game:IsLoaded()
 
-if game.PlaceId ~= 84515722934860 then
+if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
 
-print("Version 1.2.14 / 7.27")
--- ========================================
--- Main Script - รวมทุกฟังก์ชันตามลำดับ
--- ========================================
+-- Main Script - Auto Farm Manager
+-- Sugar Hub - Auto Farm System
 
--- ========================================
--- 0. Check PlayerGui (ต้องโหลดก่อนทุกอย่าง)
--- ========================================
-do
-    local Players = game:GetService("Players")
-
-    local MINIMUM_GUI_COUNT = 50  -- จำนวน GUI ขั้นต่ำที่ต้องมี
-    local MAX_WAIT_TIME = 30  -- รอสูงสุด 30 วินาที
-    local CHECK_INTERVAL = 1  -- เช็คทุก 1 วินาที
-
-    local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 10)
-
-    if not playerGui then
-        warn("❌ PlayerGui not found - Kicking...")
-        Players.LocalPlayer:Kick("PlayerGui failed to load. Please rejoin.")
-        return
-    end
-
-    -- รอจนกว่า GUI จะโหลดครบ หรือครบเวลา 30 วิ
-    local elapsedTime = 0
-
-    while elapsedTime < MAX_WAIT_TIME do
-        local guiCount = #playerGui:GetChildren()
-
-        if guiCount >= MINIMUM_GUI_COUNT then
-            break  -- โหลดสำเร็จ ให้รันสคริปต่อได้
-        end
-
-        task.wait(CHECK_INTERVAL)
-        elapsedTime = elapsedTime + CHECK_INTERVAL
-    end
-
-    -- ถ้าครบ 30 วิแล้วยังโหลดไม่ครบ
-    local finalCount = #playerGui:GetChildren()
-    if finalCount < MINIMUM_GUI_COUNT then
-        warn(string.format("❌ PlayerGui incomplete after %ds (%d/%d) - Kicking...", MAX_WAIT_TIME, finalCount, MINIMUM_GUI_COUNT))
-        Players.LocalPlayer:Kick(string.format("PlayerGui failed to load properly (%d/%d). Please rejoin.", finalCount, MINIMUM_GUI_COUNT))
-        return
-    end
-end
-
--- ========================================
--- Anti-AFK (โหลดก่อนอันแรก)
--- ========================================
+print("Version - 1.2.8 / 2.35")
 local Players = game:GetService("Players")
-local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
 
--- VirtualUser Anti-AFK (Passive)
-Players.LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
+print("=== Sugar Hub Started ===")
 
--- Random Edge Click Anti-AFK (Active)
-spawn(function()
-    local camera = workspace.CurrentCamera
-
-    while true do
-        -- รอ random 30-60 วินาที
-        task.wait(math.random(30, 60))
-
-        pcall(function()
-            local screenSize = camera.ViewportSize
-
-            -- สุ่มมุมจอ
-            local edges = {
-                {x = 10, y = 10},                              -- มุมซ้ายบน
-                {x = screenSize.X - 10, y = 10},              -- มุมขวาบน
-                {x = 10, y = screenSize.Y - 10},              -- มุมซ้ายล่าง
-                {x = screenSize.X - 10, y = screenSize.Y - 10}, -- มุมขวาล่าง
-                {x = screenSize.X / 2, y = 10},               -- กลางบน
-                {x = screenSize.X / 2, y = screenSize.Y - 10}, -- กลางล่าง
-            }
-
-            -- สุ่มเลือกมุม
-            local edge = edges[math.random(1, #edges)]
-
-            -- คลิก
-            VirtualInputManager:SendMouseButtonEvent(edge.x, edge.y, 0, true, game, 0)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(edge.x, edge.y, 0, false, game, 0)
-        end)
-    end
-end)
-
--- ========================================
--- CONFIG (รองรับ External Config)
--- ========================================
+-- ============================================
+-- Config (can be set externally via _G.Config before running this script)
+-- ============================================
 _G.Config = _G.Config or {}
-local HORST_ENABLED = _G.Config.Horst == true
-local GEM_TARGET = _G.Config.GemTarget  -- nil = ไม่ส่ง DONE
-local UPDATE_INTERVAL = 30
-local TOGGLE_RENDER3D = _G.Config.ToggleRender3D == true  -- ผูก Render3D กับ GUI toggle
+local Config = _G.Config
 
--- Secret Unit Config
-local CHANGE_ACC_SECRETS = _G.Config.Change_Acc_Secrets == true  -- true = ส่ง DONE หลัง Trait Reroll ของ Secret, false = ข้ามไปฟาร์มตามปกติ
+-- Defaults: if not set externally, use false / leave unset
+Config.Horst = Config.Horst == true
+Config.ToggleRender3D = Config.ToggleRender3D == true
+Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"Camper", "Medic"}
+-- UpgradeClass: class หลักที่จะใช้ฟาร์ม (ตอนนี้รอบรับ Cyborg — ใช้ Laser Cannon ยิงแทนตี)
+-- ตอนอยู่ lobby: equip class นี้ทันที + อัปเกรดถ้า CanLevelUp
+-- ตอนเข้า Stronghold: equip Laser Cannon + ยิงแทนตี
+-- ถ้าไม่ตั้ง = ฟาร์มปกติ (ตีต้นไม้ด้วยขวาน)
+Config.UpgradeClass = Config.UpgradeClass or {}  -- Table เช่น {"Cyborg"} - ตอนนี้ใช้แค่ตัวแรก
+-- RerollShop: สุ่มหน้าร้าน class จนเจอตัวที่อยู่ใน BuyClass (เปิดได้เมื่อมี BuyClass เท่านั้น)
+Config.RerollShop = Config.RerollShop == true
+-- MaxRerollPrice: ราคาสุ่มสูงสุดที่ยอมรับ เช่น 50 (ราคา 51+ = เลิกสุ่ม) - มีผลเมื่อ RerollShop = true เท่านั้น
+Config.MaxRerollPrice = tonumber(Config.MaxRerollPrice)
+-- Config.Diamonds: no default (if not set externally = nil = never send DONE)
 
--- Summon Config
-local SUMMON_CONFIG = _G.Config.SummonUnits or {}
--- ถ้าเป็น string ให้แปลงเป็น table (ยกเว้น "auto" จะถูก override ภายหลัง)
-if type(SUMMON_CONFIG) == "string" then
-    if SUMMON_CONFIG:lower() == "auto" then
-        SUMMON_CONFIG = {}  -- จะถูก override เป็น Secret + Mythic ภายหลัง
-    else
-        SUMMON_CONFIG = {SUMMON_CONFIG}  -- แปลง "Shadow" → {"Shadow"}
-    end
-end
-local MYTHIC_UNITS = {"Cursed Student", "Elf Mage", "Flame Emperor", "Hollow", "Lady Giant", "Puppet", "Salmon Sorcerer", "String Demon"}
-local SECRET_UNITS = {"Shadow"}
-local hasSummonConfig = _G.Config.SummonUnits and (
-    (type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits ~= "") or
-    (type(_G.Config.SummonUnits) == "table" and #_G.Config.SummonUnits > 0)
-)
-
--- Redeem Codes Config
--- รองรับ: table หรือ CSV string เท่านั้น
--- ถ้าไม่มี หรือ empty หรือรูปแบบผิด → skip
-local REDEEM_CODES = nil
-if type(_G.Config.Codes) == "table" and #_G.Config.Codes > 0 then
-    REDEEM_CODES = _G.Config.Codes
-elseif type(_G.Config.Codes) == "string" and _G.Config.Codes ~= "" then
-    -- แปลง CSV string เป็น table
-    REDEEM_CODES = {}
-    for code in string.gmatch(_G.Config.Codes, "[^,]+") do
-        local trimmed = code:match("^%s*(.-)%s*$")
-        if trimmed ~= "" then
-            table.insert(REDEEM_CODES, trimmed)
-        end
-    end
-    if #REDEEM_CODES == 0 then
-        REDEEM_CODES = nil
-    end
+-- If Horst is enabled, load the Horst script
+if Config.Horst then
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
 end
 
--- Trait Reroll Config
-local TRAIT_REROLL_CONFIG = _G.Config.TraitReroll or {}
--- ตัวอย่าง:
--- _G.Config.TraitReroll = {
---     TargetUnit = "Ice Queen",                          -- ตัวที่ต้องการสุ่ม Trait
---     TargetTrait = {"Enlightenment", "Ultimate"}        -- Trait ที่ต้องการ (หลายตัว)
---     หรือ TargetTrait = "Enlightenment"                 -- Trait เดียว
---     หรือ TargetTrait = nil                             -- อะไรก็ได้ที่ไม่ใช่ None
---     หรือ TargetTrait = {}                              -- ไม่ต้องสุ่ม (ข้าม)
--- }
+-- ============================================
+-- Check if goals are met (check real-time values from game)
+-- ============================================
+local function CheckGoals()
+    if not Config.Horst then return false end
 
--- Priority List สำหรับเลือก Unit ที่จะสุ่ม Trait (ถ้า Config ตั้ง SummonUnits หลายตัว)
-local TRAIT_REROLL_PRIORITY = {
-    "Shadow",           -- Priority 1 (Secret)
-    "Puppet",           -- Priority 2 (Mythic)
-    "Cursed Student",   -- Priority 3 (Mythic)
-    "Lady Giant",       -- Priority 4 (Mythic)
-    "Elf Mage",         -- Priority 5 (Mythic)
-    "Flame Emperor",    -- Priority 6 (Mythic)
-    "Hollow",           -- Priority 7 (Mythic)
-    "Salmon Sorcerer",  -- Priority 8 (Mythic)
-    "String Demon"      -- Priority 9 (Mythic)
-}
+    local diamondsGoal = Config.Diamonds ~= nil
+    local classesGoal = Config.BuyClass and #Config.BuyClass > 0
+    local upgradeGoal = Config.UpgradeClass and #Config.UpgradeClass > 0
+    local isLobby = game.PlaceId == 79546208627805
 
--- ========================================
--- Description Mode Selection
--- ========================================
-local DESCRIPTION_MODE = nil
-if GEM_TARGET and not hasSummonConfig then
-    DESCRIPTION_MODE = "GEM"
-    print("📊 Description Mode: GEM (Stats only)")
-elseif hasSummonConfig then
-    DESCRIPTION_MODE = "SUMMON"
-    print("📊 Description Mode: SUMMON (Unit tracking)")
-end
+    local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    local diamondsMet = (not diamondsGoal) or (currentDiamonds >= Config.Diamonds)
 
-local function printStep(stepName)
-    print(string.format("🔄 %s", stepName))
-end
-
--- ฟังก์ชันเช็ค Banner ณ ตอนนี้ (Global scope)
-local function checkCurrentBanner()
-    local success, result = pcall(function()
-        local Players = game:GetService("Players")
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-
-        Nodes.TOGGLE_MENU:FireSelf("Summon", true)
-        task.wait(2)
-
-        local summonGui = Players.LocalPlayer.PlayerGui:FindFirstChild("Summon")
-        if not summonGui then return {} end
-
-        local foundUnits = {}
-        local blacklist = {["Summon"]=true, ["Settings"]=true, ["Rates"]=true, ["Mythic Unit"]=true}
-
-        for _, child in ipairs(summonGui:GetDescendants()) do
-            if child:IsA("TextLabel") and child.Visible then
-                local text = child.Text or child.ContentText or ""
-                if text ~= "" and text:match("^[A-Z]") and #text >= 3 and #text < 30 then
-                    if not blacklist[text] then
-                        local hasFolder = false
-                        local current = child.Parent
-                        for i = 1, 5 do
-                            if not current then break end
-                            if current:IsA("Folder") then hasFolder = true; break end
-                            current = current.Parent
-                        end
-                        if hasFolder and not foundUnits[text] then foundUnits[text] = true end
-                    end
-                end
+    -- ใน Lobby: เช็ค Class ได้ (BuyClass + UpgradeClass)
+    -- ในแมพฟาร์ม: เช็ค Diamonds ได้อย่างเดียว (Class เช็คที่ Lobby)
+    if not isLobby then
+        -- ในแมพฟาร์ม: เช็คเฉพาะ Diamonds
+        if diamondsMet then
+            if _G.Horst_AccountChangeDone then
+                _G.Horst_AccountChangeDone()
             end
+            return true
         end
-
-        Nodes.TOGGLE_MENU:FireSelf("Summon", false)
-        task.wait(0.5)
-
-        local unitList = {}
-        for unitName, _ in pairs(foundUnits) do table.insert(unitList, unitName) end
-        return unitList
-    end)
-    return success and result or {}
-end
-
--- ========================================
--- -1. Load Horst API (ถ้า Config เปิด)
--- ========================================
-if HORST_ENABLED then
-    printStep("Loading Horst API...")
-    local success, err = pcall(function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
-    end)
-
-    if success then
-        if GEM_TARGET then
-        else
-        end
-    else
-        warn("   ❌ Failed to load Horst API:", err)
-        HORST_ENABLED = false
-    end
-    task.wait(1)
-end
-
--- ========================================
--- 0. StatsGUI (โหลดก่อนอันแรก)
--- ========================================
-printStep("Loading Stats GUI...")
-
--- ========================================
--- Global Flag สำหรับหยุดสคริปต์
--- ========================================
-_G.ScriptShouldStop = false  -- ใช้ _G เพื่อให้เข้าถึงได้ทุกที่
-
-local statsGuiSuccess, statsGuiError = pcall(function()
-    local Players = game:GetService("Players")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local RunService = game:GetService("RunService")
-
-    local player = Players.LocalPlayer
-    local playerGui = player:WaitForChild("PlayerGui")
-    local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-
-    -- สร้าง ScreenGui
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "StatsDisplay"
-    screenGui.ResetOnSpawn = false
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.DisplayOrder = 999999
-    screenGui.IgnoreGuiInset = true
-    screenGui.Parent = playerGui
-
-    -- Frame หลัก
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
-    mainFrame.Position = UDim2.new(0.5, 0, 0.65, 0)
-    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(245, 235, 220)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = screenGui
-
-    local mainCorner = Instance.new("UICorner")
-    mainCorner.CornerRadius = UDim.new(0, 12)
-    mainCorner.Parent = mainFrame
-
-    -- Padding
-    local mainPadding = Instance.new("UIPadding")
-    mainPadding.PaddingTop = UDim.new(0.03, 0)
-    mainPadding.PaddingBottom = UDim.new(0.03, 0)
-    mainPadding.PaddingLeft = UDim.new(0.04, 0)
-    mainPadding.PaddingRight = UDim.new(0.04, 0)
-    mainPadding.Parent = mainFrame
-
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Padding = UDim.new(0.02, 0)
-    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Parent = mainFrame
-
-    -- Username Box
-    local usernameBox = Instance.new("Frame")
-    usernameBox.Name = "UsernameBox"
-    usernameBox.Size = UDim2.new(1, 0, 0.15, 0)
-    usernameBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
-    usernameBox.BorderSizePixel = 0
-    usernameBox.LayoutOrder = 1
-    usernameBox.Parent = mainFrame
-
-    local usernameCorner = Instance.new("UICorner")
-    usernameCorner.CornerRadius = UDim.new(0, 10)
-    usernameCorner.Parent = usernameBox
-
-    local usernameStroke = Instance.new("UIStroke")
-    usernameStroke.Color = Color3.fromRGB(70, 45, 22)
-    usernameStroke.Thickness = 3
-    usernameStroke.Parent = usernameBox
-
-    local usernameLabel = Instance.new("TextLabel")
-    usernameLabel.Size = UDim2.new(1, 0, 1, 0)
-    usernameLabel.BackgroundTransparency = 1
-    usernameLabel.Text = player.Name
-    usernameLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
-    usernameLabel.TextSize = 80
-    usernameLabel.Font = Enum.Font.GothamBold
-    usernameLabel.TextScaled = true
-    usernameLabel.Parent = usernameBox
-
-    local usernamePadding = Instance.new("UIPadding")
-    usernamePadding.PaddingLeft = UDim.new(0.03, 0)
-    usernamePadding.PaddingRight = UDim.new(0.03, 0)
-    usernamePadding.PaddingTop = UDim.new(0.15, 0)
-    usernamePadding.PaddingBottom = UDim.new(0.15, 0)
-    usernamePadding.Parent = usernameLabel
-
-    -- Stats
-    local stats = {
-        {name = "Gem", key = "Gem", color = Color3.fromRGB(194, 144, 90), order = 2},
-        {name = "Gold", key = "Gold", color = Color3.fromRGB(210, 180, 140), order = 3},
-        {name = "Trait", key = "TraitReroll", color = Color3.fromRGB(222, 184, 135), order = 4}
-    }
-
-    local statsLabels = {}
-
-    for _, stat in ipairs(stats) do
-        local statBox = Instance.new("Frame")
-        statBox.Name = stat.key .. "Box"
-        statBox.Size = UDim2.new(1, 0, 0.18, 0)
-        statBox.BackgroundColor3 = stat.color
-        statBox.BorderSizePixel = 0
-        statBox.LayoutOrder = stat.order
-        statBox.Parent = mainFrame
-
-        local statCorner = Instance.new("UICorner")
-        statCorner.CornerRadius = UDim.new(0, 10)
-        statCorner.Parent = statBox
-
-        local statStroke = Instance.new("UIStroke")
-        statStroke.Color = Color3.fromRGB(139, 90, 43)
-        statStroke.Thickness = 3
-        statStroke.Parent = statBox
-
-        -- Container สำหรับ name และ value
-        local contentFrame = Instance.new("Frame")
-        contentFrame.Size = UDim2.new(1, 0, 1, 0)
-        contentFrame.BackgroundTransparency = 1
-        contentFrame.Parent = statBox
-
-        local contentPadding = Instance.new("UIPadding")
-        contentPadding.PaddingLeft = UDim.new(0.03, 0)
-        contentPadding.PaddingRight = UDim.new(0.03, 0)
-        contentPadding.PaddingTop = UDim.new(0.1, 0)
-        contentPadding.PaddingBottom = UDim.new(0.1, 0)
-        contentPadding.Parent = contentFrame
-
-        -- Name (ซ้าย)
-        local nameLabel = Instance.new("TextLabel")
-        nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
-        nameLabel.Position = UDim2.new(0, 0, 0, 0)
-        nameLabel.BackgroundTransparency = 1
-        nameLabel.Text = stat.name
-        nameLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-        nameLabel.TextSize = 72
-        nameLabel.Font = Enum.Font.GothamBold
-        nameLabel.TextScaled = true
-        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-        nameLabel.Parent = contentFrame
-
-        -- Colon (กลาง)
-        local colonLabel = Instance.new("TextLabel")
-        colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
-        colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
-        colonLabel.BackgroundTransparency = 1
-        colonLabel.Text = ":"
-        colonLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-        colonLabel.TextSize = 72
-        colonLabel.Font = Enum.Font.GothamBold
-        colonLabel.TextScaled = true
-        colonLabel.Parent = contentFrame
-
-        -- Value (ขวา)
-        local valueLabel = Instance.new("TextLabel")
-        valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
-        valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
-        valueLabel.BackgroundTransparency = 1
-        valueLabel.Text = "..."
-        valueLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
-        valueLabel.TextSize = 72
-        valueLabel.Font = Enum.Font.GothamBold
-        valueLabel.TextScaled = true
-        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-        valueLabel.Parent = contentFrame
-
-        statsLabels[stat.key] = valueLabel
-    end
-
-    -- Sugar Hub Box
-    local sugarBox = Instance.new("Frame")
-    sugarBox.Name = "SugarBox"
-    sugarBox.Size = UDim2.new(1, 0, 0.15, 0)
-    sugarBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
-    sugarBox.BorderSizePixel = 0
-    sugarBox.LayoutOrder = 5
-    sugarBox.Parent = mainFrame
-
-    local sugarCorner = Instance.new("UICorner")
-    sugarCorner.CornerRadius = UDim.new(0, 10)
-    sugarCorner.Parent = sugarBox
-
-    local sugarStroke = Instance.new("UIStroke")
-    sugarStroke.Color = Color3.fromRGB(70, 45, 22)
-    sugarStroke.Thickness = 3
-    sugarStroke.Parent = sugarBox
-
-    local sugarLabel = Instance.new("TextLabel")
-    sugarLabel.Size = UDim2.new(1, 0, 1, 0)
-    sugarLabel.BackgroundTransparency = 1
-    sugarLabel.Text = "Sugar Hub"
-    sugarLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
-    sugarLabel.TextSize = 80
-    sugarLabel.Font = Enum.Font.GothamBold
-    sugarLabel.TextScaled = true
-    sugarLabel.Parent = sugarBox
-
-    local sugarPadding = Instance.new("UIPadding")
-    sugarPadding.PaddingLeft = UDim.new(0.03, 0)
-    sugarPadding.PaddingRight = UDim.new(0.03, 0)
-    sugarPadding.PaddingTop = UDim.new(0.15, 0)
-    sugarPadding.PaddingBottom = UDim.new(0.15, 0)
-    sugarPadding.Parent = sugarLabel
-
-    -- ฟังก์ชันใส่ลูกน้ำ
-    local function formatNumber(num)
-        local formatted = tostring(num)
-        local k
-        while true do
-            formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
-            if k == 0 then
-                break
-            end
-        end
-        return formatted
-    end
-
-    -- ฟังก์ชันดึงค่า Stats
-    local function updateStats()
-        local success, err = pcall(function()
-            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            if not replica then
-                error("Replica not found")
-            end
-
-            local data = replica.Data
-            local itemData = data.ItemData
-            if not itemData then
-                error("ItemData not found")
-            end
-
-            -- Gem
-            local gem = 0
-            if itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount then
-                gem = itemData.Gem.Amount
-            end
-            statsLabels.Gem.Text = formatNumber(gem)
-
-            -- Gold
-            local gold = 0
-            if itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount then
-                gold = itemData.Gold.Amount
-            end
-            statsLabels.Gold.Text = formatNumber(gold)
-
-            -- Trait Reroll
-            local traitReroll = 0
-            if itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount then
-                traitReroll = itemData.TraitReroll.Amount
-            end
-            statsLabels.TraitReroll.Text = formatNumber(traitReroll)
-        end)
-
-        if not success then
-            warn("StatsGUI update error:", err)
-        end
-    end
-
-    -- Update แบบ Real-time (ตรวจจับการเปลี่ยนแปลง + Error Handling)
-    task.wait(2)
-    updateStats()
-
-    -- เก็บค่าเก่าเพื่อเปรียบเทียบ
-    local lastGem = 0
-    local lastGold = 0
-    local lastTrait = 0
-    local errorCount = 0
-    local maxErrors = 5
-    local checkCounter = 0
-
-    -- Initialize ค่าเริ่มต้น
-    local success = pcall(function()
-        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-        if replica then
-            local data = replica.Data
-            local itemData = data.ItemData
-            if itemData then
-                lastGem = itemData.Gem and itemData.Gem.Amount or 0
-                lastGold = itemData.Gold and itemData.Gold.Amount or 0
-                lastTrait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
-            end
-        end
-    end)
-
-    -- เช็คทุก 0.5 วินาทีแทนทุกเฟรม (ลด CPU usage)
-    spawn(function()
-        while true do
-            task.wait(0.5)  -- เช็คทุก 0.5 วินาที (ประหยัดสเปค)
-
-            local success, err = pcall(function()
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                if not replica then
-                    error("Replica not found")
-                end
-
-                local data = replica.Data
-                if not data then
-                    error("Data not found")
-                end
-
-                local itemData = data.ItemData
-                if not itemData then
-                    error("ItemData not found")
-                end
-
-                -- ดึงค่าปัจจุบัน
-                local currentGem = itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount or 0
-                local currentGold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
-                local currentTrait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
-
-                -- เช็คว่าค่าเปลี่ยนหรือไม่
-                if currentGem ~= lastGem or currentGold ~= lastGold or currentTrait ~= lastTrait then
-                    -- อัพเดททันที
-                    if currentGem ~= lastGem then
-                        statsLabels.Gem.Text = formatNumber(currentGem)
-                        lastGem = currentGem
-                    end
-
-                    if currentGold ~= lastGold then
-                        statsLabels.Gold.Text = formatNumber(currentGold)
-                        lastGold = currentGold
-                    end
-
-                    if currentTrait ~= lastTrait then
-                        statsLabels.TraitReroll.Text = formatNumber(currentTrait)
-                        lastTrait = currentTrait
-                    end
-
-                    -- Reset error count เมื่ออัพเดทสำเร็จ
-                    errorCount = 0
-                end
-            end)
-
-            -- Error Handling - ลอง retry
-            if not success then
-                errorCount = errorCount + 1
-
-                if errorCount <= maxErrors then
-                    warn(string.format("⚠️ StatsGUI error (%d/%d): %s - Retrying...", errorCount, maxErrors, tostring(err)))
-
-                    -- พยายาม force update
-                    task.spawn(function()
-                        task.wait(0.5)
-                        pcall(updateStats)
-                    end)
-                elseif errorCount == maxErrors + 1 then
-                    warn(string.format("❌ StatsGUI failed after %d attempts - Will keep trying silently", maxErrors))
-                end
-            end
-        end
-    end)
-
-    -- ========================================
-    -- Toggle GUI with N key (+ Render3D ถ้าเปิด Config)
-    -- ========================================
-    local UserInputService = game:GetService("UserInputService")
-    local isGuiVisible = true
-
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-
-        if input.KeyCode == Enum.KeyCode.N then
-            isGuiVisible = not isGuiVisible
-            mainFrame.Visible = isGuiVisible
-
-            if TOGGLE_RENDER3D then
-                if isGuiVisible then
-                    game:GetService("RunService"):Set3dRenderingEnabled(false)
-                else
-                    game:GetService("RunService"):Set3dRenderingEnabled(true)
-                end
-            end
-        end
-    end)
-
-    if TOGGLE_RENDER3D then
-        game:GetService("RunService"):Set3dRenderingEnabled(false)
-    end
-
-    -- ========================================
-    -- Horst Status Reporter (Real-time + Error Handling + ส่งทุก 30 วิ)
-    -- ========================================
-    if HORST_ENABLED then
-        local doneSent = false
-        local lastHorstGem = 0
-        local lastHorstGold = 0
-        local lastHorstTrait = 0
-        local lastHorstLevel = 0
-        local horstErrorCount = 0
-        local maxHorstErrors = 5
-
-        -- ฟังก์ชันส่ง Status (พร้อม Error Handling)
-        local function sendHorstStatus()
-            local success, err = pcall(function()
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                if not replica then
-                    error("Replica not found")
-                end
-
-                local data = replica.Data
-                if not data then
-                    error("Data not found")
-                end
-
-                local itemData = data.ItemData
-                if not itemData then
-                    error("ItemData not found")
-                end
-
-                -- ดึงข้อมูล Stats
-                local level = data.Level or 0
-                local gem = itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount or 0
-                local gold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
-                local trait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
-
-                -- สร้าง Status Message
-                local message = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
-                    level, formatNumber(gem), formatNumber(gold), formatNumber(trait))
-
-                -- ส่ง Status Update
-                if _G.Horst_SetDescription then
-                    _G.Horst_SetDescription(message)
-                    horstErrorCount = 0  -- Reset error count เมื่อส่งสำเร็จ
-                end
-
-                -- เช็คเป้าหมาย Gem (ถ้ามี GEM_TARGET)
-                -- ⚠️ ข้ามการเช็คถ้ามี SummonUnits Config (ต้องให้ไปสุ่มก่อน)
-                if GEM_TARGET and gem >= GEM_TARGET and not doneSent and not hasSummonConfig then
-                    if _G.Horst_AccountChangeDone then
-                        -- ส่ง Description ก่อน
-                        if _G.Horst_SetDescription then
-                            _G.Horst_SetDescription(message)
-                        end
-
-                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
-
-                        local ok, doneErr = pcall(_G.Horst_AccountChangeDone)
-                        if ok then
-                            doneSent = true
-                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                            print("✅ GEM_TARGET reached (no summon config) - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replicaLoop = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    if replicaLoop and replicaLoop.Data and replicaLoop.Data.ItemData then
-                                        local dataLoop = replicaLoop.Data
-                                        local itemDataLoop = dataLoop.ItemData
-                                        local levelLoop = dataLoop.Level or 0
-                                        local gemLoop = itemDataLoop.Gem and type(itemDataLoop.Gem) == "table" and itemDataLoop.Gem.Amount or 0
-                                        local goldLoop = itemDataLoop.Gold and type(itemDataLoop.Gold) == "table" and itemDataLoop.Gold.Amount or 0
-                                        local traitLoop = itemDataLoop.TraitReroll and type(itemDataLoop.TraitReroll) == "table" and itemDataLoop.TraitReroll.Amount or 0
-
-                                        local HttpService = game:GetService("HttpService")
-                                        local json_data = {
-                                            Level = levelLoop,
-                                            Gem = gemLoop,
-                                            Gold = goldLoop,
-                                            Trait = traitLoop
-                                        }
-                                        local encoded_json = HttpService:JSONEncode(json_data)
-
-                                        local messageLoop = string.format("⭐ Level : %d • 💎 Gems : %s • 🪙 Gold : %s • 🎲 RR : %s",
-                                            levelLoop, formatNumber(gemLoop), formatNumber(goldLoop), formatNumber(traitLoop))
-
-                                        _G.Horst_SetDescription(messageLoop)
-                                    end
-                                end)
-                                task.wait(5)
-                            end
-                        else
-                            warn(string.format("❌ Failed to send DONE: %s", tostring(doneErr)))
-                        end
-                    else
-                        warn("❌ Horst_AccountChangeDone function not found")
-                    end
-                end
-            end)
-
-            if not success then
-                horstErrorCount = horstErrorCount + 1
-                if horstErrorCount <= maxHorstErrors then
-                    warn(string.format("⚠️ Horst error (%d/%d): %s - Retrying...", horstErrorCount, maxHorstErrors, tostring(err)))
-                elseif horstErrorCount == maxHorstErrors + 1 then
-                    warn(string.format("❌ Horst failed after %d attempts - Will keep trying silently", maxHorstErrors))
-                end
-            end
-        end
-
-        -- Initialize ค่าเริ่มต้น
-        task.wait(1)
-        local initSuccess = pcall(function()
-            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            if replica then
-                local data = replica.Data
-                local itemData = data.ItemData
-                if data and itemData then
-                    lastHorstLevel = data.Level or 0
-                    lastHorstGem = itemData.Gem and itemData.Gem.Amount or 0
-                    lastHorstGold = itemData.Gold and itemData.Gold.Amount or 0
-                    lastHorstTrait = itemData.TraitReroll and itemData.TraitReroll.Amount or 0
-                end
-            end
-        end)
-
-        -- ส่งรอบแรกทันที (เฉพาะ GEM mode)
-        if DESCRIPTION_MODE == "GEM" then
-            sendHorstStatus()
-        end
-
-        -- Real-time update (เช็คทุก 1 วินาที แทน 0.3 วิ - ประหยัดสเปค)
-        spawn(function()
-            while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
-                task.wait(1)  -- เช็คทุก 1 วินาที (ประหยัดสเปค)
-
-                local success, err = pcall(function()
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    if not replica then
-                        error("Replica not found")
-                    end
-
-                    local data = replica.Data
-                    if not data then
-                        error("Data not found")
-                    end
-
-                    local itemData = data.ItemData
-                    if not itemData then
-                        error("ItemData not found")
-                    end
-
-                    local currentLevel = data.Level or 0
-                    local currentGem = itemData.Gem and type(itemData.Gem) == "table" and itemData.Gem.Amount or 0
-                    local currentGold = itemData.Gold and type(itemData.Gold) == "table" and itemData.Gold.Amount or 0
-                    local currentTrait = itemData.TraitReroll and type(itemData.TraitReroll) == "table" and itemData.TraitReroll.Amount or 0
-
-                    -- เช็คว่าค่าเปลี่ยนหรือไม่
-                    if currentLevel ~= lastHorstLevel or currentGem ~= lastHorstGem or
-                       currentGold ~= lastHorstGold or currentTrait ~= lastHorstTrait then
-
-                        -- ส่ง update ทันที
-                        sendHorstStatus()
-
-                        -- บันทึกค่าใหม่
-                        lastHorstLevel = currentLevel
-                        lastHorstGem = currentGem
-                        lastHorstGold = currentGold
-                        lastHorstTrait = currentTrait
-                    end
-                end)
-
-                if not success then
-                    -- Silent retry - ไม่ warn เพราะจะลองใหม่ใน 1 วิ
-                end
-            end
-        end)
-
-        -- Fallback: ส่งทุก 30 วิ (กรณี real-time พลาด)
-        spawn(function()
-            while HORST_ENABLED and not _G.ScriptShouldStop and DESCRIPTION_MODE == "GEM" do
-                task.wait(UPDATE_INTERVAL)
-                sendHorstStatus()
-            end
-        end)
-    end
-end)
-
-if not statsGuiSuccess then
-    warn("❌ StatsGUI failed to load:", statsGuiError)
-end
-task.wait(1)
-
--- Config (สามารถแก้ไขได้จาก loadstring)
-_G.Config = _G.Config or {}
-
--- ========================================
--- ฟังก์ชันเช็คแมพ - ต้องเช็คหลัง Stats GUI โหลดเสร็จ
--- ========================================
-local function isInTargetMap()
-    local success, result = pcall(function()
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-        local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-
-        -- Method 1: ใช้ Map Replicas (แม่นยำกว่า)
-        local allMaps = Nodes.GET_ALL_MAP_REPLICAS:InvokeSelf()
-
-        if allMaps then
-            for mapID, mapReplica in pairs(allMaps) do
-                local data = mapReplica.Data
-                local parameters = data.Parameters or {}
-
-                -- เช็คว่าเป็น SchoolGrounds Act 1 Story Mode
-                if parameters.MapName == "SchoolGrounds" and
-                   parameters.ActName == "Act 1" and
-                   parameters.Gamemode == "Story" then
-                    return true
-                end
-            end
-        end
-
         return false
-    end)
-    return success and result
-end
-
--- เช็คและรอ Wave รีเซ็ต
--- ========================================
--- ฟังก์ชัน RemoveLobbyMesh (ใช้ร่วมกันระหว่าง In-Game และ Lobby)
--- ========================================
-local function applyPerformanceOptimizations()
-    local g = game
-    local w = g.Workspace
-    local l = g.Lighting
-    local t = w.Terrain
-
-    -- ใช้เฉพาะ TOGGLE_RENDER3D (เอา Config.Disable3DRendering ออก)
-    if TOGGLE_RENDER3D then
-        local RunService = game:GetService("RunService")
-        RunService:Set3dRenderingEnabled(false)
-        print("🔧 3D Rendering disabled (TOGGLE_RENDER3D)")
     end
 
-    t.WaterWaveSize = 0
-    t.WaterWaveSpeed = 0
-    t.WaterReflectance = 0
-    t.WaterTransparency = 0
-
-    local Lighting = game:GetService("Lighting")
-    Lighting.Brightness = 0
-    Lighting.Ambient = Color3.fromRGB(128, 128, 128)
-    Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
-    Lighting.ColorShift_Bottom = Color3.fromRGB(128, 128, 128)
-    Lighting.ColorShift_Top = Color3.fromRGB(128, 128, 128)
-    Lighting.GlobalShadows = false
-    Lighting.ShadowSoftness = 0
-    Lighting.EnvironmentDiffuseScale = 0
-    Lighting.EnvironmentSpecularScale = 0
-    Lighting.FogEnd = 9e9
-
-    settings().Rendering.QualityLevel = "Level01"
-
-    -- เช็ค Map ก่อน (เพราะเมื่ออยู่ในเกมให้ลบ Map ไม่ใช่ Lobby)
-    local lobbyFolder = workspace:FindFirstChild("Lobby")
-    local mapFolder = workspace:FindFirstChild("Map")
-
-    if mapFolder then
-        -- ลบ children ของ Map (เกมจะสร้าง folder ใหม่ถ้าลบทั้งก้อน)
-        for _, obj in pairs(mapFolder:GetChildren()) do
-            obj:Destroy()
-        end
-
-        -- สร้างพื้นล่องหนไว้ที่เท้าผู้เล่น
-        local player = game:GetService("Players").LocalPlayer
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local rootPart = player.Character.HumanoidRootPart
-            local invisibleFloor = Instance.new("Part")
-            invisibleFloor.Name = "InvisibleFloor"
-            invisibleFloor.Size = Vector3.new(2000, 1, 2000)
-            invisibleFloor.Position = rootPart.Position - Vector3.new(0, 5, 0)
-            invisibleFloor.Anchored = true
-            invisibleFloor.Transparency = 1
-            invisibleFloor.CanCollide = true
-            invisibleFloor.Material = Enum.Material.SmoothPlastic
-            invisibleFloor.Parent = workspace
-        end
-    elseif lobbyFolder then
-        for _, obj in pairs(lobbyFolder:GetChildren()) do
-            obj:Destroy()
-        end
-
-        -- สร้างพื้นล่องหนสำหรับ Lobby
-        local player = game:GetService("Players").LocalPlayer
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local pos = player.Character.HumanoidRootPart.Position
-            local floor = Instance.new("Part")
-            floor.Name = "InvisibleFloor"
-            floor.Size = Vector3.new(2000, 1, 2000)
-            floor.Position = Vector3.new(pos.X, pos.Y - 3, pos.Z)
-            floor.Anchored = true
-            floor.Transparency = 1
-            floor.CanCollide = true
-            floor.Material = Enum.Material.SmoothPlastic
-            floor.Parent = workspace
-        end
-    end
-
-    for _, obj in pairs(Lighting:GetChildren()) do
-        obj:Destroy()
-    end
-
-    local MaterialService = game:GetService("MaterialService")
-    for _, obj in pairs(MaterialService:GetChildren()) do
-        obj:Destroy()
-    end
-
-    for _, obj in pairs(workspace:GetDescendants()) do
-        local success, err = pcall(function()
-            if obj:IsA("Texture") or obj:IsA("Decal") then
-                obj.Transparency = 1
-            elseif obj:IsA("SurfaceAppearance") then
-                obj:Destroy()
-            elseif obj:IsA("Part") or obj:IsA("Union") or obj:IsA("CornerWedgePart") or obj:IsA("TrussPart") or obj:IsA("UnionOperation") then
-                obj.Material = "Plastic"
-                obj.Color = Color3.fromRGB(128, 128, 128)
-                obj.Reflectance = 0
-            elseif obj:IsA("MeshPart") then
-                obj.Material = "Plastic"
-                obj.Color = Color3.fromRGB(128, 128, 128)
-                obj.Reflectance = 0
-                obj.TextureID = ""
-            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
-                obj.Enabled = false
-            elseif obj:IsA("Explosion") then
-                obj.BlastPressure = 1
-                obj.BlastRadius = 1
-            elseif obj:IsA("Fire") or obj:IsA("SpotLight") or obj:IsA("Smoke") then
-                obj.Enabled = false
-            end
-        end)
-    end
-
-    for _, e in pairs(Lighting:GetChildren()) do
-        if e:IsA("BlurEffect") or e:IsA("SunRaysEffect") or e:IsA("ColorCorrectionEffect") or e:IsA("BloomEffect") or e:IsA("DepthOfFieldEffect") then
-            e.Enabled = false
-        end
-    end
-
-    for _, player in pairs(game.Players:GetPlayers()) do
-        if player.Character then
-            for _, part in pairs(player.Character:GetDescendants()) do
-                pcall(function()
-                    if part:IsA("Texture") or part:IsA("Decal") then
-                        part.Transparency = 1
-                    elseif part:IsA("MeshPart") then
-                        part.TextureID = ""
-                        part.Material = "Plastic"
-                        part.Color = Color3.fromRGB(128, 128, 128)
-                        part.Reflectance = 0
-                    elseif part:IsA("BasePart") then
-                        part.Material = "Plastic"
-                        part.Color = Color3.fromRGB(128, 128, 128)
-                        part.Reflectance = 0
-                    elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
-                        part.Enabled = false
-                    elseif part:IsA("Fire") or part:IsA("SpotLight") or part:IsA("Smoke") then
-                        part.Enabled = false
-                    end
-                end)
-            end
-        end
-    end
-end
-
--- ========================================
--- เช็คแมพหลังโหลด Stats GUI เสร็จแล้ว
--- ========================================
-print("🔍 Checking current map...")
-
--- ตอนนี้อยู่ในแมพหรือไม่
-if isInTargetMap() then
-    print("✅ In Story Mode (School Grounds - Act 1)")
-    spawn(function()
-        -- ปิด Tutorial popup (ถ้ามี)
-        local function closeTutorial()
-            local success = pcall(function()
-                local playerGui = game:GetService("Players").LocalPlayer.PlayerGui
-                local prompt = playerGui:FindFirstChild("Prompt")
-                if not prompt then return end
-
-                local tutorialLabel = prompt.Frame.Frame.Folder.Frame.Frame.Frame.TextLabel
-                if tutorialLabel then
-                    local text = tutorialLabel.ContentText or tutorialLabel.Text
-                    if text == "Tutorial" then
-                        local closeButton = prompt.Frame.Frame.Folder.Frame:FindFirstChild("PrimaryButton")
-                        if closeButton then
-                            local GuiService = game:GetService("GuiService")
-                            local VirtualInputManager = game:GetService("VirtualInputManager")
-
-                            GuiService.SelectedCoreObject = nil
-                            task.wait(0.1)
-
-                            closeButton.Selectable = true
-                            GuiService.SelectedCoreObject = closeButton
-                            task.wait(0.1)
-
-                            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-                            task.wait(0.05)
-                            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
-
-                            task.wait(0.2)
-                            GuiService.SelectedCoreObject = nil
-
-                            return
-                        end
-                    end
-                end
-            end)
-        end
-
-        closeTutorial()
-        task.wait(0.5)
-
-        applyPerformanceOptimizations()
-
-
-    -- ====================================
-    -- ระบบวาง + อัพเกรด (เหมือน Path B)
-    -- ====================================
-    local Players = game:GetService("Players")
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-    local Shared = ReplicatedStorage:WaitForChild("Shared")
-    local ReplicaClient = require(Shared:WaitForChild("ReplicaClient"))
-
-    -- ตัวแปรสำหรับเก็บ Connection และ State
-    local currentConnection = nil
-    local allPlacedIDs = {}
-
-    local function getCurrentWave()
-        -- Method 1: อ่านจาก Game Replica (ถูกต้อง - ยืนยันจาก CheckWave.lua)
-        local success1, wave1 = pcall(function()
-            local gameReplica = Nodes.GET_GAME_REPLICA:InvokeSelf()
-            if gameReplica and gameReplica.Data and gameReplica.Data.Wave then
-                return tonumber(gameReplica.Data.Wave) or 0
-            end
-            return nil
-        end)
-
-        if success1 and wave1 then
-            return wave1
-        end
-
-        -- Method 2: Fallback - อ่านจาก GUI (พร้อม timeout)
-        local success2, wave2 = pcall(function()
-            local startTime = tick()
-            local timeout = 3
-
-            while tick() - startTime < timeout do
-                local topHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("TopGameHUD")
-                if topHUD then
-                    local success, result = pcall(function()
-                        local waveLabel = topHUD.Frame:GetChildren()[4].Frame.Frame.Frame.Frame.Frame.TextLabel
-                        local text = waveLabel.ContentText or waveLabel.Text
-                        return tonumber(string.match(text, "^(%d+)")) or 0
-                    end)
-                    if success and result then
-                        return result
-                    end
-                end
-                task.wait(0.5)
-            end
-            return nil
-        end)
-
-        if success2 and wave2 then
-            warn("⚠️ Wave detection fallback to GUI (Game Replica failed)")
-            return wave2
-        end
-
-        warn("❌ Wave detection failed - both Replica and GUI methods failed")
-        return nil  -- ⚠️ return nil แทน 0 เพื่อไม่ให้ trigger false wave reset
-    end
-
-    local function resetFarmingState()
-        print("🔄 [resetFarmingState] Resetting state...")
-        -- Disconnect connection เก่า (ถ้ามี)
-        if currentConnection then
-            pcall(function()
-                currentConnection:Disconnect()
-                print("   ✅ [resetFarmingState] Disconnected old connection")
-            end)
-            currentConnection = nil
-        end
-
-        -- ล้างข้อมูล Unit เก่า
-        local oldCount = #allPlacedIDs
-        allPlacedIDs = {}
-        print(string.format("   🗑️ [resetFarmingState] Cleared %d old unit IDs", oldCount))
-    end
-
-    local function placeAndUpgrade()
-        print("═══════════════════════════════════════")
-        print("🎮 [placeAndUpgrade] Starting new phase")
-        print("═══════════════════════════════════════")
-
-        local DELAY_AFTER_PLACE = 1
-        local AUTO_UPGRADE_PRIORITY = 1
-
-        local function getCurrentMoney()
-            -- Method 1: อ่านจาก Replica (เชื่อถือได้กว่า)
-            local success, money = pcall(function()
-                local replica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
-                if replica and replica.Data and replica.Data.Yen then
-                    return replica.Data.Yen
-                end
-                return nil
-            end)
-
-            if success and money then
-                return money
-            else
-                warn("⚠️ [getCurrentMoney] Replica method failed, using GUI fallback")
-            end
-
-            -- Method 2: Fallback อ่านจาก GUI (ครอบคลุม)
-            local success2, money2 = pcall(function()
-                local playerGui = Players.LocalPlayer.PlayerGui
-                local bottomHUD = playerGui:FindFirstChild("BottomHUD")
-                if not bottomHUD then return nil end
-
-                -- หา TextLabel ที่มี ContentText เป็นตัวเลข + สัญลักษณ์เงิน
-                local function findMoneyLabel(parent, depth)
-                    depth = depth or 0
-                    if depth > 10 then return nil end  -- จำกัดความลึก
-
-                    for _, child in ipairs(parent:GetDescendants()) do
-                        if child:IsA("TextLabel") then
-                            local text = child.ContentText or child.Text or ""
-                            -- เช็คว่ามีตัวเลขและสัญลักษณ์เงิน (¥ หรือ $)
-                            if text:match("[¥$]") and text:match("%d") then
-                                local cleaned = (text:gsub("[^%d]", ""))
-                                local num = tonumber(cleaned)
-                                -- ต้องเป็นตัวเลขที่สมเหตุสมผล (มากกว่า 0)
-                                if num and num >= 0 then
-                                    return num
-                                end
-                            end
-                        end
-                    end
-                    return nil
-                end
-
-                local money = findMoneyLabel(bottomHUD)
-                if money then return money end
-
-                -- Method 2.1: วิธีเดิม (GetChildren index)
-                local success, result = pcall(function()
-                    local moneyLabel = bottomHUD:GetChildren()[2]:GetChildren()[6].Frame.Frame.TextLabel
-                    local moneyText = moneyLabel.ContentText or moneyLabel.Text
-                    local cleaned = (moneyText:gsub("[^%d]", ""))
-                    return tonumber(cleaned) or 0
-                end)
-
-                if success and result and result > 0 then
-                    return result
-                end
-
-                return nil
-            end)
-
-            if success2 and money2 then
-                return money2
-            end
-
-            warn("❌ [getCurrentMoney] All methods failed")
-            return 0
-        end
-
-        local function getUnitCost(slot)
-            local targetSlot = tonumber(slot)
-            if not targetSlot then
-                warn(string.format("❌ [getUnitCost] Invalid slot: %s", tostring(slot)))
-                return 999999
-            end
-
-            local attempts = 0
-            while attempts < 10 do
-                -- Method 1: ตาม CheckAllSlots.lua pattern (หลัก)
-                local success1, result1, errorMsg1 = pcall(function()
-                    local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
-                    if not bottomHUD then return nil, "BottomHUD not found" end
-
-                    local success1, children2 = pcall(function()
-                        return bottomHUD:GetChildren()[2]
-                    end)
-                    if not success1 or not children2 then return nil, "Cannot access children[2]" end
-
-                    local success2, children5 = pcall(function()
-                        return children2:GetChildren()[5]
-                    end)
-                    if not success2 or not children5 then return nil, "Cannot access children[5]" end
-
-                    local hotbarContainer = children5
-
-                    for _, child in ipairs(hotbarContainer:GetChildren()) do
-                        if child:IsA("TextButton") and child.LayoutOrder == targetSlot then
-                            local frame = child:FindFirstChild("Frame")
-                            if not frame then return nil, "No Frame in button" end
-
-                            local children = frame:GetChildren()
-                            if children[3] and children[3]:IsA("Frame") then
-                                local innerFrame = children[3]:FindFirstChild("Frame")
-                                if innerFrame then
-                                    local textLabel = innerFrame:FindFirstChild("TextLabel")
-                                    if textLabel then
-                                        local costText = textLabel.ContentText or textLabel.Text
-                                        local cleaned = (costText:gsub("[^%d]", ""))
-                                        local parsed = tonumber(cleaned)
-                                        if parsed and parsed > 0 then
-                                            return parsed, nil
-                                        else
-                                            return nil, "Failed to parse cost text: " .. costText
-                                        end
-                                    else
-                                        return nil, "No TextLabel in innerFrame"
-                                    end
-                                else
-                                    return nil, "No inner Frame in child[3]"
-                                end
-                            else
-                                return nil, "No Frame at child[3]"
-                            end
-                        end
-                    end
-                    return nil, string.format("Slot %d not found in hotbar", targetSlot)
-                end)
-
-                -- ถ้า Method 1 สำเร็จ → return ทันที
-                if success1 and result1 then
-                    if attempts > 0 then
-                        print(string.format("✅ [getUnitCost] Method 1 success for slot %s: %d (attempt %d)", slot, result1, attempts + 1))
-                    end
-                    return result1
-                end
-
-                -- Method 2: Path จากรูป (Fallback)
-                local success2, result2, errorMsg2 = pcall(function()
-                    local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
-                    if not playerGui then return nil, "PlayerGui not found" end
-
-                    local bottomHUD = playerGui:FindFirstChild("BottomHUD")
-                    if not bottomHUD then return nil, "BottomHUD not found" end
-
-                    -- Path: BottomHUD.Frame.Frame.TextButton.Frame.Frame.Frame.TextLabel
-                    local frame1 = bottomHUD:FindFirstChild("Frame")
-                    if not frame1 then return nil, "BottomHUD.Frame not found" end
-
-                    local frame2 = frame1:FindFirstChild("Frame")
-                    if not frame2 then return nil, "BottomHUD.Frame.Frame not found" end
-
-                    -- หา TextButton ที่ตรงกับ slot (LayoutOrder)
-                    for _, child in ipairs(frame2:GetChildren()) do
-                        if child:IsA("TextButton") and child.LayoutOrder == targetSlot then
-                            local btnFrame = child:FindFirstChild("Frame")
-                            if not btnFrame then return nil, "TextButton.Frame not found" end
-
-                            local innerFrame1 = btnFrame:FindFirstChild("Frame")
-                            if not innerFrame1 then return nil, "TextButton.Frame.Frame not found" end
-
-                            local innerFrame2 = innerFrame1:FindFirstChild("Frame")
-                            if not innerFrame2 then return nil, "TextButton.Frame.Frame.Frame not found" end
-
-                            local textLabel = innerFrame2:FindFirstChild("TextLabel")
-                            if not textLabel then return nil, "TextLabel not found in final Frame" end
-
-                            local costText = textLabel.ContentText or textLabel.Text
-                            local cleaned = (costText:gsub("[^%d]", ""))
-                            local parsed = tonumber(cleaned)
-                            if parsed and parsed > 0 then
-                                return parsed, nil
-                            else
-                                return nil, "Failed to parse cost: " .. costText
-                            end
-                        end
-                    end
-                    return nil, string.format("Slot %d TextButton not found", targetSlot)
-                end)
-
-                if success2 and result2 then
-                    print(string.format("✅ [getUnitCost] Method 2 (Fallback) success for slot %s: %d (attempt %d)", slot, result2, attempts + 1))
-                    return result2
-                end
-
-                -- Method 3: Scan ทุก TextLabel ใน Hotbar slot
-                local success3, result3, errorMsg3 = pcall(function()
-                    local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
-                    if not bottomHUD then return nil, "BottomHUD not found" end
-
-                    -- หา TextButton ที่ตรง LayoutOrder
-                    for _, button in ipairs(bottomHUD:GetDescendants()) do
-                        if button:IsA("TextButton") and button.LayoutOrder == targetSlot then
-                            -- Scan ทุก TextLabel ใน button นี้
-                            for _, label in ipairs(button:GetDescendants()) do
-                                if label:IsA("TextLabel") then
-                                    local text = label.ContentText or label.Text or ""
-                                    -- เช็คว่ามีตัวเลข 100+ (ราคา unit ต่ำสุด)
-                                    local cleaned = (text:gsub("[^%d]", ""))
-                                    local num = tonumber(cleaned)
-                                    if num and num >= 100 and num < 100000 then
-                                        -- ตรวจสอบว่าไม่ใช่ค่าอื่น (เช่น level, upgrade)
-                                        -- ราคา unit อยู่ระหว่าง 100-99999
-                                        return num, nil
-                                    end
-                                end
-                            end
-                            return nil, "No valid cost TextLabel found in button"
-                        end
-                    end
-                    return nil, string.format("TextButton LayoutOrder %d not found", targetSlot)
-                end)
-
-                if success3 and result3 then
-                    print(string.format("✅ [getUnitCost] Method 3 (Scan) success for slot %s: %d (attempt %d)", slot, result3, attempts + 1))
-                    return result3
-                end
-
-                -- Method 4: ตาม structure จากรูป (BottomHUD > Frame > Frame > TextButton > Folder > Frame > Folder > Frame > Frame > Frame > TextLabel)
-                local success4, result4, errorMsg4 = pcall(function()
-                    local bottomHUD = Players.LocalPlayer.PlayerGui:FindFirstChild("BottomHUD")
-                    if not bottomHUD then return nil, "BottomHUD not found" end
-
-                    local frame1 = bottomHUD:FindFirstChild("Frame")
-                    if not frame1 then return nil, "BottomHUD.Frame not found" end
-
-                    local frame2 = frame1:FindFirstChild("Frame")
-                    if not frame2 then return nil, "Frame.Frame not found" end
-
-                    -- หา TextButton ที่ LayoutOrder ตรง
-                    for _, button in ipairs(frame2:GetChildren()) do
-                        if button:IsA("TextButton") and button.LayoutOrder == targetSlot then
-                            local folder1 = button:FindFirstChild("Folder")
-                            if not folder1 then return nil, "TextButton.Folder not found" end
-
-                            local btnFrame = folder1:FindFirstChild("Frame")
-                            if not btnFrame then return nil, "Folder.Frame not found" end
-
-                            local folder2 = btnFrame:FindFirstChild("Folder")
-                            if not folder2 then return nil, "Frame.Folder not found" end
-
-                            local innerFrame1 = folder2:FindFirstChild("Frame")
-                            if not innerFrame1 then return nil, "Folder.Frame not found" end
-
-                            local innerFrame2 = innerFrame1:FindFirstChild("Frame")
-                            if not innerFrame2 then return nil, "Frame.Frame not found" end
-
-                            local innerFrame3 = innerFrame2:FindFirstChild("Frame")
-                            if not innerFrame3 then return nil, "Frame.Frame.Frame not found" end
-
-                            local textLabel = innerFrame3:FindFirstChild("TextLabel")
-                            if not textLabel then return nil, "TextLabel not found" end
-
-                            local costText = textLabel.ContentText or textLabel.Text
-                            local cleaned = (costText:gsub("[^%d]", ""))
-                            local parsed = tonumber(cleaned)
-                            if parsed and parsed > 0 then
-                                return parsed, nil
-                            else
-                                return nil, "Failed to parse cost: " .. costText
-                            end
-                        end
-                    end
-                    return nil, string.format("TextButton LayoutOrder %d not found", targetSlot)
-                end)
-
-                if success4 and result4 then
-                    print(string.format("✅ [getUnitCost] Method 4 (Structure) success for slot %s: %d (attempt %d)", slot, result4, attempts + 1))
-                    return result4
-                end
-
-                -- ทั้ง 4 Method ล้มเหลว → log + retry
-                if attempts == 0 then
-                    warn(string.format("⚠️ [getUnitCost] Slot %s - All methods failed (attempt %d/10)", slot, attempts + 1))
-                    warn(string.format("   Method 1 error: %s", tostring(errorMsg1)))
-                    warn(string.format("   Method 2 error: %s", tostring(errorMsg2)))
-                    warn(string.format("   Method 3 error: %s", tostring(errorMsg3)))
-                    warn(string.format("   Method 4 error: %s", tostring(errorMsg4)))
-                end
-
-                attempts = attempts + 1
-                task.wait(0.5)
-            end
-
-            warn(string.format("⚠️ [getUnitCost] Failed after 10 attempts for slot %s", slot))
-            return 999999
-        end
-
-        print("🔍 [placeAndUpgrade] Getting Player Replica...")
-        local playerReplica = nil
-        for i = 1, 5 do
-            playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
-            if playerReplica then
-                print(string.format("✅ [placeAndUpgrade] Player Replica found (attempt %d/5)", i))
-                break
-            end
-            warn(string.format("⚠️ [placeAndUpgrade] PlayerReplica not found - retry %d/5", i))
-            task.wait(1)
-        end
-
-        if not playerReplica then
-            warn("❌ [placeAndUpgrade] ไม่พบ Player Replica - aborting phase")
-            return false
-        end
-
-        -- รีเซ็ต state ก่อนเริ่ม Phase ใหม่
-        print("🔄 [placeAndUpgrade] Resetting farming state...")
-        resetFarmingState()
-
-        -- ดึง units ที่มีอยู่แล้วก่อนสร้าง connection
-        print("📋 [placeAndUpgrade] Loading existing units...")
-        pcall(function()
-            local dependenciesModule = ReplicatedStorage:FindFirstChild("Dependencies")
-            if dependenciesModule then
-                local Dependencies = require(dependenciesModule)
-                local GameUnits = Dependencies.GameUnits
-                if GameUnits then
-                    local existingCount = 0
-                    for unitID, _ in pairs(GameUnits:get()) do
-                        if not table.find(allPlacedIDs, unitID) then
-                            table.insert(allPlacedIDs, unitID)
-                            existingCount = existingCount + 1
-                        end
-                    end
-                    print(string.format("   📊 [placeAndUpgrade] Loaded %d existing units", existingCount))
-                end
-            end
-        end)
-
-        -- สร้าง Connection ใหม่
-        print("🔗 [placeAndUpgrade] Creating unit tracker connection...")
-        currentConnection = ReplicaClient.OnNew("GameUnit", function(replica)
-            local unitID = replica.Data.ID
-            if unitID and not table.find(allPlacedIDs, unitID) then
-                table.insert(allPlacedIDs, unitID)
-                print(string.format("   🆕 [UnitTracker] New unit detected: %s", tostring(unitID)))
-            end
-        end)
-
-        -- รอให้ connection พร้อม (แก้ race condition)
-        print("⏳ [placeAndUpgrade] Waiting for connection to be ready...")
-        task.wait(2)
-
-        local function placeUnit(slot, cframe)
-            -- Validate slot มี unit หรือไม่
-            local cost = getUnitCost(slot)
-
-            if cost == 0 then
-                warn(string.format("❌ [PlaceUnit] Slot %s is empty or unavailable - skipping", slot))
-                return false
-            end
-
-            local startCount = #allPlacedIDs
-
-            -- ปิด random offset เพื่อป้องกัน collision ตอน retry
-            local adjustedCFrame = cframe
-
-            print(string.format("🔄 [PlaceUnit] Attempting to place Slot %s (Cost: %d, Money: %d)", slot, cost, getCurrentMoney()))
-
-            local attempts = 0
-            while attempts < 60 do
-                local money = getCurrentMoney()
-                local shouldContinue = false
-
-                -- ถ้า cost = 999999 (detect ไม่ได้) → retry getUnitCost() ก่อน
-                if cost == 999999 then
-                    warn(string.format("⚠️ [PlaceUnit] Cannot detect cost for slot %s - retrying detection", slot))
-                    local newCost, costErr = getUnitCost(slot)
-                    if newCost and newCost ~= 999999 then
-                        cost = newCost
-                        print(string.format("✅ [PlaceUnit] Cost detected: %d", cost))
-                    else
-                        warn(string.format("⚠️ [PlaceUnit] Still cannot detect cost - waiting before retry"))
-                        attempts = attempts + 1
-                        task.wait(1)
-                        shouldContinue = true
-                    end
-                end
-
-                -- เช็คเงินตามปกติ
-                if not shouldContinue and money >= cost then
-
-                    local success, err = pcall(function()
-                        playerReplica:FireServer("PlaceGameUnit", slot, adjustedCFrame, true)
-                    end)
-
-                    if success then
-                        task.wait(DELAY_AFTER_PLACE)
-
-                        local waited = 0
-                        while #allPlacedIDs <= startCount and waited < 5 do
-                            task.wait(0.1)
-                            waited = waited + 0.1
-                        end
-
-                        if #allPlacedIDs > startCount then
-                            local newUnitID = allPlacedIDs[#allPlacedIDs]
-                            print(string.format("   ✅ [PlaceUnit] Successfully placed Slot %s (Unit ID: %s)", slot, tostring(newUnitID)))
-                            return true
-                        else
-                            warn(string.format("⚠️ [PlaceUnit] Place retry: Slot=%s, Cost=%d, Money=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
-                            attempts = attempts + 1
-                            task.wait(1)
-                        end
-                    else
-                        warn(string.format("❌ [PlaceUnit] FireServer failed: Slot=%s, Attempt=%d/60, Error=%s", slot, attempts + 1, tostring(err)))
-                        attempts = attempts + 1
-                        task.wait(1)
-                    end
-                elseif not shouldContinue then
-                    if attempts % 10 == 0 then
-                        print(string.format("⏳ [PlaceUnit] Waiting for money: Slot=%s, Need=%d, Have=%d, Attempt=%d/60", slot, cost, money, attempts + 1))
-                    end
-                    task.wait(1)
-                    attempts = attempts + 1
-                end
-            end
-
-            warn(string.format("❌ [PlaceUnit] Place timeout after 60 attempts: Slot=%s, Cost=%d", slot, cost))
-            return false
-        end
-
-        print("🔄 [Phase] Starting placement sequence...")
-
-        -- ฟังก์ชันเช็คชื่อ Unit จาก HotbarData (Replica)
-        local function getUnitNameFromSlot(slot)
-            local success, unitName = pcall(function()
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                if not replica or not replica.Data or not replica.Data.HotbarData then
-                    return nil
-                end
-
-                -- อ่าน fullKey จาก HotbarData
-                local fullKey = replica.Data.HotbarData[slot] or replica.Data.HotbarData[tostring(slot)]
-                if not fullKey then return nil end
-
-                -- แยก internal name (format: "UnitName#uuid")
-                local internalName = fullKey:match("^(.+)#") or fullKey
-
-                -- แปลงเป็น Display Name
-                local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
-                local unitInfo = UnitInfo[internalName]
-
-                if unitInfo then
-                    return unitInfo.DisplayName or internalName
-                end
-
-                return internalName
-            end)
-
-            if success and unitName then
-                return unitName
-            end
-            return nil
-        end
-
-        -- เช็ค Hotbar: Epic (slot 3) + Legendary (slot 2)
-        local epicUnitName = getUnitNameFromSlot("3")
-        local legendaryUnitName = getUnitNameFromSlot("2")
-
-        print(string.format("🔍 [Phase] Hotbar Check - Slot 2: %s | Slot 3: %s",
-            tostring(legendaryUnitName or "Empty"),
-            tostring(epicUnitName or "Empty")))
-
-        -- เช็คว่าเป็น Farm Mode ไหน
-        local LEGENDARY_PLACEMENT_LIMITED = {"Greed", "Scissor", "Water Princess"}
-        local isLegendaryLimited = false
-        local isIceMage = (epicUnitName == "Ice Mage")
-
-        if legendaryUnitName then
-            for _, limitedUnit in ipairs(LEGENDARY_PLACEMENT_LIMITED) do
-                if legendaryUnitName == limitedUnit then
-                    isLegendaryLimited = true
+    -- ใน Lobby: เช็ค Diamonds + BuyClass + UpgradeClass
+    local classesMet = true
+    local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+
+    if classesGoal then
+        if not ClassProgress then
+            classesMet = false
+        else
+            for _, className in ipairs(Config.BuyClass) do
+                if not ClassProgress:FindFirstChild(className) then
+                    classesMet = false
                     break
                 end
             end
         end
+    end
 
-        -- ตัดสินใจ Farm Mode
-        local farmMode = "LEGENDARY_ONLY"  -- Default
-        if epicUnitName and legendaryUnitName then
-            farmMode = "EPIC_LEGENDARY"
-            print(string.format("✅ [Phase] Farm Mode: EPIC_LEGENDARY (Epic: %s, Legendary: %s)", epicUnitName, legendaryUnitName))
+    if upgradeGoal and classesMet then
+        if not ClassProgress then
+            classesMet = false
         else
-            print(string.format("✅ [Phase] Farm Mode: LEGENDARY_ONLY (Legendary: %s)", tostring(legendaryUnitName)))
-        end
-
-        -- ===========================================
-        -- FARM MODE: EPIC_LEGENDARY
-        -- ===========================================
-        if farmMode == "EPIC_LEGENDARY" then
-            local upgradeUnits = {}
-
-            -- วาง Epic Units (4 ตัว ถ้าเป็น Ice Mage, 3 ตัวถ้าเป็นตัวอื่น)
-            print("📍 [Epic Phase] Placing Epic units (slot 3)...")
-
-            local epicPositions = {
-                CFrame.new(3091.4519042969, 1798.9315185547, 3375.9118652344, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                CFrame.new(3091.3552246094, 1798.9315185547, 3373.8767089844, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                CFrame.new(3086.3559570312, 1798.9315185547, 3375.8781738281, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-            }
-
-            -- ถ้าเป็น Ice Mage → วางตัวที่ 4
-            if isIceMage then
-                table.insert(epicPositions, CFrame.new(3086.3735351562, 1798.9315185547, 3374.1369628906, 1, 0, 0, 0, 1, 0, 0, 0, 1))
-            end
-
-            for i, cframe in ipairs(epicPositions) do
-                local startCount = #allPlacedIDs
-                print(string.format("📍 [Epic Phase] Placing Epic unit %d/%d...", i, #epicPositions))
-                local success = placeUnit("3", cframe)
-                if success and #allPlacedIDs > startCount then
-                    table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-                    print(string.format("✅ [Epic Phase] Epic unit %d placed (ID: %s)", i, tostring(allPlacedIDs[#allPlacedIDs])))
-                else
-                    warn(string.format("❌ [Epic Phase] Failed to place Epic unit %d - continuing...", i))
+            for _, clsName in ipairs(Config.UpgradeClass) do
+                if type(clsName) ~= "string" then continue end
+                local folder = ClassProgress:FindFirstChild(clsName)
+                if not folder then
+                    classesMet = false
+                    break
+                end
+                local lvl = folder:GetAttribute("Level") or 1
+                if lvl < 3 then
+                    classesMet = false
+                    break
                 end
             end
-
-            -- วาง Legendary Units (4 ตัว หรือ 3 ตัวถ้า Legendary เป็น limited)
-            print("📍 [Legendary Phase] Placing Legendary units (slot 2)...")
-
-            local legendaryPositions = {
-                CFrame.new(3094.5942382812, 1798.9315185547, 3373.314453125, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                CFrame.new(3094.5502929688, 1798.9315185547, 3370.8835449219, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                CFrame.new(3091.6162109375, 1798.9315185547, 3371.0627441406, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-            }
-
-            -- ถ้า Legendary ไม่ใช่ limited → วางตัวที่ 4
-            if not isLegendaryLimited then
-                table.insert(legendaryPositions, CFrame.new(3097.2465820312, 1798.7340087891, 3373.2370605469, 1, 0, 0, 0, 1, 0, 0, 0, 1))
-            end
-
-            for i, cframe in ipairs(legendaryPositions) do
-                local startCount = #allPlacedIDs
-                print(string.format("📍 [Legendary Phase] Placing Legendary unit %d/%d...", i, #legendaryPositions))
-                local success = placeUnit("2", cframe)
-                if success and #allPlacedIDs > startCount then
-                    table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-                    print(string.format("✅ [Legendary Phase] Legendary unit %d placed (ID: %s)", i, tostring(allPlacedIDs[#allPlacedIDs])))
-                else
-                    warn(string.format("❌ [Legendary Phase] Failed to place Legendary unit %d - continuing...", i))
-                end
-            end
-
-            -- วาง Slot 1 Units ที่ตำแหน่งใหม่ (หลังจากวาง Epic/Legendary ครบแล้ว)
-            local slot1UnitName = getUnitNameFromSlot("1")
-            print(string.format("🔍 [Slot 1 Phase] Unit in slot 1: %s", tostring(slot1UnitName or "Empty")))
-
-            if slot1UnitName then
-                -- Slot 1 เป็น Epic unit: วาง 4 ตัวถ้าเป็น Ice Mage, 3 ตัวถ้าเป็นตัวอื่น
-                local isSlot1IceMage = (slot1UnitName == "Ice Mage")
-
-                local slot1Positions = {
-                    CFrame.new(3113.3083496094, 1798.7340087891, 3201.0505371094, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                    CFrame.new(3113.1704101562, 1798.7340087891, 3199.0378417969, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                    CFrame.new(3110.1689453125, 1798.7340087891, 3200.9020996094, 1, 0, 0, 0, 1, 0, 0, 0, 1),
-                }
-
-                if isSlot1IceMage then
-                    table.insert(slot1Positions, CFrame.new(3110.0202636719, 1798.7340087891, 3199.0668945312, 1, 0, 0, 0, 1, 0, 0, 0, 1))
-                end
-
-                print(string.format("📍 [Slot 1 Phase] Placing %d units from slot 1 (%s)...", #slot1Positions, slot1UnitName))
-                for i, cframe in ipairs(slot1Positions) do
-                    local startCount = #allPlacedIDs
-                    print(string.format("📍 [Slot 1 Phase] Placing unit %d/%d...", i, #slot1Positions))
-                    local success = placeUnit("1", cframe)
-                    if success and #allPlacedIDs > startCount then
-                        table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-                        print(string.format("✅ [Slot 1 Phase] Unit %d placed (ID: %s)", i, tostring(allPlacedIDs[#allPlacedIDs])))
-                    else
-                        warn(string.format("❌ [Slot 1 Phase] Failed to place unit %d - continuing...", i))
-                    end
-                end
-            else
-                print("ℹ️ [Slot 1 Phase] Slot 1 is empty - skipping slot 1 placements")
-            end
-
-            -- Disconnect connection
-            if currentConnection then
-                currentConnection:Disconnect()
-                currentConnection = nil
-            end
-
-            -- ตั้ง AutoUpgrade Priority ทุกตัว
-            print(string.format("🔧 [Phase Final] Setting AutoUpgrade priority for %d units...", #upgradeUnits))
-            for i, unitID in ipairs(upgradeUnits) do
-                local success, err = pcall(function()
-                    playerReplica:FireServer("ChangeGameUnitAutoUpgradePriority", unitID, AUTO_UPGRADE_PRIORITY)
-                end)
-                if success then
-                    print(string.format("   ✅ Priority set for unit %d/%d (ID: %s)", i, #upgradeUnits, tostring(unitID)))
-                else
-                    warn(string.format("   ⚠️ Failed to set priority for unit %s: %s", tostring(unitID), tostring(err)))
-                end
-                task.wait(0.3)
-            end
-
-            print("✅ [Phase] EPIC_LEGENDARY mode completed successfully")
-            return true
         end
+    end
 
-        -- ===========================================
-        -- FARM MODE: LEGENDARY_ONLY (วิธีเดิม)
-        -- ===========================================
-        local isPlacementLimited = isLegendaryLimited
-        if isPlacementLimited then
-            print(string.format("⚠️ [Phase] Legendary '%s' is placement-limited (max 3 units) - will skip Unit 4", legendaryUnitName))
+    -- ส่ง DONE เมื่อ Diamonds + Classes (BuyClass + UpgradeClass) ครบ
+    if diamondsMet and classesMet then
+        if _G.Horst_AccountChangeDone then
+            _G.Horst_AccountChangeDone()
         end
-
-        -- Phase 1-2: วาง 4 ตัว (หรือ 3 ตัวถ้าเป็น limited unit)
-        local unit1ID = nil
-        local startCount = #allPlacedIDs
-        print("📍 [Phase 1] Placing Unit 1...")
-        local success1 = placeUnit("2", CFrame.new(3077.4265136719, 1798.7340087891, 3330.8972167969))
-        if success1 and #allPlacedIDs > startCount then
-            unit1ID = allPlacedIDs[#allPlacedIDs]
-            print(string.format("✅ [Phase 1] Unit 1 placed (ID: %s)", tostring(unit1ID)))
-        else
-            warn("❌ [Phase 1] Failed to place Unit 1 - aborting phase")
-            return false
-        end
-
-        local upgradeUnits = {}
-
-        startCount = #allPlacedIDs
-        print("📍 [Phase 1] Placing Unit 2...")
-        local success2 = placeUnit("2", CFrame.new(3092.5168457031, 1798.9315185547, 3367.4926757812))
-        if success2 and #allPlacedIDs > startCount then
-            table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("✅ [Phase 1] Unit 2 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
-        else
-            warn("❌ [Phase 1] Failed to place Unit 2 - aborting phase")
-            return false
-        end
-
-        startCount = #allPlacedIDs
-        print("📍 [Phase 2] Placing Unit 3...")
-        local success3 = placeUnit("2", CFrame.new(3092.3759765625, 1798.9315185547, 3370.3395996094))
-        if success3 and #allPlacedIDs > startCount then
-            table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("✅ [Phase 2] Unit 3 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
-        else
-            warn("❌ [Phase 2] Failed to place Unit 3 - aborting phase")
-            return false
-        end
-
-        -- Phase 2 Unit 4: ข้ามถ้าเป็น placement-limited unit
-        if isPlacementLimited then
-            print("⏭️ [Phase 2] Skipping Unit 4 (placement-limited unit equipped)")
-        else
-            startCount = #allPlacedIDs
-            print("📍 [Phase 2] Placing Unit 4...")
-            local success4 = placeUnit("2", CFrame.new(3092.3918457031, 1798.9315185547, 3373.3002929688))
-            if success4 and #allPlacedIDs > startCount then
-                table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-                print(string.format("✅ [Phase 2] Unit 4 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
-            else
-                warn("❌ [Phase 2] Failed to place Unit 4 - aborting phase")
-                return false
-            end
-        end
-
-        -- Phase 3: รอ 30 วิ
-        print("⏳ [Phase 3] Waiting 30 seconds...")
-        task.wait(30)
-
-        -- Phase 4: ขาย Unit 1 + วาง Unit 5
-        print("💰 [Phase 4] Selling Unit 1...")
-        if unit1ID then
-            local success, err = pcall(function()
-                playerReplica:FireServer("SellGameUnit", unit1ID)
-            end)
-            if success then
-                print(string.format("   ✅ [Phase 4] Sold Unit 1 (ID: %s)", tostring(unit1ID)))
-            else
-                warn(string.format("   ⚠️ [Phase 4] Failed to sell Unit 1 (ID=%s): %s", tostring(unit1ID), tostring(err)))
-            end
-            task.wait(0.5)
-        else
-            warn("⚠️ [Phase 4] unit1ID is nil - cannot sell Unit 1")
-        end
-
-        startCount = #allPlacedIDs
-        print("📍 [Phase 4] Placing Unit 5...")
-        local success5 = placeUnit("2", CFrame.new(3095.4975585938, 1798.7340087891, 3365.9299316406))
-        if success5 and #allPlacedIDs > startCount then
-            table.insert(upgradeUnits, allPlacedIDs[#allPlacedIDs])
-            print(string.format("✅ [Phase 4] Unit 5 placed (ID: %s)", tostring(allPlacedIDs[#allPlacedIDs])))
-        else
-            warn("⚠️ [Phase 4] Failed to place Unit 5 - continuing with existing units...")
-        end
-
-        -- Phase 5: รอ 2 วิ
-        print("⏳ [Phase 5] Waiting 2 seconds...")
-        task.wait(2)
-
-        -- Disconnect connection ใหม่ที่สร้างใน Phase นี้
-        if currentConnection then
-            currentConnection:Disconnect()
-            currentConnection = nil
-        end
-
-        -- Phase 6: ตั้ง AutoUpgrade Priority
-        print(string.format("🔧 [Phase 6] Setting AutoUpgrade priority for %d units...", #upgradeUnits))
-        for i, unitID in ipairs(upgradeUnits) do
-            local success, err = pcall(function()
-                playerReplica:FireServer("ChangeGameUnitAutoUpgradePriority", unitID, AUTO_UPGRADE_PRIORITY)
-            end)
-            if success then
-                print(string.format("   ✅ [Phase 6] Priority set for unit %d/%d (ID: %s)", i, #upgradeUnits, tostring(unitID)))
-            else
-                warn(string.format("   ⚠️ [Phase 6] Failed to set priority for unit %s: %s", tostring(unitID), tostring(err)))
-            end
-            task.wait(0.3)
-        end
-
-        print("✅ [Phase] All phases completed successfully")
         return true
     end
 
-    -- Anti-AFK Walk Loop (เดินวนในแมพ)
-    spawn(function()
-        local Players = game:GetService("Players")
-        local player = Players.LocalPlayer
+    return false
+end
 
-        task.wait(5)
 
-        local waypoints = {
-            Vector3.new(3089, 0, 3271),
-            Vector3.new(3089, 0, 3350)
-        }
+-- ============================================
+-- Force Teleport Lobby (เมื่อ Diamonds ถึงกำหนดในแมพฟาร์ม)
+-- ใช้สำหรับกรณี BuyClass + Diamonds (ต้องกลับ Lobby เช็ค Multi-Class)
+-- ============================================
+local function forceTeleportLobby()
+    local LOBBY_PLACE_ID = 79546208627805
+    print("[Teleport] Forcing teleport to Lobby (Diamonds met or Lv.3 reached)")
+    updateStatus("Teleporting to Lobby...")
+    task.wait(2)
+    pcall(function()
+        local TS = game:GetService("TeleportService")
+        TS:Teleport(LOBBY_PLACE_ID, LocalPlayer)
+    end)
+    task.wait(5)
+end
 
-        local currentWaypointIndex = 1
+-- ============================================
+-- Anti-AFK (prevent Roblox from kicking for inactivity)
+-- ============================================
+local VirtualUser = game:GetService("VirtualUser")
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+    print("[AntiAFK] Idled -> sent virtual input")
+end)
 
-        while true do
-            task.wait(0.1)
+-- ============================================
+-- GUI Setup
+-- ============================================
 
-            if not isInTargetMap() then
-                break
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SugarHubGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.DisplayOrder = 999999
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = playerGui
+
+-- Main Frame (ขนาด/ตำแหน่งเป็น scale ทั้งหมด เพื่อปรับตามขนาดจอ - เหมือน Anime Expeditions)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
+mainFrame.Position = UDim2.new(0.5, 0, 0.65, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(245, 235, 220)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = mainFrame
+
+local mainPadding = Instance.new("UIPadding")
+mainPadding.PaddingTop = UDim.new(0.03, 0)
+mainPadding.PaddingBottom = UDim.new(0.03, 0)
+mainPadding.PaddingLeft = UDim.new(0.04, 0)
+mainPadding.PaddingRight = UDim.new(0.04, 0)
+mainPadding.Parent = mainFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0.02, 0)
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Parent = mainFrame
+
+-- ฟังก์ชันใส่ลูกน้ำ (เหมือน Anime Expeditions)
+local function formatNumber(num)
+    local formatted = tostring(num)
+    local k
+    while true do
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if k == 0 then
+            break
+        end
+    end
+    return formatted
+end
+
+-- Username Box (LayoutOrder 1 - เหมือน Anime Expeditions)
+local usernameBox = Instance.new("Frame")
+usernameBox.Name = "UsernameBox"
+usernameBox.Size = UDim2.new(1, 0, 0.15, 0)
+usernameBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
+usernameBox.BorderSizePixel = 0
+usernameBox.LayoutOrder = 1
+usernameBox.Parent = mainFrame
+
+local usernameCorner = Instance.new("UICorner")
+usernameCorner.CornerRadius = UDim.new(0, 10)
+usernameCorner.Parent = usernameBox
+
+local usernameStroke = Instance.new("UIStroke")
+usernameStroke.Color = Color3.fromRGB(70, 45, 22)
+usernameStroke.Thickness = 3
+usernameStroke.Parent = usernameBox
+
+local usernameLabel = Instance.new("TextLabel")
+usernameLabel.Size = UDim2.new(1, 0, 1, 0)
+usernameLabel.BackgroundTransparency = 1
+usernameLabel.Text = LocalPlayer.Name
+usernameLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
+usernameLabel.TextSize = 80
+usernameLabel.Font = Enum.Font.GothamBold
+usernameLabel.TextScaled = true
+usernameLabel.Parent = usernameBox
+
+local usernamePadding = Instance.new("UIPadding")
+usernamePadding.PaddingLeft = UDim.new(0.03, 0)
+usernamePadding.PaddingRight = UDim.new(0.03, 0)
+usernamePadding.PaddingTop = UDim.new(0.15, 0)
+usernamePadding.PaddingBottom = UDim.new(0.15, 0)
+usernamePadding.Parent = usernameLabel
+
+-- ฟังก์ชันสร้างกล่อง Stat แบบ name/colon/value (เหมือน Anime Expeditions)
+local function createStatBox(name, key, color, layoutOrder)
+    local statBox = Instance.new("Frame")
+    statBox.Name = key .. "Box"
+    statBox.Size = UDim2.new(1, 0, 0.18, 0)
+    statBox.BackgroundColor3 = color
+    statBox.BorderSizePixel = 0
+    statBox.LayoutOrder = layoutOrder
+    statBox.Parent = mainFrame
+
+    local statCorner = Instance.new("UICorner")
+    statCorner.CornerRadius = UDim.new(0, 10)
+    statCorner.Parent = statBox
+
+    local statStroke = Instance.new("UIStroke")
+    statStroke.Color = Color3.fromRGB(139, 90, 43)
+    statStroke.Thickness = 3
+    statStroke.Parent = statBox
+
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1, 0, 1, 0)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = statBox
+
+    local contentPadding = Instance.new("UIPadding")
+    contentPadding.PaddingLeft = UDim.new(0.03, 0)
+    contentPadding.PaddingRight = UDim.new(0.03, 0)
+    contentPadding.PaddingTop = UDim.new(0.1, 0)
+    contentPadding.PaddingBottom = UDim.new(0.1, 0)
+    contentPadding.Parent = contentFrame
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0.4, 0, 1, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = name
+    nameLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    nameLabel.TextSize = 72
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextScaled = true
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = contentFrame
+
+    local colonLabel = Instance.new("TextLabel")
+    colonLabel.Size = UDim2.new(0.1, 0, 1, 0)
+    colonLabel.Position = UDim2.new(0.4, 0, 0, 0)
+    colonLabel.BackgroundTransparency = 1
+    colonLabel.Text = ":"
+    colonLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    colonLabel.TextSize = 72
+    colonLabel.Font = Enum.Font.GothamBold
+    colonLabel.TextScaled = true
+    colonLabel.Parent = contentFrame
+
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
+    valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = "..."
+    valueLabel.TextColor3 = Color3.fromRGB(70, 45, 22)
+    valueLabel.TextSize = 72
+    valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.TextScaled = true
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.Parent = contentFrame
+
+    return valueLabel
+end
+
+-- Status Box (LayoutOrder 2)
+local diamondsValueLabel
+local statusValueLabel = createStatBox("Status", "Status", Color3.fromRGB(194, 144, 90), 2)
+statusValueLabel.Text = "Initializing..."
+
+-- Diamonds Box (LayoutOrder 3) - อ่านค่าจาก LocalPlayer.Diamonds attribute (ดูตาม diamond_checker_print.lua)
+diamondsValueLabel = createStatBox("Diamonds", "Diamonds", Color3.fromRGB(210, 180, 140), 3)
+
+local function updateDiamondsLabel()
+    local diamonds = LocalPlayer:GetAttribute("Diamonds")
+    diamondsValueLabel.Text = diamonds and formatNumber(diamonds) or "..."
+end
+
+-- ส่ง Description ให้ Horst
+-- CLASS_QUESTS ต้อง declare ก่อน (hoist) เพราะ function bodies ในบาง executor scope leak
+local CLASS_QUESTS = {
+    Cyborg = {
+        [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
+        [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
+    },
+    -- ... (จะ merge เพิ่มด้านล่าง)
+}
+
+local function sendHorstDescription()
+    if not Config.Horst then return end
+    if not _G.Horst_SetDescription then return end
+
+    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+
+    local isLobby = game.PlaceId == 79546208627805
+    local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
+                     (Config.UpgradeClass and #Config.UpgradeClass > 0)
+
+    -- ถ้าไม่มี config เลย → ไม่ต้องแสดง Class
+    if not hasConfig then
+        _G.Horst_SetDescription(string.format("🌲 99 Nights • Diamonds: %d", diamonds))
+        return
+    end
+
+    local classText
+    if isLobby then
+        local lines = {}
+        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+        if ClassProgress then
+            local seen = {}
+            local classesToShow = {}
+            if Config.BuyClass then
+                for _, c in ipairs(Config.BuyClass) do classesToShow[#classesToShow + 1] = c end
             end
-
-            local character = player.Character
-            if not character then
-                task.wait(1)
-                continue
+            if Config.UpgradeClass then
+                for _, c in ipairs(Config.UpgradeClass) do classesToShow[#classesToShow + 1] = c end
             end
-
-            local humanoid = character:FindFirstChild("Humanoid")
-            local hrp = character:FindFirstChild("HumanoidRootPart")
-
-            if not humanoid or not hrp then
-                task.wait(1)
-                continue
-            end
-
-            local targetPos = waypoints[currentWaypointIndex]
-            local distance = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(targetPos.X, 0, targetPos.Z)).Magnitude
-
-            if distance > 5 then
-                humanoid:MoveTo(Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z))
-                task.wait(0.5)
-            else
-                currentWaypointIndex = currentWaypointIndex + 1
-                if currentWaypointIndex > #waypoints then
-                    currentWaypointIndex = 1
+            for _, className in ipairs(classesToShow) do
+                if not seen[className] then
+                    seen[className] = true
+                    local folder = ClassProgress:FindFirstChild(className)
+                    if folder then
+                        local lvl = folder:GetAttribute("Level") or 1
+                        local classStr = className .. " Lv" .. lvl
+                        -- คำนวณ % quest progress (Lv < 3)
+                        if lvl < 3 then
+                            local targetLevel = lvl + 1
+                            local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
+                            if reqs then
+                                local totalPct = 0
+                                local count = 0
+                                for statKey, goal in pairs(reqs) do
+                                    local have = folder:GetAttribute(statKey) or 0
+                                    if type(have) == "number" and goal > 0 then
+                                        totalPct = totalPct + math.min(have / goal, 1) * 100
+                                        count = count + 1
+                                    end
+                                end
+                                if count > 0 then
+                                    local avgPct = math.floor(totalPct / count)
+                                    classStr = classStr .. " (" .. avgPct .. "%)"
+                                    -- Dev Logs: แสดงแต่ละ stat แยก
+                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
+                                        className, targetLevel, avgPct))
+                                    for statKey, goal in pairs(reqs) do
+                                        local have = folder:GetAttribute(statKey) or 0
+                                        if type(have) == "number" and goal > 0 then
+                                            print(string.format("  - %s: %d / %d",
+                                                statKey, have, goal))
+                                        end
+                                    end
+                                end
+                            end
+                        else
+                            classStr = classStr .. " (MAX)"
+                        end
+                        table.insert(lines, classStr)
+                    else
+                        table.insert(lines, className .. " (not owned)")
+                    end
                 end
-                task.wait(0.5)
             end
         end
-    end)
-
-    -- Auto Claim Quest/Achievement Loop (ทุก 5 นาที)
-    spawn(function()
-        -- Claim ทันที 1 รอบก่อน
-        pcall(function()
-            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-            if replica and replica.Data.QuestData then
-                local questData = replica.Data.QuestData
-                local claimCount = 0
-
-                for categoryName, _ in pairs(questData) do
-                    spawn(function()
-                        pcall(function()
-                            Nodes.QUEST_CLAIM_ALL_CATEGORY:FireServer(categoryName)
-                            claimCount = claimCount + 1
-                        end)
-                    end)
-                    task.wait(0.05)
+        classText = #lines > 0 and table.concat(lines, ", ") or "None"
+    else
+        -- แมพฟาร์ม: เช็คเฉพาะ class ที่กำลัง equip + คำนวณ % quest progress
+        local equipped = LocalPlayer:GetAttribute("Class")
+        if equipped then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local classTextPart = equipped .. " Lv" .. lvl
+            -- คำนวณ % ของ quest ถัดไป (ใช้ CLASS_QUESTS ที่ฝังไว้)
+            local targetLevel = math.min(lvl + 1, 3)
+            local reqs = CLASS_QUESTS[equipped] and CLASS_QUESTS[equipped][targetLevel]
+            if reqs and lvl < 3 then
+                local cp = LocalPlayer:FindFirstChild("ClassProgress")
+                local folder = cp and cp:FindFirstChild(equipped)
+                if folder then
+                    local totalPct = 0
+                    local count = 0
+                    for statKey, goal in pairs(reqs) do
+                        local have = folder:GetAttribute(statKey) or 0
+                        if type(have) == "number" and goal > 0 then
+                            totalPct = totalPct + math.min(have / goal, 1) * 100
+                            count = count + 1
+                        end
+                    end
+                    if count > 0 then
+                        local avgPct = math.floor(totalPct / count)
+                        classTextPart = classTextPart .. " (" .. avgPct .. "%)"
+                    end
                 end
+                classText = classTextPart .. " [Can't check classes during farming]"
+            else
+                classText = classTextPart .. " (MAX) [Can't check classes during farming]"
+            end
+        else
+            classText = "None [Can't check classes during farming]"
+        end
+    end
 
-                task.wait(2)
+    _G.Horst_SetDescription(string.format(
+        "🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText))
+end
 
-                local VirtualInputManager = game:GetService("VirtualInputManager")
-                for i = 1, 10 do
-                    VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                    task.wait(0.05)
-                    VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-                    task.wait(0.1)
+local function checkDiamondsGoalAndSendDone()
+    sendHorstDescription()
+    CheckGoals()
+end
+
+LocalPlayer:GetAttributeChangedSignal("Diamonds"):Connect(function()
+    updateDiamondsLabel()
+    checkDiamondsGoalAndSendDone()
+end)
+updateDiamondsLabel()
+
+-- ClassStatUpdated Remote watcher: ดัก event จาก server → อัปเดต quest % real-time
+-- signature: ClassStatUpdated:FireClient(player, className, statKey, value, delta)
+local classStatCache = {}  -- [className] = { [statKey] = value }
+local lastFarmReport = 0    -- cooldown log
+
+pcall(function()
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    -- รอ remote แบบ indefinite ใน background task (กัน hook ก่อน remote พร้อม)
+    task.spawn(function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Remotes = ReplicatedStorage:WaitForChild("RemoteEvents", 300)  -- รอ 5 นาที
+        if not Remotes then
+            warn("[ClassStat] RemoteEvents not found after 5 min")
+            return
+        end
+        -- ตอนนี้รอ ClassStatUpdated แบบ indefinite (กัน hook ก่อน remote replicate)
+        local ClassStatUpdated = Remotes:WaitForChild("ClassStatUpdated", math.huge)
+        if not ClassStatUpdated or not ClassStatUpdated.OnClientEvent then return end
+        ClassStatUpdated.OnClientEvent:Connect(function(className, statKey, value, delta)
+            if not className or not statKey then return end
+            classStatCache[className] = classStatCache[className] or {}
+            classStatCache[className][statKey] = value
+
+            -- ถ้าอยู่แมพฟาร์ม → คำนวณ % + print + ส่ง Horst update
+            -- ใช้กับ "currently equipped class" (LocalPlayer.ClassLevel) — ไม่ใช่ [1] เสมอ
+            local isLobby = game.PlaceId == 79546208627805
+            if not isLobby and Config.Horst then
+                -- ตรวจว่า className นี้อยู่ใน UpgradeClass list ไหม
+                local isTracked = false
+                for _, clsName in ipairs(Config.UpgradeClass or {}) do
+                    if clsName == className then isTracked = true break end
+                end
+                if isTracked then
+                    local mainClass = className
+                    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                    if lvl < 3 then
+                        local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
+                        if reqs then
+                            local totalPct, count = 0, 0
+                            for sk, goal in pairs(reqs) do
+                                local have = classStatCache[mainClass][sk]
+                                    or (LocalPlayer.ClassProgress
+                                        and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
+                                        and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk))
+                                    or 0
+                                if type(have) == "number" and goal > 0 then
+                                    totalPct = totalPct + math.min(have / goal, 1) * 100
+                                    count = count + 1
+                                end
+                            end
+                            if count > 0 then
+                                local avgPct = math.floor(totalPct / count)
+                                if os.clock() - lastFarmReport >= 1 then
+                                    lastFarmReport = os.clock()
+                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
+                                        mainClass, lvl + 1, avgPct))
+                                    -- Dev Logs: แสดง stat แต่ละอัน
+                                    for sk, goal in pairs(reqs) do
+                                        local have = classStatCache[mainClass][sk]
+                                            or (LocalPlayer.ClassProgress
+                                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
+                                                and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk))
+                                            or 0
+                                        if type(have) == "number" and goal > 0 then
+                                            print(string.format("  - %s: %d / %d", sk, have, goal))
+                                        end
+                                    end
+                                end
+                                local equipped = LocalPlayer:GetAttribute("Class")
+                                local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                                local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
+                                    or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
+                                if Config.Horst and _G.Horst_SetDescription then
+                                    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                    _G.Horst_SetDescription(string.format(
+                                        "🌲 99 Nights • Diamonds: %d • Class: %s [Can't check classes during farming]",
+                                        diamonds, classTextPart))
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end)
+        print("[ClassStat] watching ClassStatUpdated")
+    end)
+end)
 
-        -- วนลูปทุก 5 นาที
-        while true do
-            task.wait(300) -- 5 นาที
+-- รอให้ attribute Diamonds sync มาจาก server ก่อน (อาจยังเป็น nil ตอนสคริปต์เริ่ม)
+-- ป้องกันการส่ง "Diamonds: 0" ไปที่ Horst ทั้งที่ยังโหลดค่าจริงไม่เสร็จ
+task.spawn(function()
+    local waited = 0
+    while LocalPlayer:GetAttribute("Diamonds") == nil and waited < 15 do
+        task.wait(0.2)
+        waited = waited + 0.2
+    end
+    updateDiamondsLabel()
+    sendHorstDescription()
+    checkDiamondsGoalAndSendDone()
+end)
 
-            pcall(function()
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                if replica and replica.Data.QuestData then
-                    local questData = replica.Data.QuestData
-                    local claimCount = 0
+-- ============================================
+-- Toggle GUI/Render3D ด้วยปุ่ม N
+-- ============================================
+local UserInputService = game:GetService("UserInputService")
+local isGuiVisible = true
 
-                    for categoryName, _ in pairs(questData) do
-                        spawn(function()
-                            pcall(function()
-                                Nodes.QUEST_CLAIM_ALL_CATEGORY:FireServer(categoryName)
-                                claimCount = claimCount + 1
-                            end)
-                        end)
-                        task.wait(0.05)
+-- ถ้าเปิด ToggleRender3D ให้ปิด Render3D ตอนเริ่มต้น (เพราะ GUI เปิดอยู่)
+if Config.ToggleRender3D then
+    RunService:Set3dRenderingEnabled(false)
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.N then
+        isGuiVisible = not isGuiVisible
+        mainFrame.Visible = isGuiVisible
+
+        -- ถ้าเปิด ToggleRender3D ให้เปิด/ปิด 3D Rendering ตาม GUI (กลับกัน)
+        if Config.ToggleRender3D then
+            RunService:Set3dRenderingEnabled(not isGuiVisible)
+        end
+    end
+end)
+
+-- Hub Name Box (LayoutOrder 4 - อยู่ล่างสุด เหมือน Sugar Hub ใน Anime Expeditions)
+local hubBox = Instance.new("Frame")
+hubBox.Name = "HubBox"
+hubBox.Size = UDim2.new(1, 0, 0.15, 0)
+hubBox.BackgroundColor3 = Color3.fromRGB(139, 90, 43)
+hubBox.BorderSizePixel = 0
+hubBox.LayoutOrder = 4
+hubBox.Parent = mainFrame
+
+local hubCorner = Instance.new("UICorner")
+hubCorner.CornerRadius = UDim.new(0, 10)
+hubCorner.Parent = hubBox
+
+local hubStroke = Instance.new("UIStroke")
+hubStroke.Color = Color3.fromRGB(70, 45, 22)
+hubStroke.Thickness = 3
+hubStroke.Parent = hubBox
+
+local hubLabel = Instance.new("TextLabel")
+hubLabel.Size = UDim2.new(1, 0, 1, 0)
+hubLabel.BackgroundTransparency = 1
+hubLabel.Text = "Sugar Hub"
+hubLabel.TextColor3 = Color3.fromRGB(245, 222, 179)
+hubLabel.TextSize = 80
+hubLabel.Font = Enum.Font.GothamBold
+hubLabel.TextScaled = true
+hubLabel.Parent = hubBox
+
+local hubPadding = Instance.new("UIPadding")
+hubPadding.PaddingLeft = UDim.new(0.03, 0)
+hubPadding.PaddingRight = UDim.new(0.03, 0)
+hubPadding.PaddingTop = UDim.new(0.15, 0)
+hubPadding.PaddingBottom = UDim.new(0.15, 0)
+hubPadding.Parent = hubLabel
+
+-- Update Status Function (pcall กันพัง ถ้า label ถูก Destroy ไปแล้วจะไม่ทำให้ script ทั้งเส้นตายไปด้วย)
+local function updateStatus(text)
+    pcall(function()
+        statusValueLabel.Text = text
+    end)
+end
+
+-- ============================================
+-- Retry helper: วนจนสำเร็จ ไม่มีเพดานรอบ ไม่มี timeout
+-- ============================================
+local function retryUntil(label, fn, interval)
+    interval = interval or 0.5
+    local attempt = 0
+    while true do
+        attempt = attempt + 1
+        local ok, result = pcall(fn)
+        if ok and result then
+            if attempt > 1 then
+                print(("  [OK] %s succeeded on attempt %d"):format(label, attempt))
+            end
+            return result
+        end
+        if not ok then
+            warn(("  [WARN] %s error on attempt %d: %s"):format(label, attempt, tostring(result)))
+        end
+        if attempt % 20 == 0 then
+            print(("  ...%s not yet (attempt %d)"):format(label, attempt))
+        end
+        pcall(updateStatus, ("%s... (%d)"):format(label, attempt))
+        task.wait(interval)
+    end
+end
+
+-- ============================================
+-- GLOBAL SHIELD: กล่องล่องหน 6 ด้านคลุมตัวเรา "ตลอดเวลา" (ตั้งแต่เริ่มฟาร์มจนจบ)
+-- หุ้ม 4 ด้านข้าง + บน + ล่าง กันมอนประชิดและกระสุน
+-- สร้างแบบ WELD ติดกับ HumanoidRootPart => ขยับตาม "ทันที" ในระดับ physics
+-- (แม้ FPS เหลือ 5 ก็ตามสนิท เพราะเป็นชิ้นส่วนเดียวกันกับตัวละคร ไม่ต้องรอ loop ขยับ)
+-- ============================================
+local SHIELD_SIZE = 8     -- ครึ่งรัศมี 4 รอบ HRP = พอดีคลุมหัวถึงเท้า
+local SHIELD_THICK = 1
+-- shieldSolid = true เปิดกายภาพ 4 ด้านข้าง = "กันมอนเดินเข้ามาหาเรา" (ดันมอนออกนอกโล่)
+-- ใช้ตอนอยู่นอก Stronghold (แมพฟาร์ม/แถวกองไฟ) - พอเข้า Stronghold (Step 3.6)
+-- สคริปต์จะเรียก setShieldSolid(false) สลับเป็นโหมดโปร่งเอง = ไม่ชนมอน/พื้นห้อง/แท่น
+-- กันโล่ไปติดพื้นตอนรอมอนเกิดที่ TriggerZone
+-- ทุกโหมด: ด้านบน/ล่างโปร่งเสมอ + ดัก raycast กระสุนได้ (CanQuery = true เสมอ)
+local shieldSolid = true
+
+local shieldFolder = nil
+
+local function destroyShield()
+    if shieldFolder then
+        pcall(function() shieldFolder:Destroy() end)
+        shieldFolder = nil
+    end
+end
+
+local function buildShield()
+    destroyShield()
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (char and hrp) then return end
+
+    shieldFolder = Instance.new("Folder")
+    shieldFolder.Name = "SugarHubShield"
+
+    local half = SHIELD_SIZE / 2
+    local t = SHIELD_THICK
+    -- กล่องสมมาตรครบ 6 ด้านรอบ HRP: คลุม -4..+4 = หัวจดเท้า (HRP อยู่กลางตัวละคร)
+    local faces = {
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0,  half, 0), false}, -- บน
+        {Vector3.new(SHIELD_SIZE, t, SHIELD_SIZE), Vector3.new(0, -half, 0), false}, -- ล่าง
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new( half, 0, 0), true},  -- ขวา
+        {Vector3.new(t, SHIELD_SIZE, SHIELD_SIZE), Vector3.new(-half, 0, 0), true},  -- ซ้าย
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0,  half), true},  -- หน้า
+        {Vector3.new(SHIELD_SIZE, SHIELD_SIZE, t), Vector3.new(0, 0, -half), true},  -- หลัง
+    }
+
+    for i, f in ipairs(faces) do
+        local p = Instance.new("Part")
+        p.Name = "ShieldFace" .. i
+        p.Size = f[1]
+        p.Anchored = false       -- ห้าม anchor - weld กับ HRP เพื่อให้ตามทันทีทุกเฟรม
+        p.CanCollide = shieldSolid and f[3]
+        p.CanQuery = true        -- ให้ raycast กระสุนชนกล่องแทนตัวเรา
+        p.CanTouch = false       -- ไม่ไป trigger Touched ของอย่างอื่น
+        p.Transparency = 1
+        p.Massless = true        -- ไม่เพิ่มน้ำหนัก/แรงกระทบต่อตัวละคร
+        p.Material = Enum.Material.SmoothPlastic
+        p.CFrame = hrp.CFrame * CFrame.new(f[2])
+        p.Parent = shieldFolder
+
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = hrp
+        weld.Part1 = p
+        weld.Parent = p
+    end
+
+    -- เก็บไว้ในตัวละคร: ตาย/เกิดใหม่ถูกลบไปด้วย ไม่ค้างใน workspace
+    shieldFolder.Parent = char
+end
+
+-- สลับโหมดโล่: true = ชนมอนได้ (กันมอนเดินเข้ามา), false = โปร่ง (ไม่ชนอะไรเลย แค่ดักกระสุน)
+-- เรียกแล้ว rebuild โล่ทันทีถ้ากำลังสร้างอยู่ (ตายเกิดใหม่ก็จะได้โหมดล่าสุดเสมอ)
+local function setShieldSolid(enabled)
+    if shieldSolid == enabled then return end
+    shieldSolid = enabled
+    if shieldFolder then
+        print("[Shield] Switch mode -> " .. (enabled and "SOLID (block monsters)" or "PHASE (no collision)"))
+        buildShield()
+    end
+end
+
+-- ตายเกิดใหม่ = สร้างโล่ใหม่ให้อัตโนมัติ
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 10)
+    if hrp then
+        task.wait(0.2) -- รอ character ตั้งค่าเสร็จก่อน
+        buildShield()
+    end
+end)
+
+print("✅ GUI Loaded")
+
+-- ============================================
+-- STEP 1: Check Map and Enter Solo if needed
+-- ============================================
+
+local function isLobby()
+    return workspace:FindFirstChild("Boards") ~= nil
+end
+
+----------------------------------------------------------------
+-- Auto-level-up + equip class (Lobby)
+-- 1. ถ้ามี UpgradeClass ใน Config → equip class นั้นก่อน (ถ้ามีอยู่แล้ว)
+-- 2. เช็ค class ทุกตัวที่ owned → ถ้า CanLevelUp=true → ยิง RequestLevelUpClass
+-- 3. ตอนนี้รอบรับแค่ตัวแรกของ UpgradeClass เป็น "main" class
+----------------------------------------------------------------
+local function lobbyAutoLevelUp()
+    local Client = require(LocalPlayer.PlayerScripts.Client)
+    local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+    if not ClassProgress then
+        return
+    end
+
+    -- Validate Config.UpgradeClass: ต้องเป็น table ของ string เท่านั้น
+    local validClasses = {}
+    if Config.UpgradeClass == nil then
+        -- ไม่ได้ตั้ง → silent skip
+    elseif type(Config.UpgradeClass) ~= "table" then
+        warn(string.format("[ClassUpgrade] Config.UpgradeClass is %s (expected table) - skip",
+            type(Config.UpgradeClass)))
+    else
+        for i, v in ipairs(Config.UpgradeClass) do
+            if type(v) ~= "string" then
+                warn(string.format("[ClassUpgrade] UpgradeClass[%d] is %s (expected string) - skip",
+                    i, type(v)))
+            else
+                table.insert(validClasses, v)
+            end
+        end
+    end
+
+    if #validClasses == 0 then
+        -- ไม่มี class ที่ valid → skip ทั้งหมด
+        return
+    end
+
+    -- 1) Equip class ตามลำดับ UpgradeClass - ข้าม class ที่ Lv.3 แล้ว
+    for _, mainClass in ipairs(validClasses) do
+        local folder = ClassProgress:FindFirstChild(mainClass)
+        if not folder then
+            warn("[ClassUpgrade] " .. mainClass .. " not owned")
+        else
+            local curLvl = folder:GetAttribute("Level") or 1
+            if curLvl >= 3 then
+                -- skip, ลอง class ถัดไป
+            else
+                if folder:GetAttribute("Equipped") ~= true then
+                    Client.Events.UpdateEquipped:FireServer(mainClass)
+                    local t = 0
+                    while folder:GetAttribute("Equipped") ~= true and t < 3 do
+                        task.wait(0.1); t += 0.1
+                    end
+                    if folder:GetAttribute("Equipped") ~= true then
+                        warn("[ClassUpgrade] equip " .. mainClass .. " timed out (server may not have responded)")
+                    end
+                end
+                break  -- เจอ class ที่ยังไม่ Lv.3 → หยุด
+            end
+        end
+    end
+
+    -- 2) อัปเกรดทุก class ที่ CanLevelUp → รวมเป็นบรรทัดเดียว
+    local upgrades = {}
+    for _, folder in ipairs(ClassProgress:GetChildren()) do
+        if folder:GetAttribute("CanLevelUp") == true and (folder:GetAttribute("Level") or 1) < 3 then
+            local cn = folder:GetAttribute("ClassName") or folder.Name
+            local fromLv = folder:GetAttribute("Level") or 1
+            local ok = pcall(function()
+                Client.Events.RequestLevelUpClass:FireServer(cn)
+            end)
+            if not ok then
+                warn("[ClassUpgrade] FireServer(" .. cn .. ") failed")
+            end
+            task.wait(0.5)
+            local toLv = folder:GetAttribute("Level") or 1
+            if toLv > fromLv then
+                table.insert(upgrades, cn .. " Lv" .. fromLv .. "->Lv" .. toLv)
+            else
+                warn("[ClassUpgrade] " .. cn .. " still Lv." .. toLv .. " after request (server may not have processed)")
+            end
+        end
+    end
+
+    if #upgrades > 0 then
+        local msg = "[ClassUpgrade] " .. table.concat(upgrades, ", ")
+        print(msg)
+        updateStatus(msg)
+    end
+end
+
+
+print("\n[Step 1] Checking current map...")
+updateStatus("Checking Map...")
+
+if isLobby() then
+    print("Currently in Lobby - Entering Solo map...")
+    updateStatus("Entering Solo Map...")
+
+    local Client = require(LocalPlayer.PlayerScripts.Client)
+
+    -- ============================================
+    -- Daily Quests & Badges (before entering map)
+    -- ============================================
+
+    local function makeInvisible()
+        local character = LocalPlayer.Character
+        if not character then return end
+
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") or part:IsA("Decal") then
+                part.Transparency = 1
+            elseif part:IsA("Accessory") then
+                local handle = part:FindFirstChild("Handle")
+                if handle then handle.Transparency = 1 end
+            end
+        end
+
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+            humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+        end
+    end
+
+    -- Make invisible first
+    updateStatus("Preparing...")
+    makeInvisible()
+    task.wait(0.1)
+
+    local LEVER_PATH = {
+        "Boards", "DailyQuest", "MainBoard", "Functional", "Lever",
+        "Meshes/dailyquestmachine_Cube.007 (1)",
+    }
+
+    local function resolvePath(root, path)
+        local node = root
+        for _, name in ipairs(path) do
+            if not node then return nil end
+            node = node:FindFirstChild(name)
+        end
+        return node
+    end
+
+    local function needsRoll()
+        -- เทียบ DailyQuests.QuestDay กับ workspace.DailyQuestDay
+        local day = workspace:GetAttribute("DailyQuestDay")
+        local quests = LocalPlayer:FindFirstChild("DailyQuests")
+        if not day or not quests then return false end
+        return quests:GetAttribute("QuestDay") ~= day
+    end
+
+    local function getRollPrompt()
+        local folder = workspace:FindFirstChild("DailyQuests")
+        local promptPart = folder and folder:FindFirstChild("PromptPart")
+        local attachment = promptPart and promptPart:FindFirstChild("PromptAttachment")
+        return attachment and attachment:FindFirstChildWhichIsA("ProximityPrompt"), promptPart
+    end
+
+    local function firePrompt(prompt)
+        if not prompt or not prompt.Enabled then return false end
+        if typeof(fireproximityprompt) == "function" then
+            return (pcall(fireproximityprompt, prompt))
+        end
+        -- fallback สำหรับ executor ที่ไม่มี fireproximityprompt
+        pcall(function() prompt.HoldDuration = 0 end)
+        prompt:InputHoldBegin()
+        task.wait(0.1)
+        prompt:InputHoldEnd()
+        return true
+    end
+
+    local function teleportToLever()
+        local hrp = retryUntil("find HumanoidRootPart", function()
+            local char = LocalPlayer.Character
+            return char and char:FindFirstChild("HumanoidRootPart")
+        end, 0.2)
+
+        local pivot = retryUntil("find DailyQuest Lever", function()
+            local lever = resolvePath(workspace, LEVER_PATH)
+            if not lever then return nil end
+            if lever:IsA("BasePart") then return lever.CFrame end
+            if lever:IsA("Model") then return lever:GetPivot() end
+            return nil
+        end, 0.3)
+
+        -- ยืนหน้า lever เยื้องขึ้นกันจมพื้น แล้วหันหน้าเข้าหา
+        local standPos = pivot.Position + Vector3.new(0, 3, 5)
+        hrp.CFrame = CFrame.lookAt(standPos, pivot.Position)
+        task.wait(0.1)
+        print("Teleported to lever")
+    end
+
+    local function rollDailyQuest()
+        if not needsRoll() then
+            print("Daily quests already rolled for today")
+            return
+        end
+
+        print("Rolling daily quests...")
+        teleportToLever()
+
+        -- lever กับ prompt อยู่คนละ path เตือนถ้าหลุดระยะกด
+        local prompt, promptPart = getRollPrompt()
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if prompt and hrp and promptPart and promptPart:IsA("BasePart") then
+            local dist = (promptPart.Position - hrp.Position).Magnitude
+            if dist > prompt.MaxActivationDistance then
+                warn(("Prompt out of range after teleport: %.1f > %d"):format(dist, prompt.MaxActivationDistance))
+            end
+        end
+
+        -- ยิงซ้ำจน QuestDay ตรงกับวันปัจจุบัน ไม่มีเพดาน
+        retryUntil("roll daily quest", function()
+            if not needsRoll() then return true end
+            local p = getRollPrompt()
+            if p then firePrompt(p) end
+            return not needsRoll()
+        end, 0.25)
+
+        print("Roll complete")
+    end
+
+    local function claimAllDailyQuestRewards()
+        print("Claiming Daily Quest rewards...")
+        local DailyQuests = LocalPlayer:FindFirstChild("DailyQuests")
+        if not DailyQuests then return end
+        for _, quest in ipairs(DailyQuests:GetChildren()) do
+            if quest:GetAttribute("Completed") and not quest:GetAttribute("Rewarded") then
+                local slot = quest:GetAttribute("QuestNumber")
+                if slot then
+                    Client.Events.RequestClaimDailyRequestReward:InvokeServer(slot)
+                    task.wait(0.1)
+                end
+            end
+        end
+    end
+
+    local function claimAllBadges()
+        print("Claiming Badges...")
+        local Unclaimed = LocalPlayer:FindFirstChild("UnclaimedBadges")
+        if not Unclaimed then return end
+        local BadgeDB = Client.Databases and Client.Databases.BadgeDatabase
+        if not BadgeDB then return end
+        for _, badge in pairs(BadgeDB.Badges or {}) do
+            if Unclaimed:GetAttribute(tostring(badge.ID)) == true then
+                Client.Events.RequestClaimBadgeDiamonds:FireServer(badge.ID)
+                task.wait(0.2)
+            end
+        end
+    end
+
+    updateStatus("Rolling Daily Quest...")
+    rollDailyQuest()
+
+    updateStatus("Claiming Quest Rewards...")
+    claimAllDailyQuestRewards()
+
+    updateStatus("Claiming Badges...")
+    claimAllBadges()
+
+    print("Daily Quests & Badges done")
+
+    -- ============================================
+    -- Auto-Upgrade + Equip Class (Lobby only - ก่อน Auto-Buy)
+    -- 1) Equip main class จาก UpgradeClass[1]
+    -- 2) อัปเกรดทุก class ที่ CanLevelUp
+    -- ============================================
+    updateStatus("Upgrading Classes...")
+    lobbyAutoLevelUp()
+
+    -- ============================================
+    -- Auto-Buy Class (ก่อนสร้างห้อง)
+    -- ============================================
+    if Config.BuyClass and #Config.BuyClass > 0 then
+        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
+        if ClassProgress then
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local Shop = ReplicatedStorage:FindFirstChild("Shop")
+
+            if Shop then
+                local Classes = Shop:FindFirstChild("Classes")
+
+                if Classes then
+                    local Client = require(LocalPlayer.PlayerScripts.Client)
+
+                    -- เช็ค stock แบบเดียวกับ UI (decompile ClassesClient): InStock<UserId> ทับ InStock
+                    local function isInStock(clsFolder)
+                        local s = clsFolder:GetAttribute("InStock")
+                        local mine = clsFolder:GetAttribute("InStock" .. LocalPlayer.UserId)
+                        if mine ~= nil then s = mine end
+                        return s == true
+                    end
+
+                    -- คืนรายชื่อ class ที่ยังขาด = ไม่ owned และไม่อยู่ใน stock
+                    local function wantedStillNeeded()
+                        local need = {}
+                        for _, className in ipairs(Config.BuyClass) do
+                            if not ClassProgress:FindFirstChild(className) then
+                                local folder = Classes:FindFirstChild(className)
+                                if not (folder and isInStock(folder)) then
+                                    table.insert(need, className)
+                                end
+                            end
+                        end
+                        return need
+                    end
+
+                    -- ============================================
+                    -- Auto-Reroll Shop (Config.RerollShop + Config.MaxRerollPrice)
+                    -- เปิดได้เมื่อ: RerollShop = true "และ" มี BuyClass เท่านั้น
+                    -- - เช็คราคา class ที่ต้องการจาก ClassesDatabase ก่อน (เช่น Cyborg=600, Vampire=500)
+                    -- - ถ้าของครบแล้ว (owned/อยู่ใน stock) = ไม่สุ่มเลย
+                    -- - สุ่มแล้วเจอตัวที่ต้องการ = ซื้อทันที แล้วค่อยสุ่มหาตัวที่เหลือต่อ
+                    -- - หยุดสุ่มเมื่อ: ราคาสุ่ม > MaxRerollPrice หรือ
+                    --   หักราคาสุ่มแล้วเพชรไม่พอซื้อตัวถูกสุดที่ยังขาด
+                    --   (= สุ่มไปก็ซื้อไม่ได้ ให้ไปฟาร์มต่อ)
+                    -- ============================================
+                    if Config.RerollShop then
+                        -- ราคา class ที่ต้องการจาก ClassesDatabase (ClassList[ชื่อ].Price)
+                        local classPrices = {}
+                        do
+                            local db = Client.Databases and Client.Databases.ClassesDatabase
+                            local list = db and db.ClassList
+                            if list then
+                                for _, className in ipairs(Config.BuyClass) do
+                                    local entry = list[className]
+                                    local p = entry and tonumber(entry.Price)
+                                    if p then
+                                        classPrices[className] = p
+                                    else
+                                        print("[Reroll] No price for " .. className .. " in ClassesDatabase")
+                                    end
+                                end
+                            else
+                                warn("[Reroll] ClassesDatabase not found - skipping reroll")
+                            end
+                        end
+
+                        -- ราคาหลังส่วนลด (attribute Discount บน folder class - ตาม decompile AttemptPurchase)
+                        local function effectivePrice(className)
+                            local base = classPrices[className]
+                            if not base then return nil end
+                            local folder = Classes:FindFirstChild(className)
+                            local disc = (folder and folder:GetAttribute("Discount")) or 0
+                            if disc > 0 then
+                                return math.max(math.round(base - base * (disc / 100)), 1)
+                            end
+                            return base
+                        end
+
+                        -- ซื้อทันทีทุกตัวที่อยู่ใน stock และมีเพชรพอ
+                        -- (เตือน "เพชรไม่พอ" แค่ครั้งเดียวต่อ class กันสแปมทุกรอบ)
+                        local lowDiamondWarned = {}
+
+                        local function buyInStockNow()
+                            for _, className in ipairs(Config.BuyClass) do
+                                if not ClassProgress:FindFirstChild(className) then
+                                    local folder = Classes:FindFirstChild(className)
+                                    if folder and isInStock(folder) then
+                                        local p = effectivePrice(className)
+                                        local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                        if p == nil or diamonds >= p then
+                                            print(string.format("[Reroll] %s in stock (%s) - buying",
+                                                className, tostring(p)))
+                                            updateStatus("Buying: " .. className)
+                                            Client.Events.RequestPurchaseClass:FireServer(className)
+                                            -- รอยืนยันว่า owned จริง (กันยิงซ้ำเสียเพชร)
+                                            local vt = 0
+                                            while vt < 2 and not ClassProgress:FindFirstChild(className) do
+                                                task.wait(0.1)
+                                                vt += 0.1
+                                            end
+                                        elseif not lowDiamondWarned[className] then
+                                            lowDiamondWarned[className] = true
+                                            print(string.format("[Reroll] %s in stock but low diamonds (%d/%s)",
+                                                className, diamonds, tostring(p)))
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        -- ราคาถูกสุดของตัวที่ยังขาด (ไม่ owned ไม่ใน stock) - nil ถ้าไม่รู้ราคาตัวไหนเลย
+                        local function minMissingPrice()
+                            local minP
+                            for _, className in ipairs(Config.BuyClass) do
+                                if not ClassProgress:FindFirstChild(className) then
+                                    local folder = Classes:FindFirstChild(className)
+                                    if not (folder and isInStock(folder)) then
+                                        local p = effectivePrice(className)
+                                        if p and (not minP or p < minP) then
+                                            minP = p
+                                        end
+                                    end
+                                end
+                            end
+                            return minP
+                        end
+
+                        local need = wantedStillNeeded()
+                        if #need == 0 then
+                            print("[Reroll] All wanted classes owned/in stock - no rolls needed")
+                        elseif next(classPrices) == nil then
+                            print("[Reroll] No prices known for wanted classes - skipping reroll")
+                        else
+                            -- สรุปราคา + ตัวที่ยังขาดในบรรทัดเดียว
+                            local pricesStr = {}
+                            for _, className in ipairs(Config.BuyClass) do
+                                table.insert(pricesStr, className .. "=" .. tostring(classPrices[className] or "?"))
+                            end
+                            print("[Reroll] Starting | missing: " .. table.concat(need, ", ")
+                                .. " | prices: " .. table.concat(pricesStr, ", "))
+                            updateStatus("Rerolling Shop...")
+                            if not Config.MaxRerollPrice then
+                                print("[Reroll] WARN: MaxRerollPrice not set - limited only by diamonds")
+                            end
+
+                            local rerollRemote = ReplicatedStorage.RemoteEvents
+                                and ReplicatedStorage.RemoteEvents:FindFirstChild("RerollShop")
+
+                            if not rerollRemote then
+                                warn("[Reroll] RerollShop remote not found - skipping")
+                            else
+                                -- จับ event ที่ server ปฏิเสธ (สุ่มใกล้รอบ rotate)
+                                local cantReroll = false
+                                pcall(function()
+                                    Client.Events.CantRerollNow:Connect(function()
+                                        cantReroll = true
+                                    end)
+                                end)
+
+                                local function snapEqual(a, b)
+                                    for k, v in pairs(a) do if b[k] ~= v then return false end end
+                                    for k in pairs(b) do if a[k] == nil then return false end end
+                                    return true
+                                end
+
+                                -- นับ roll ติดกันที่ stock ไม่เปลี่ยน (3 ครั้ง = เลิกสุ่ม)
+                                local timeoutStreak = 0
+                                -- นับครั้งที่โดน server block ติดกัน (6 ครั้ง = เลิกสุ่ม)
+                                local blockStreak = 0
+
+                                while true do
+                                    -- 1) ซื้อทันทีทุกตัวที่อยู่ใน stock และเพชรพอ (เช่นสุ่มได้ Vampire ก็ซื้อ Vampire ก่อน)
+                                    buyInStockNow()
+
+                                    -- 2) ยังขาดอยู่ไหม
+                                    local stillNeed = wantedStillNeeded()
+                                    if #stillNeed == 0 then
+                                        print("[Reroll] ✅ All wanted classes obtained - done")
+                                        updateStatus("✅ Reroll Success!")
+                                        break
+                                    end
+
+                                    -- 3) ราคาสุ่มรอบนี้
+                                    local price = LocalPlayer:GetAttribute("RerollPrice")
+                                    if type(price) ~= "number" then
+                                        task.wait(0.5)
+                                        price = LocalPlayer:GetAttribute("RerollPrice")
+                                    end
+                                    if type(price) ~= "number" then
+                                        warn("[Reroll] Cannot read RerollPrice - stopping")
+                                        break
+                                    end
+
+                                    -- 4) ลิมิตราคาสุ่มจาก Config
+                                    if type(Config.MaxRerollPrice) == "number" and price > Config.MaxRerollPrice then
+                                        print(string.format("[Reroll] Roll price %d > limit %d - stopping",
+                                            price, Config.MaxRerollPrice))
+                                        updateStatus(string.format("Reroll %d > %d - Stop",
+                                            price, Config.MaxRerollPrice))
+                                        break
+                                    end
+
+                                    -- 5) เช็คว่าสุ่มแล้วคุ้มไหม: เพชร - ค่าสุ่ม ต้อง >= ราคาตัวถูกสุดที่ยังขาด
+                                    --    (เช่น มี 510 ค่าสุ่ม 15 => เหลือ 495 < ราคา Vampire 500 = สุ่มไปก็ซื้อไม่ได้ ไปฟาร์มต่อ)
+                                    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+                                    if diamonds < price then
+                                        print(string.format("[Reroll] Diamonds %d < roll cost %d - farming instead",
+                                            diamonds, price))
+                                        updateStatus("No diamonds for reroll - farming...")
+                                        break
+                                    end
+                                    local minNeed = minMissingPrice()
+                                    if minNeed and (diamonds - price) < minNeed then
+                                        print(string.format(
+                                            "[Reroll] After roll cost: %d left < cheapest needed (%d) - farming instead",
+                                            diamonds - price, minNeed))
+                                        updateStatus("Can't afford after roll - farming...")
+                                        break
+                                    end
+
+                                    -- 6) snapshot stock ก่อนยิง
+                                    local before = {}
+                                    for _, cls in ipairs(Classes:GetChildren()) do
+                                        before[cls.Name] = tostring(isInStock(cls))
+                                    end
+
+                                    cantReroll = false
+                                    local ok = pcall(function() rerollRemote:FireServer() end)
+                                    if not ok then
+                                        warn("[Reroll] FireServer failed - stopping")
+                                        break
+                                    end
+
+                                    -- 7) รอผล: stock เปลี่ยน / โดน block / timeout 6 วิ
+                                    local settled = false
+                                    local waited = 0
+                                    while waited < 6 do
+                                        task.wait(0.25)
+                                        waited += 0.25
+                                        local after = {}
+                                        for _, cls in ipairs(Classes:GetChildren()) do
+                                            after[cls.Name] = tostring(isInStock(cls))
+                                        end
+                                        if not snapEqual(before, after) then
+                                            settled = true
+                                            break
+                                        end
+                                        if cantReroll then
+                                            blockStreak += 1
+                                            if blockStreak >= 6 then
+                                                print("[Reroll] Still blocked after 6 tries - stopping")
+                                                updateStatus("Can't Reroll Now - stopping")
+                                                settled = true
+                                                break
+                                            end
+                                            print("[Reroll] Blocked near rotate - waiting 5s")
+                                            updateStatus("Can't Reroll Now - waiting...")
+                                            task.wait(5)
+                                            settled = true
+                                            break
+                                        end
+                                    end
+                                    if not settled then
+                                        timeoutStreak += 1
+                                        if timeoutStreak >= 3 then
+                                            print("[Reroll] Stock not changing after 3 rolls - stopping")
+                                            break
+                                        end
+                                    else
+                                        timeoutStreak = 0
+                                        blockStreak = 0
+                                        updateStatus("Rerolling...")
+                                    end
+                                    task.wait(0.3)
+                                end
+                            end
+                        end
+                    end
+
+                    updateStatus("Buying Classes...")
+
+                    local totalClasses = #Config.BuyClass
+                    local ownedCount = 0
+                    local outOfStock = {}
+
+                    for _, className in ipairs(Config.BuyClass) do
+                        if not ClassProgress:FindFirstChild(className) then
+                            local classFolder = Classes:FindFirstChild(className)
+                            if classFolder then
+                                local inStock = isInStock(classFolder)
+                                if inStock then
+                                    print(string.format("[Auto-Buy] Buying: %s", className))
+                                    updateStatus(string.format("Buying: %s", className))
+                                    Client.Events.RequestPurchaseClass:FireServer(className)
+                                    task.wait(0.5)
+                                    if ClassProgress:FindFirstChild(className) then
+                                        print(string.format("[Auto-Buy] Bought: %s", className))
+                                    else
+                                        warn(string.format("[Auto-Buy] Buy %s failed (server may not have processed)", className))
+                                    end
+                                else
+                                    print(string.format("[Auto-Buy] %s out of stock", className))
+                                    table.insert(outOfStock, className)
+                                end
+                            else
+                                warn(string.format("[Auto-Buy] Class folder not found: %s", className))
+                            end
+                        else
+                            ownedCount = ownedCount + 1
+                        end
                     end
 
                     task.wait(2)
 
-                    local VirtualInputManager = game:GetService("VirtualInputManager")
-                    for i = 1, 10 do
-                        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                        task.wait(0.05)
-                        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-                        task.wait(0.1)
+                    -- Count owned classes after purchase
+                    ownedCount = 0
+                    for _, className in ipairs(Config.BuyClass) do
+                        if ClassProgress:FindFirstChild(className) then
+                            ownedCount = ownedCount + 1
+                        end
+                    end
+
+                    updateStatus(string.format("Classes: %d/%d", ownedCount, totalClasses))
+
+                    local allOwned = ownedCount == totalClasses
+
+                    if allOwned then
+                        updateStatus("All Classes Owned")
+                        if CheckGoals() then
+                            updateStatus("Goals Complete - DONE Sent")
+                            return  -- หยุดทันที ไม่สร้างห้อง
+                        end
+                    elseif #outOfStock > 0 then
+                        updateStatus("Out of Stock")
+                        task.wait(2)
                     end
                 else
-                    warn("⚠️ Quest claim failed: Replica or QuestData not found")
+                    warn("Auto-Buy: Classes folder not found")
                 end
-            end)
-        end
-    end)
-
-    task.wait(5)
-
-        -- ฟังก์ชันขาย Unit ทั้งหมด (เรียกก่อนเริ่ม Phase ใหม่)
-        local function sellAllUnits()
-            local soldCount = 0
-            local failCount = 0
-
-            print("🔄 [Wave Reset] Selling all existing units...")
-
-            -- ดึง playerReplica ใหม่
-            local playerReplica = Nodes.GET_GAME_PLAYER_REPLICA:InvokeSelf()
-            if not playerReplica then
-                warn("❌ [sellAllUnits] Failed to get playerReplica")
-                return false
-            end
-
-            -- Method 1: ใช้ Dependencies.GameUnits (เร็วกว่า)
-            local success1 = pcall(function()
-                local dependenciesModule = ReplicatedStorage:FindFirstChild("Dependencies")
-                if dependenciesModule then
-                    local Dependencies = require(dependenciesModule)
-                    local GameUnits = Dependencies.GameUnits
-                    if GameUnits then
-                        local units = GameUnits:get()
-                        for unitID, _ in pairs(units) do
-                            local sellSuccess, sellErr = pcall(function()
-                                playerReplica:FireServer("SellGameUnit", unitID)
-                            end)
-
-                            if sellSuccess then
-                                soldCount = soldCount + 1
-                                print(string.format("   ✅ Sold unit ID: %s", tostring(unitID)))
-                            else
-                                failCount = failCount + 1
-                                warn(string.format("   ⚠️ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
-                            end
-
-                            task.wait(0.2)  -- หน่วงเล็กน้อยระหว่างขาย
-                        end
-                    end
-                end
-            end)
-
-            if not success1 then
-                warn("⚠️ Method 1 (Dependencies) failed - trying Method 2 (allPlacedIDs)")
-
-                -- Method 2: Fallback ใช้ allPlacedIDs
-                if #allPlacedIDs > 0 then
-                    for _, unitID in ipairs(allPlacedIDs) do
-                        local sellSuccess, sellErr = pcall(function()
-                            playerReplica:FireServer("SellGameUnit", unitID)
-                        end)
-
-                        if sellSuccess then
-                            soldCount = soldCount + 1
-                            print(string.format("   ✅ Sold unit ID: %s", tostring(unitID)))
-                        else
-                            failCount = failCount + 1
-                            warn(string.format("   ⚠️ Failed to sell unit ID %s: %s", tostring(unitID), tostring(sellErr)))
-                        end
-
-                        task.wait(0.2)
-                    end
-                end
-            end
-
-            print(string.format("✅ [Wave Reset] Sold %d units (Failed: %d)", soldCount, failCount))
-            task.wait(1)
-
-            -- Return logic:
-            -- - true: ถ้าขายสำเร็จอย่างน้อย 1 ตัว หรือไม่มี unit เลย (soldCount=0 และ failCount=0)
-            -- - false: ถ้ามี unit แต่ขายไม่สำเร็จเลย (soldCount=0 และ failCount>0)
-            if failCount > 0 and soldCount == 0 then
-                warn("⚠️ [sellAllUnits] All sell attempts failed")
-                return false
             else
-                return true  -- สำเร็จ หรือไม่มี unit
+                warn("Auto-Buy: Shop not found")
             end
-        end
-
-        local isRunningPhase = false
-        local lastWaveResetTime = 0
-        local WAVE_RESET_COOLDOWN = 5  -- ป้องกัน trigger ซ้ำภายใน 5 วินาที
-
-        print("🔄 [In-Game] Starting initial phase...")
-        placeAndUpgrade()
-
-        while true do
-            task.wait(1)
-
-            if isRunningPhase then
-                continue
-            end
-
-            local currentWave = getCurrentWave()
-
-            -- ⚠️ ถ้า getCurrentWave() fail (return nil) ให้ข้ามรอบนี้
-            if currentWave == nil then
-                warn("⚠️ [Wave Monitor] getCurrentWave() returned nil - skipping this check")
-                continue
-            end
-
-            local currentTime = tick()
-
-            if (currentWave == 0 or currentWave == 1) and (currentTime - lastWaveResetTime) >= WAVE_RESET_COOLDOWN then
-                print(string.format("🔄 [Wave Reset] Detected at Wave %d - preparing new phase", currentWave))
-                isRunningPhase = true
-                lastWaveResetTime = currentTime
-                task.wait(2)
-
-                -- ขาย Unit เก่าทั้งหมดก่อนเริ่ม Phase ใหม่
-                local sellSuccess = sellAllUnits()
-                if not sellSuccess then
-                    warn("⚠️ [Wave Reset] Sell failed but continuing with new phase")
-                end
-
-                -- เช็ค Banner ถ้ามี Summon Config และเงินเกิน 10000
-                if hasSummonConfig and #SUMMON_CONFIG > 0 then
-                    print("🔍 [Wave Reset] Checking banner for target units...")
-                    local bannerCheckSuccess, bannerResult = pcall(function()
-                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                        if replica and replica.Data then
-                            local itemData = replica.Data.ItemData
-                            local gems = itemData and itemData.Gem and itemData.Gem.Amount or 0
-
-                            print(string.format("   💎 Current Gems: %d", gems))
-
-                            if gems >= 2500 then
-                                print("   ✅ Gems >= 2500 - checking banner...")
-
-                                -- เช็คว่าเป็น Secret unit หรือไม่
-                                local isSecretUnit = false
-                                for _, configUnit in ipairs(SUMMON_CONFIG) do
-                                    for _, secretUnit in ipairs(SECRET_UNITS) do
-                                        if configUnit == secretUnit then
-                                            isSecretUnit = true
-                                            print(string.format("   ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
-                                            break
-                                        end
-                                    end
-                                    if isSecretUnit then break end
-                                end
-
-                                if isSecretUnit then
-                                    -- Secret unit: ข้าม Banner check
-                                    print(string.format("✅ [Wave Reset] Secret unit + gems >= 2500 → Rejoining..."))
-                                    task.wait(1)
-
-                                    pcall(function()
-                                        game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
-                                    end)
-                                else
-                                    -- Mythic unit: เช็ค Banner ตามปกติ
-                                    local bannerUnits = {}
-                                    local bannerSuccess = pcall(function()
-                                        local startTime = tick()
-                                        local timeout = 5
-
-                                        while tick() - startTime < timeout do
-                                            local units = checkCurrentBanner()
-                                            if #units > 0 then
-                                                bannerUnits = units
-                                                return
-                                            end
-                                            task.wait(0.5)
-                                        end
-                                    end)
-
-                                    if bannerSuccess and #bannerUnits > 0 then
-                                        print(string.format("   📋 Banner units found: %s", table.concat(bannerUnits, ", ")))
-
-                                        -- เช็คว่ามีตัวที่ต้องการหรือไม่
-                                        local hasMatch = false
-                                        local matchedUnit = nil
-                                        for _, configUnit in pairs(SUMMON_CONFIG) do
-                                            for _, bannerUnit in pairs(bannerUnits) do
-                                                if configUnit == bannerUnit then
-                                                    hasMatch = true
-                                                    matchedUnit = configUnit
-                                                    break
-                                                end
-                                            end
-                                            if hasMatch then break end
-                                        end
-
-                                        if hasMatch then
-                                            print(string.format("✅ [Wave Reset] Target unit '%s' found in banner + gems >= 2500 → Rejoining...", matchedUnit))
-                                            task.wait(1)
-
-                                            pcall(function()
-                                                game:GetService("TeleportService"):Teleport(game.PlaceId, Players.LocalPlayer)
-                                            end)
-                                            return  -- หยุดสคริปต์
-                                        else
-                                            warn("⚠️ [Wave Reset] No target units found in banner - continuing farming")
-                                        end
-                                    else
-                                        warn("⚠️ [Wave Reset] Failed to check banner (timeout or error) - continuing farming")
-                                    end
-                                end
-                            else
-                                print(string.format("   ⏭️ Gems < 2500 - skipping banner check"))
-                            end
-                        else
-                            warn("⚠️ [Wave Reset] Failed to get Replica for banner check")
-                        end
-                    end)
-
-                    if not bannerCheckSuccess then
-                        warn(string.format("⚠️ [Wave Reset] Banner check error: %s - continuing farming", tostring(bannerResult)))
-                    end
-                end
-
-                print("🔄 [Wave Reset] Starting new phase...")
-                local success = placeAndUpgrade()
-                isRunningPhase = false
-
-                if not success then
-                    warn("⚠️ [Wave Reset] Phase failed - will retry on next wave reset")
-                else
-                    print("✅ [Wave Reset] Phase completed successfully")
-                end
-            end
-        end
-    end)
-
-    -- หยุดที่นี่ - ไม่รัน Lobby scripts
-    return
-end
-
--- ========================================
--- LOBBY SCRIPTS (รันเฉพาะตอนไม่ได้อยู่ในแมพ)
--- ========================================
-
--- ========================================
--- 1. RemoveLobbyMesh.lua (Boost FPS)
--- ========================================
-printStep("Removing Lobby Mesh...")
-
--- ใช้ฟังก์ชัน Performance Optimization
-applyPerformanceOptimizations()
-
-task.wait(1)
-
--- ========================================
--- 2. Settings.lua
--- ========================================
-printStep("Applying Settings...")
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Nodes = require(ReplicatedStorage:WaitForChild("Nodes"))
-
-local settings = {
-    AutoSkipWaves = true,
-    AutoVoteStart = true,
-    AutoRetry = true,
-    LowDetailMode = true,
-    FastSummon = true,
-    SummonMax = true,
-    DisplayPinnedQuests = false,
-    PathVisualizerEnabled = false,
-    CameraShakeEnabled = false,
-    OtherUnitsEnabled = false,
-    OtherUnitVFXEnabled = false,
-    OwnUnitVFXEnabled = false,
-    AbilityVFXEnabled = false,
-    UnitAuraEnabled = false,
-    TraitAuraEnabled = false,
-    BuffIndicatorsEnabled = false,
-    DisplayUnitCircles = false,
-    DisplayHealthBars = false,
-    DisplayEnemyTags = false,
-    DisplayEnemyStatusEffects = false,
-    DisplayEnemyEffects = false,
-    OtherCosmeticEnabled = false,
-    OtherEmoteSFXEnabled = false,
-    GlobalMessagesEnabled = false,
-    DisplayUpdateLog = false,
-    DamageIndicatorsEnabled = false,
-    AutoPlacePhantoms = false,
-    StrictPhantomPlacement = false
-}
-
--- ดึง Settings ปัจจุบันจาก Replica (ถ้ามี)
-local currentSettings = {}
-local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-if replica and replica.Data and replica.Data.Settings then
-    currentSettings = replica.Data.Settings
-    local existingCount = 0
-    for _ in pairs(currentSettings) do existingCount = existingCount + 1 end
-    print("   📋 Loaded " .. existingCount .. " existing settings from Replica")
-else
-    print("   ⚠️ Replica.Settings not found - will set all")
-end
-
--- เช็คแต่ละ setting ก่อนส่ง
-local setCount, skipCount, failCount = 0, 0, 0
-for settingName, desiredValue in pairs(settings) do
-    local currentValue = currentSettings[settingName]
-
-    -- เช็คว่าค่าปัจจุบันตรงกับที่ต้องการหรือไม่
-    if currentValue == desiredValue then
-        skipCount = skipCount + 1
-        -- log เฉพาะ verbose mode
-        -- print(string.format("   ⏭️ Skip: %s (already %s)", settingName, tostring(currentValue)))
-    else
-        local success, err = pcall(function()
-            Nodes.CLIENT_CHANGE_SETTING:FireServer(settingName, desiredValue)
-        end)
-
-        if success then
-            setCount = setCount + 1
-            print(string.format("   🔧 Set: %s = %s (was %s)", settingName, tostring(desiredValue), tostring(currentValue)))
         else
-            failCount = failCount + 1
-            warn(string.format("   ❌ Failed: %s - %s", settingName, tostring(err)))
-        end
-
-        task.wait(0.3)
-    end
-end
-
-print(string.format("   📊 Settings: %d set, %d skipped, %d failed", setCount, skipCount, failCount))
-
--- AutoSell Settings
-task.wait(1)
-local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-local Actions = require(FusionPackage.Actions)
-
--- เริ่มต้น: ขาย Rare เท่านั้น (ไม่ขาย Epic และ Legendary)
-print("🔧 Setting AutoSell: Rare only (Epic = false)...")
-pcall(function()
-    Actions.ToggleAutoSell("Standard", "Rare", false, true)
-end)
-task.wait(0.3)
-
--- ตั้ง Epic = false (ทั้ง Non-Shiny และ Shiny)
-pcall(function()
-    Actions.ToggleAutoSell("Standard", "Epic", false, false)
-end)
-task.wait(0.3)
-
-pcall(function()
-    Actions.ToggleAutoSell("Standard", "Epic", true, false)
-end)
-task.wait(0.3)
-
--- เปิดขาย Shiny Rare
-print("🔧 Enabling Shiny AutoSell (Rare only)...")
-pcall(function()
-    Actions.ToggleAutoSell("Standard", "Rare", true, true)
-end)
-task.wait(0.3)
-
-task.wait(1)
-
--- ========================================
--- 2.5. Trait Filter Setup
--- ========================================
-printStep("Setting Trait Filters...")
-
-do
-    local TRAIT_CONFIG = {
-        TargetTraits = {"Unbound", "Primordial", "Forsaken", "Draconic", "Investor"},
-        ClearBeforeSet = false,
-        FilterMode = false,
-    }
-
-    -- ล้าง filters (ถ้าต้องการ)
-    if TRAIT_CONFIG.ClearBeforeSet then
-        pcall(function() Nodes.CLIENT_CLEAR_TRAIT_FILTERS:Request() end)
-        task.wait(0.3)
-    end
-
-    -- ตั้ง filters
-    local success, fail = 0, 0
-    for _, trait in ipairs(TRAIT_CONFIG.TargetTraits) do
-        if pcall(function() Nodes.CLIENT_TOGGLE_TRAIT_FILTER:Request(trait, TRAIT_CONFIG.FilterMode) end) then
-            success = success + 1
-        else
-            fail = fail + 1
-        end
-        task.wait(0.1)
-    end
-
-    -- แจ้งผลลัพธ์
-    if fail == 0 then
-        print(string.format("✅ Trait Filters: %d traits %s", success, TRAIT_CONFIG.FilterMode and "enabled" or "disabled"))
-    else
-        warn(string.format("⚠️ Trait Filters: %d success, %d failed", success, fail))
-    end
-end
-
-task.wait(1)
-
--- ========================================
--- 3. AutoClaimStarter (FireServer ตรง - บังคับเลือก Goku)
--- ========================================
-printStep("Claiming Starter Unit (Goku)...")
-
-local STARTER_UNIT = "Goku"
-local VirtualInputManager = game:GetService("VirtualInputManager")
-
--- รอให้ PlayerGui โหลด
-task.wait(2)
-
--- เช็คว่ามี Goku อยู่ใน UnitData แล้วหรือยัง
-local hasStarter = false
-local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-if unitData then
-    for fullKey, _ in pairs(unitData) do
-        local internalName = fullKey:match("^(.+)#") or fullKey
-        if internalName == STARTER_UNIT then
-            hasStarter = true
-            break
+            warn("Auto-Buy: ClassProgress not found")
         end
     end
-end
 
-if hasStarter then
-    print("   ⏭️ [Starter] " .. STARTER_UNIT .. " already owned - skip")
-else
-    -- ส่ง FireServer ตรงเลย
-    local fireSuccess, fireErr = pcall(function()
-        Nodes.CHOOSE_STARTER_UNIT:FireServer(STARTER_UNIT)
-    end)
+    -- Check if goals are already met before entering farm map
+    if CheckGoals() then
+        updateStatus("Goals Complete - DONE Sent")
+        return  -- หยุดทันที ไม่สร้างห้อง
+    end
 
-    if not fireSuccess then
-        warn("❌ [Starter] FireServer failed: " .. tostring(fireErr))
-    else
-        print("✅ [Starter] Sent FireServer: " .. STARTER_UNIT)
+    -- Solo Teleport Logic
+    updateStatus("Entering Solo Map...")
 
-        -- รอ 5 วิ ให้ Server process
-        task.wait(5)
+    -- นับผู้เล่น "อื่น" ที่ยืนอยู่ในวง BeamPart ของ Teleporter หมายเลข num
+    -- คืน math.huge ถ้าหา BeamPart ไม่เจอ = ถือว่าไม่ปลอดภัย (ไม่ใช้วงนั้น)
+    local function countPlayersInBeam(num)
+        local tp = workspace:FindFirstChild("Teleporter" .. num)
+        local beamPart = tp and tp:FindFirstChild("BeamPart")
+        if not beamPart then return math.huge end
 
-        -- เช็คว่าได้ Goku จริงไหม
-        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-        if replica and replica.Data then
-            local unitData2 = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-            if unitData2 then
-                local gotIt = false
-                for fullKey, _ in pairs(unitData2) do
-                    local internalName = fullKey:match("^(.+)#") or fullKey
-                    if internalName == STARTER_UNIT then
-                        gotIt = true
-                        break
-                    end
-                end
-                if gotIt then
-                    print("✅ [Starter] Claim completed: " .. STARTER_UNIT)
-                else
-                    warn("⚠️ [Starter] Failed to claim " .. STARTER_UNIT .. " within 5s")
+        -- รัศมีวงจากขนาด part (เทียบเฉพาะแกน X, Z - ไม่สนความสูง)
+        local radius = math.max(beamPart.Size.X, beamPart.Size.Z) / 2
+
+        local count = 0
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local distance = math.sqrt(
+                        (hrp.Position.X - beamPart.Position.X)^2 +
+                        (hrp.Position.Z - beamPart.Position.Z)^2
+                    )
+                    if distance <= radius then count += 1 end
                 end
             end
         end
+        return count
     end
-end
 
-task.wait(1)
+    task.wait(1)
+    makeInvisible()
 
--- ========================================
--- 4. AutoClaimCalendar.lua
--- ========================================
-printStep("Claiming Calendar Rewards...")
-
-local START_DAY = 1
-local END_DAY = 7
-
--- Claim ReleaseCalendar ทั้งหมดพร้อมกัน
-for day = START_DAY, END_DAY do
-    spawn(function()
-        pcall(function()
-            Nodes.CLAIM_CALENDAR:FireServer("ReleaseCalendar", day)
-        end)
-    end)
-    task.wait(0.05)  -- หน่วงเล็กน้อย
-end
-
-task.wait(2)  -- รอให้ claim เสร็จ
-
--- Claim DailyRewards ทั้งหมดพร้อมกัน
-for day = START_DAY, END_DAY do
-    spawn(function()
-        pcall(function()
-            Nodes.CLAIM_CALENDAR:FireServer("DailyRewards", day)
-        end)
-    end)
-    task.wait(0.05)  -- หน่วงเล็กน้อย
-end
-
-task.wait(2)  -- รอให้ claim เสร็จ
-
--- ปิด popup รวม
-local VirtualInputManager = game:GetService("VirtualInputManager")
-for i = 1, 10 do
-    VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-    task.wait(0.05)
-    VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
+    Client.Events.TeleportEvent:FireServer("Remove")
     task.wait(0.1)
-end
 
-task.wait(1)
+    local teleporters = {
+        {num = 1, obj = workspace:FindFirstChild("Teleporter1")},
+        {num = 2, obj = workspace:FindFirstChild("Teleporter2")},
+        {num = 3, obj = workspace:FindFirstChild("Teleporter3")},
+    }
 
--- ========================================
--- 4.5. Redeem Codes
--- ========================================
-printStep("Redeeming Codes...")
-
-do
-    -- ใช้ REDEEM_CODES จาก Config
-    if not REDEEM_CODES or #REDEEM_CODES == 0 then
-        print("   ℹ️ No codes configured - skipping")
-    else
-        print(string.format("   📋 Codes to redeem: %d", #REDEEM_CODES))
-
-        local successCount = 0
-        local failCount = 0
-
-        -- Redeem ทีละโค้ด (เพิ่มเวลาระหว่างโค้ด)
-        for i, code in ipairs(REDEEM_CODES) do
-            local success, result = pcall(function()
-                local request = Nodes.CLAIM_CODE:Request(code)
-                request:Timeout(5)
-                return request:Wait()
-            end)
-
-            if success and result and result.Success then
-                successCount = successCount + 1
-                print(string.format("   ✅ [%d/%d] %s", i, #REDEEM_CODES, code))
-            else
-                failCount = failCount + 1
-                print(string.format("   ⚠️ [%d/%d] %s - failed", i, #REDEEM_CODES, code))
-            end
-
-            task.wait(1.1)  -- รอ 5 วิต่อโค้ด
-        end
-
-        print(string.format("   📊 Result: %d success, %d failed", successCount, failCount))
-    end
-
-    -- รอเพิ่มอีกนิด
-    task.wait(1)
-
-
-    -- ปิด popup (ถ้ามี)
-    local VirtualInputManager = game:GetService("VirtualInputManager")
-    for i = 1, 10 do
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-        task.wait(0.1)
-    end
-end
-
-task.wait(1)
-
--- ========================================
--- 4.6. Claim All Quests, Achievements & BattlePass
--- ========================================
-printStep("Claiming All Quests, Achievements & BattlePass...")
-
-do
-    -- ดึง QuestData
-    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-    if not replica or not replica.Data.QuestData then
-        warn("   ⚠️ QuestData not found!")
-    else
-        local questData = replica.Data.QuestData
-        local categories = {}
-
-        -- เก็บ categories ทั้งหมด
-        for categoryName, _ in pairs(questData) do
-            table.insert(categories, categoryName)
-        end
-
-
-        -- Claim แต่ละ category พร้อมกัน
-        local claimedCount = 0
-        for _, categoryName in ipairs(categories) do
-            spawn(function()
-                pcall(function()
-                    Nodes.QUEST_CLAIM_ALL_CATEGORY:FireServer(categoryName)
-                    claimedCount = claimedCount + 1
-                end)
-            end)
-            task.wait(0.05)
-        end
-
-        task.wait(2)
-    end
-
-    task.wait(1)
-
-    -- Claim BattlePass
-    local ReplicaClient = require(ReplicatedStorage.Shared.ReplicaClient)
-    local battlepassClaimed = 0
-
-    ReplicaClient.OnNew("BattlepassData", function(replica)
-        if replica.Data and replica.Data.DataKey then
-            local battlepassId = replica.Data.DataKey
-            pcall(function()
-                Nodes.CLAIM_ALL_BATTLEPASS_REWARDS:FireServer(battlepassId)
-                battlepassClaimed = battlepassClaimed + 1
-            end)
-        end
-    end)
-
-    task.wait(2)
-
-    if battlepassClaimed == 0 then
-    end
-
-    -- ปิด popup ที่อาจจะขึ้นมา
-    local VirtualInputManager = game:GetService("VirtualInputManager")
-    for i = 1, 20 do
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-        task.wait(0.05)
-        VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-        task.wait(0.1)
-    end
-end
-task.wait(1)
-
--- ========================================
--- 5. เช็คตัวละครที่มีอยู่ + Summon System (Mythic/Secret)
--- ========================================
-
-printStep("Checking Inventory...")
-
--- ลบฟังก์ชัน openInventory และ closeInventory เพราะไม่จำเป็นแล้ว
--- ใช้ Nodes.GET_DATA_VALUE:InvokeSelf("UnitData") โดยตรง
-
--- ฟังก์ชันเช็คว่ามี units ใน Inventory (พร้อม Trait)
-local function checkInventoryForUnits(targetUnits, returnWithTrait)
-    local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-    if not unitData then return {} end
-
-    -- ถ้า targetUnits เป็น string ให้แปลงเป็น table
-    if type(targetUnits) == "string" then
-        targetUnits = {targetUnits}
-    end
-
-    local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
-    local foundUnits = {}
-
-    for fullKey, data in pairs(unitData) do
-        local internalName = fullKey:match("^(.+)#") or fullKey
-        local unitInfo = UnitInfo[internalName]
-        if unitInfo then
-            local displayName = unitInfo.DisplayName or internalName
-            for _, targetUnit in ipairs(targetUnits) do
-                if displayName == targetUnit then
-                    if returnWithTrait then
-                        -- return พร้อม Trait และ Shiny
-                        table.insert(foundUnits, {
-                            name = displayName,
-                            trait = data.Trait or "None",
-                            fullKey = fullKey,
-                            unitID = data.ID,
-                            isShiny = data.Shiny or false
-                        })
-                    else
-                        -- return แค่ชื่อ
-                        table.insert(foundUnits, displayName)
-                    end
+    -- วนลองหาห้องจนกว่าจะเข้าได้จริง (กันเคสมีคนเข้าพร้อมกันแล้ว teleport ล้มเหลว)
+    while isLobby() do
+        local selectedTeleporter = nil
+        while not selectedTeleporter do
+            for _, tp in ipairs(teleporters) do
+                if tp.obj and countPlayersInBeam(tp.num) == 0 then
+                    selectedTeleporter = tp.num
+                    print("Found empty Teleporter:", selectedTeleporter)
                     break
                 end
             end
-        end
-    end
-    return foundUnits
-end
-
--- ฟังก์ชันเลือกตัวที่จะสุ่ม Trait (Priority: None > Worst Trait)
-local function selectBestUnitForReroll(units)
-    if #units == 0 then return nil end
-    if #units == 1 then return units[1] end
-
-    -- Trait Priority (จากกากสุด → ดีสุด)
-    local TRAIT_PRIORITY = {
-        "Strength 1",    -- 1 (กากสุด)
-        "Speed 1",       -- 2
-        "Range 1",       -- 3
-        "Enlightenment", -- 4
-        "Strength 2",    -- 5
-        "Speed 2",       -- 6
-        "Range 2",       -- 7
-        "Limit Breaker", -- 8
-        "Precision 1",   -- 9
-        "Precision 2",   -- 10
-        "Bolt",          -- 11
-        "Optics",        -- 12
-        "Investor",      -- 13
-        "Draconic",      -- 14
-        "Forsaken",      -- 15
-        "Primordial",    -- 16
-        "Unbound"        -- 17 (ดีสุด)
-    }
-
-    -- สร้าง Trait → Priority Map
-    local traitPriorityMap = {}
-    for priority, traitName in ipairs(TRAIT_PRIORITY) do
-        traitPriorityMap[traitName] = priority
-    end
-
-    -- แยก Shiny และ Non-Shiny
-    local shinyUnits = {}
-    local normalUnits = {}
-
-    for _, unit in ipairs(units) do
-        if unit.isShiny then
-            table.insert(shinyUnits, unit)
-        else
-            table.insert(normalUnits, unit)
-        end
-    end
-
-    -- ฟังก์ชันเลือกตัวที่ดีที่สุดจาก list
-    local function selectFromList(list)
-        if #list == 0 then return nil end
-        if #list == 1 then return list[1] end
-
-        -- แยกตัวที่ Trait = None
-        local noneUnits = {}
-        local withTraitUnits = {}
-
-        for _, unit in ipairs(list) do
-            if unit.trait == "None" then
-                table.insert(noneUnits, unit)
-            else
-                table.insert(withTraitUnits, unit)
+            if not selectedTeleporter then
+                print("All teleporters busy - waiting...")
+                updateStatus("Waiting for Empty Teleporter...")
+                task.wait(1)
             end
         end
 
-        -- ถ้ามีตัวที่ Trait = None → เลือกตัวแรก
-        if #noneUnits > 0 then
-            return noneUnits[1]
-        end
+        Client.Events.TeleportEvent:FireServer("Remove")
+        task.wait(0.1)
+        Client.Events.TeleportEvent:FireServer("Add", selectedTeleporter)
+        task.wait(0.1)
+        Client.Events.TeleportEvent:FireServer("Chosen", nil, 1, nil)
+        print("Entering Solo map...")
+        updateStatus("Loading Map...")
 
-        -- ถ้าไม่มี None → เลือกตัวที่ Trait กากสุด (priority ต่ำสุด)
-        if #withTraitUnits > 0 then
-            table.sort(withTraitUnits, function(a, b)
-                local priorityA = traitPriorityMap[a.trait] or 999
-                local priorityB = traitPriorityMap[b.trait] or 999
-                return priorityA < priorityB  -- priority ต่ำกว่า = กากกว่า
-            end)
-            return withTraitUnits[1]
-        end
-
-        return list[1]
-    end  -- ปิด selectFromList function
-
-    -- เลือก Shiny ก่อน (ถ้ามี)
-    if #shinyUnits > 0 then
-        local selected = selectFromList(shinyUnits)
-        if selected then return selected end
-    end
-
-    -- ถ้าไม่มี Shiny หรือเลือกไม่ได้ → เลือกตัวธรรมดา
-    if #normalUnits > 0 then
-        local selected = selectFromList(normalUnits)
-        if selected then return selected end
-    end
-
-    -- Fallback (ไม่น่าเกิด)
-    return units[1]
-end  -- ปิด selectBestUnitForReroll function
-
--- ฟังก์ชันส่ง Horst Description
-local function sendSummonStatus(foundUnits, isComplete)
-    if not HORST_ENABLED or not _G.Horst_SetDescription then return end
-
-    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-    local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
-    local rr = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-    -- สร้าง unit list
-    local unitNames = {}
-    for _, unit in ipairs(foundUnits) do
-        table.insert(unitNames, unit)
-    end
-    local unitText = table.concat(unitNames, ", ")
-
-    -- สร้าง message ในรูปแบบเดียวกับ GEM mode
-    local message = string.format("💎 Gems: %d • RR: %d • %s", gems, rr, unitText)
-
-    pcall(function()
-        _G.Horst_SetDescription(message)
-    end)
-
-    -- ไม่ส่ง DONE ที่นี่ - ให้ Trait Reroll system รับผิดชอบส่ง DONE
-    -- เพราะต้องสุ่ม Trait ก่อน
-end
-
--- เช็ค Summon Config
-local shouldSummon = false
-local hasTargetUnitConfig = false  -- เปลี่ยนชื่อจาก hasTargetUnit
-local autoSummonMode = false  -- ใหม่: โหมด auto summon
-
-if hasSummonConfig then
-    -- เช็คว่าเป็น "auto" mode หรือไม่
-    if type(_G.Config.SummonUnits) == "string" and _G.Config.SummonUnits:lower() == "auto" then
-        autoSummonMode = true
-        -- Override SUMMON_CONFIG เป็น Mythic + Secret ทั้งหมด
-        local allTargets = {}
-        for _, unit in ipairs(SECRET_UNITS) do
-            table.insert(allTargets, unit)
-        end
-        for _, unit in ipairs(MYTHIC_UNITS) do
-            table.insert(allTargets, unit)
-        end
-        SUMMON_CONFIG = allTargets
-    end
-
-    -- เช็ค Level และ Gems
-    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-    local level = replica and replica.Data and replica.Data.Level or 0
-    local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
-
-    -- 1. เช็ค Inventory ก่อนเสมอ (ไม่ว่า Gems จะพอหรือไม่)
-    local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
-
-    if autoSummonMode then
-        -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
-        if #foundInInventory > 0 then
-            sendSummonStatus(foundInInventory, true)
-            hasTargetUnitConfig = true
-            print("✅ Found target unit in inventory - skipping summon")
-        end
-    else
-        -- โหมดปกติ: ต้องได้ครบทุกตัว
-        if #foundInInventory >= #SUMMON_CONFIG then
-            sendSummonStatus(foundInInventory, true)
-            hasTargetUnitConfig = true
-            print("✅ Found all target units in inventory - skipping summon")
-        end
-    end
-
-    -- 2. ถ้ายังไม่มีตัว → พิจารณาว่าจะสุ่มหรือไม่
-    if not hasTargetUnitConfig then
-        if level >= 10 and gems >= 2500 then
-            -- มี Level และ Gems พอ → ไปสุ่ม
-            -- เช็คว่าเป็น Secret unit หรือไม่
-            local isSecretUnit = false
-            for _, configUnit in ipairs(SUMMON_CONFIG) do
-                for _, secretUnit in ipairs(SECRET_UNITS) do
-                    if configUnit == secretUnit then
-                        isSecretUnit = true
-                        print(string.format("ℹ️ '%s' is a Secret unit - Banner always available", configUnit))
-                        break
-                    end
-                end
-                if isSecretUnit then break end
-            end
-
-            if isSecretUnit then
-                -- Secret unit: ข้าม Banner check (มีเสมอ)
-                shouldSummon = true
-            else
-                -- Mythic unit: เช็ค Banner ตามปกติ
-                local bannerUnits = checkCurrentBanner()
-
-                local hasMatch = false
-                for _, configUnit in pairs(SUMMON_CONFIG) do
-                    for _, bannerUnit in pairs(bannerUnits) do
-                        if configUnit == bannerUnit then
-                            hasMatch = true
-                            break
-                        end
-                    end
-                    if hasMatch then break end
-                end
-
-                if hasMatch then
-                    shouldSummon = true
-                else
-                    if #foundInInventory > 0 then
-                        sendSummonStatus(foundInInventory, false)
-                    end
-                end
-            end
-        else
-            -- ไม่มีตัว + Gems ไม่พอ → เช็คว่ามี Mythic Fallback หรือไม่
-            warn(string.format("⚠️ Target unit not found in inventory. Need to farm more gems. Level=%d, Gems=%d (require Level>=10 and Gems>=2500)", level, gems))
-
-            -- เช็คว่า Config เป็น Secret unit หรือไม่
-            local isSecretSummon = false
-            for _, configUnit in ipairs(SUMMON_CONFIG) do
-                for _, secretUnit in ipairs(SECRET_UNITS) do
-                    if configUnit == secretUnit then
-                        isSecretSummon = true
-                        break
-                    end
-                end
-                if isSecretSummon then break end
-            end
-
-            -- ถ้าเป็น Secret + Change_Acc_Secrets = true → Fallback ไป Mythic
-            if isSecretSummon and CHANGE_ACC_SECRETS then
-                print("ℹ️ Secret unit not found - checking for Mythic fallback...")
-
-                -- เช็คว่ามี Mythic ใน Inventory หรือไม่
-                local mythicFallback = checkInventoryForUnits(MYTHIC_UNITS)
-
-                if #mythicFallback > 0 then
-                    print(string.format("✅ Found Mythic fallback: %s", table.concat(mythicFallback, ", ")))
-                    sendSummonStatus(mythicFallback, false)
-                    hasTargetUnitConfig = true
-                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) แต่มี hasTargetUnitConfig = true (ไป Trait Reroll)
-                else
-                    print("⚠️ No Mythic fallback found - will proceed to farming")
-                    -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
-                end
-            else
-                print("ℹ️ Script will proceed to farming to collect gems...")
-                -- ไม่ตั้ง shouldSummon = true (ไม่ไปสุ่ม) ให้ไปเช็ค Legendary ต่อ
-            end
-        end
-    end
-end
-
--- เช็คตัว Legendary (ถ้าไม่มี Summon Config หรือข้ามมาแล้ว)
--- แต่ไม่ override hasTargetUnitConfig ถ้ามีค่าอยู่แล้ว (เช่น จาก Mythic Fallback)
-local hasTargetUnitLegendary = false
-
-if not shouldSummon and not hasTargetUnitConfig then
-
-    local function checkForLegendaryUnits()
-        local targetUnits = {
-            "The Hero",
-            "Scissor",
-            "Ice Queen",
-            "Water Princess",
-            "Forbidden Teacher",
-            "Greed"
-        }
-
-        -- เช็คผ่าน UnitData โดยตรงแทนการอ่าน GUI
-        local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-        if not unitData then
-            return false
-        end
-
-        local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
-
-        -- เก็บชื่อที่เจอเพื่อ debug
-        local foundUnits = {}
-        local targetFound = false
-
-        for fullKey, data in pairs(unitData) do
-            local internalName = fullKey:match("^(.+)#") or fullKey
-            local unitInfo = UnitInfo[internalName]
-
-            if unitInfo then
-                local displayName = unitInfo.DisplayName or internalName
-
-                -- เก็บเพื่อ debug
-                if not foundUnits[displayName] then
-                    foundUnits[displayName] = true
-                end
-
-                -- เช็คว่าตรงกับ target unit หรือไม่
-                for _, targetUnit in pairs(targetUnits) do
-                    if displayName == targetUnit then
-                        targetFound = true
-                        break
-                    end
-                end
-
-                if targetFound then
-                    break
-                end
-            end
-        end
-
-        return targetFound
-    end
-
-    -- เช็คตัวละครโดยตรง (ไม่ต้องเปิด Inventory)
-    hasTargetUnitLegendary = checkForLegendaryUnits()
-
-    if hasTargetUnitLegendary then
-        print("✅ Found Legendary unit in inventory")
-    else
-        print("ℹ️ No Legendary units found - will farm with Starter Unit to collect gems")
-    end
-end
-
--- ========================================
--- 6. AutoSummon (สำหรับ Summon Config หรือ Legendary)
--- ========================================
-if shouldSummon then
-    printStep("Auto Summon (Mythic/Secret)...")
-
-    -- ========================================
-    -- 6.1 เช็คและตั้งค่า AutoSell Epic/Legendary ก่อนสุ่ม
-    -- ========================================
-    print("🔍 Checking for Epic/Legendary units before summon...")
-
-    local EPIC_UNITS = {
-        "Ice Mage",           -- Priority 1
-        "Bounty Hunter",      -- Priority 2
-        "Nen Hunter",         -- Priority 3
-        "Corps Captain",      -- Priority 4
-        "Demon Cyborg"        -- Priority 5
-    }
-
-    local LEGENDARY_UNITS = {
-        "The Hero",
-        "Scissor",
-        "Ice Queen",
-        "Water Princess",
-        "Forbidden Teacher",
-        "Greed"
-    }
-
-    local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-    local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
-    local hasEpic = false
-    local hasLegendary = false
-
-    if unitData then
-        for fullKey, data in pairs(unitData) do
-            local internalName = fullKey:match("^(.+)#") or fullKey
-            local unitInfo = UnitInfo[internalName]
-
-            if unitInfo then
-                local displayName = unitInfo.DisplayName or internalName
-
-                -- เช็ค Epic
-                for _, epicUnit in ipairs(EPIC_UNITS) do
-                    if displayName == epicUnit then
-                        hasEpic = true
-                        print(string.format("   ✅ Found Epic: %s", displayName))
-                        break
-                    end
-                end
-
-                -- เช็ค Legendary
-                for _, legendaryUnit in ipairs(LEGENDARY_UNITS) do
-                    if displayName == legendaryUnit then
-                        hasLegendary = true
-                        print(string.format("   ✅ Found Legendary: %s", displayName))
-                        break
-                    end
-                end
-
-                if hasEpic and hasLegendary then break end
-            end
-        end
-    end
-
-    local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-    local Actions = require(FusionPackage.Actions)
-
-    -- ตั้ง AutoSell Epic (ถ้ามี)
-    if hasEpic then
-        print("🔧 Enabling Epic AutoSell before summon (Non-Shiny + Shiny)...")
-
-        pcall(function()
-            Actions.ToggleAutoSell("Standard", "Epic", false, true)
-        end)
-        task.wait(0.3)
-
-        pcall(function()
-            Actions.ToggleAutoSell("Standard", "Epic", true, true)
-        end)
-        task.wait(0.3)
-
-        print("✅ Epic AutoSell enabled")
-    end
-
-    -- ตั้ง AutoSell Legendary (ถ้ามี)
-    if hasLegendary then
-        print("🔧 Enabling Legendary AutoSell before summon (Non-Shiny + Shiny)...")
-
-        pcall(function()
-            Actions.ToggleAutoSell("Standard", "Legendary", false, true)
-        end)
-        task.wait(0.3)
-
-        pcall(function()
-            Actions.ToggleAutoSell("Standard", "Legendary", true, true)
-        end)
-        task.wait(0.3)
-
-        print("✅ Legendary AutoSell enabled")
-    end
-
-    task.wait(1)
-
-    local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
-    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
-    local summonCount = 0
-
-    while true do
-        -- เช็คว่าได้ตัวที่ต้องการก่อนสุ่ม (ทุกรอบ)
-        local foundBeforeSummon = checkInventoryForUnits(SUMMON_CONFIG)
-
-        if autoSummonMode then
-            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
-            if #foundBeforeSummon > 0 then
-                sendSummonStatus(foundBeforeSummon, true)
-                hasTargetUnitConfig = true
-                print("✅ Found target unit - stopping summon")
+        -- รอสูงสุด 20 วิ - เฝ้าตลอดว่ามีคนอื่นเดินเข้าวง Teleporter ที่เราจองไหม
+        -- ถ้ามี = Remove ทิ้งทันทีแล้วไปเลือกวงใหม่ (กันถูกรวมห้องกับคนอื่น)
+        local waited = 0
+        local TELEPORT_TIMEOUT = 20
+        local someoneJoined = false
+        while isLobby() and waited < TELEPORT_TIMEOUT do
+            waited = waited + 0.1
+            if countPlayersInBeam(selectedTeleporter) > 0 then
+                someoneJoined = true
                 break
             end
-        else
-            -- โหมดปกติ: ต้องได้ครบทุกตัว
-            if #foundBeforeSummon >= #SUMMON_CONFIG then
-                sendSummonStatus(foundBeforeSummon, true)
-                hasTargetUnitConfig = true
-                print("✅ Found all target units - stopping summon")
-                break
+            if math.floor(waited) % 5 == 0 and math.abs(waited - math.floor(waited)) < 0.05 then
+                print(("Still in Lobby... (%ds)"):format(math.floor(waited)))
             end
-        end
-
-        -- เช็ค Gems ก่อนสุ่ม
-        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-        local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
-
-        if gems < GEMS_PER_SUMMON then
-            warn(string.format("⚠️ Not enough gems for summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
-            break
-        end
-
-        summonCount = summonCount + 1
-        print(string.format("🎲 Summon #%d | Gems: %d", summonCount, gems))
-
-        pcall(function()
-            Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
-        end)
-
-        task.wait(0.3)
-
-        -- ปิด popup
-        for j = 1, 5 do
-            VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-            task.wait(0.01)
-            VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-            task.wait(0.02)
-        end
-
-        task.wait(0.2)
-
-        -- เช็คว่าได้ตัวที่ต้องการหรือยังหลังสุ่ม
-        local foundInInventory = checkInventoryForUnits(SUMMON_CONFIG)
-
-        if autoSummonMode then
-            -- โหมด auto: ได้ตัวใดตัวหนึ่งก็พอ
-            if #foundInInventory > 0 then
-                sendSummonStatus(foundInInventory, true)
-                hasTargetUnitConfig = true
-                print(string.format("✅ Found target unit after summon #%d - stopping", summonCount))
-                break
-            end
-        else
-            -- โหมดปกติ: ต้องได้ครบทุกตัว
-            if #foundInInventory >= #SUMMON_CONFIG then
-                sendSummonStatus(foundInInventory, true)
-                hasTargetUnitConfig = true
-                print(string.format("✅ Found all target units after summon #%d - stopping", summonCount))
-                break
-            else
-                -- แสดงตัวที่มีแล้ว
-                if #foundInInventory > 0 then
-                    sendSummonStatus(foundInInventory, false)
-                end
-
-                -- เช็คว่าเป็น Secret unit หรือไม่
-                local isSecretUnit = false
-                for _, configUnit in ipairs(SUMMON_CONFIG) do
-                    for _, secretUnit in ipairs(SECRET_UNITS) do
-                        if configUnit == secretUnit then
-                            isSecretUnit = true
-                            break
-                        end
-                    end
-                    if isSecretUnit then break end
-                end
-
-                if isSecretUnit then
-                    -- Secret unit: ข้าม Banner check (มีเสมอ)
-                    -- ทำต่อ loop
-                else
-                    -- Mythic unit: เช็ค Banner ว่ายังมีตัวที่ต้องการอยู่หรือไม่
-                    local bannerUnits = checkCurrentBanner()
-                    local hasMatch = false
-                    for _, configUnit in pairs(SUMMON_CONFIG) do
-                        for _, bannerUnit in pairs(bannerUnits) do
-                            if configUnit == bannerUnit then
-                                hasMatch = true
-                                break
-                            end
-                        end
-                        if hasMatch then break end
-                    end
-
-                    if not hasMatch then
-                        if #foundInInventory > 0 then
-                            sendSummonStatus(foundInInventory, false)
-                        end
-                        warn("⚠️ Target units no longer in banner - stopping summon")
-                        break
-                    end
-                end
-            end
-        end
-    end
-
-elseif not hasTargetUnitConfig and not hasTargetUnitLegendary then
-    printStep("Auto Summon (Legendary)...")
-
-    local BANNER_ID = "Standard"
-    local AMOUNT_PER_SUMMON = 50  -- จำนวนครั้งสุ่ม (x50 multi)
-    local GEMS_PER_SUMMON = 2500  -- Gems ที่ใช้ต่อรอบ
-    local DELAY = 2
-    local summonCount = 0
-    local MAX_SUMMONS = 100  -- จำกัดไว้ 100 รอบป้องกันวนไม่รู้จบ
-
-    local function checkForTargetUnits()
-        local targetUnits = {
-            "The Hero",
-            "Scissor",
-            "Ice Queen",
-            "Water Princess",
-            "Forbidden Teacher",
-            "Greed"
-        }
-        return #checkInventoryForUnits(targetUnits) > 0
-    end
-
-    while not hasTargetUnitLegendary and summonCount < MAX_SUMMONS do
-        -- เช็ค Gems ก่อนสุ่ม
-        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-        local gems = replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.Gem and replica.Data.ItemData.Gem.Amount or 0
-
-        if gems < GEMS_PER_SUMMON then
-            warn(string.format("⚠️ Not enough gems for Legendary summon: %d (require %d) - stopping", gems, GEMS_PER_SUMMON))
-            break
-        end
-
-        summonCount = summonCount + 1
-        print(string.format("🎲 Legendary Summon #%d | Gems: %d", summonCount, gems))
-
-        pcall(function()
-            Nodes.BANNER_SUMMON:FireServer(BANNER_ID, AMOUNT_PER_SUMMON)
-        end)
-
-        task.wait(DELAY)
-
-        -- spam คลิกมุมซ้ายบน 5 รอบ
-        for j = 1, 5 do
-            VirtualInputManager:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(10, 10, 0, false, game, 0)
+            updateStatus(("Loading Map... (%.0fs)"):format(waited))
             task.wait(0.1)
         end
 
-        task.wait(2)
-
-        -- เช็คว่าได้ target unit หรือยัง
-        hasTargetUnitLegendary = checkForTargetUnits()
-
-        if hasTargetUnitLegendary then
-            warn("✅ Target Legendary unit found!")
+        if someoneJoined and isLobby() then
+            print(string.format("Someone entered OUR Teleporter%d (%d player) - re-picking",
+                selectedTeleporter, countPlayersInBeam(selectedTeleporter)))
+            updateStatus("Teleporter Occupied - Re-picking...")
+            Client.Events.TeleportEvent:FireServer("Remove")
+            task.wait(1)
+        elseif isLobby() then
+            warn("Teleport failed or room was taken - retrying...")
+            updateStatus("Retrying Teleport...")
+            task.wait(0.5)
         end
     end
-
-    if not hasTargetUnitLegendary then
-        warn(string.format("⚠️ Reached max summons (%d) without finding target unit", MAX_SUMMONS))
-    end
+    print("Successfully entered Farm map!")
+    updateStatus("Map Loaded!")
 else
+    print("Already in Farm map - continuing...")
+    updateStatus("Already in Map")
 end
 
--- ========================================
--- 6.5 Trait Reroll System (ถ้ามี Config)
--- ========================================
--- เช็คว่าควรทำ Trait Reroll หรือไม่
-local shouldDoTraitReroll = false
-local traitRerollTargetUnit = nil
+task.wait(0.3)
 
-if TRAIT_REROLL_CONFIG and TRAIT_REROLL_CONFIG.TargetUnit then
-    -- Normalize TargetUnit: ถ้าเป็น table → เอาตัวแรก, ถ้าเป็น string → ใช้ตรงๆ
-    local normalizedTargetUnit = TRAIT_REROLL_CONFIG.TargetUnit
-    if type(normalizedTargetUnit) == "table" then
-        normalizedTargetUnit = normalizedTargetUnit[1]  -- เอาตัวแรก
+-- ============================================
+-- Anti-Share: เช็คผู้เล่นอื่นในแมพฟาร์มตลอดเวลา
+-- ถ้ามีคนอื่นอยู่แมพเดียวกับเรา = Teleport กลับ Lobby ทันที
+-- (สคริปต์จะถูกรันใหม่ที่ Lobby แล้วสร้างห้องโซโล่ขึ้นมาเอง)
+-- ============================================
+if game.PlaceId ~= 79546208627805 then
+    task.spawn(function()
+        local TeleportService = game:GetService("TeleportService")
+        task.wait(5) -- ให้แมพโหลดนิ่งๆ ก่อนเช็คครั้งแรก
+
+        while true do
+            local others = 0
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character and plr.Character.Parent then
+                    others += 1
+                end
+            end
+
+            if others > 0 then
+                print("[Anti-Share] " .. others .. " other player(s) in farm map - hopping back to lobby")
+                updateStatus("Player Detected - Hopping...")
+                pcall(function()
+                    TeleportService:Teleport(79546208627805, LocalPlayer)
+                end)
+                task.wait(10) -- กันยิง teleport ซ้ำรัวๆ ตอนยังไม่ย้ายเซิร์ฟ
+            end
+
+            task.wait(3)
+        end
+    end)
+end
+
+-- ============================================
+-- STEP 2: Start Auto-Eat Food (Continuous Background)
+-- ============================================
+
+print("\n[Step 2] Starting continuous auto-eat food...")
+
+task.spawn(function()
+    local Client = require(LocalPlayer.PlayerScripts.Client)
+    local MAX_HUNGER = 200
+    local MIN_HUNGER = 150
+
+    local function getHunger()
+        return LocalPlayer:GetAttribute("Hunger") or 100
     end
 
-    -- กรณีที่ 1: TargetUnit = "auto" → ใช้ Fallback logic
-    if normalizedTargetUnit == "auto" then
-        if hasTargetUnitConfig then
-            shouldDoTraitReroll = true
-            traitRerollTargetUnit = "auto"  -- ส่ง "auto" ต่อไป
-        elseif not hasTargetUnitConfig and hasSummonConfig then
-            -- Fallback: เลือก Mythic ใน Inventory
-            printStep("Checking for fallback Mythic units (auto mode)...")
+    local function getHRP()
+        local char = LocalPlayer.Character
+        return char and char:FindFirstChild("HumanoidRootPart")
+    end
 
-            local availableMythics = checkInventoryForUnits(MYTHIC_UNITS, true)
+    local function getItemPos(item)
+        if item:IsA("Model") then
+            if item.PrimaryPart then return item.PrimaryPart.Position end
+            local part = item:FindFirstChildWhichIsA("BasePart", true)
+            return part and part.Position
+        elseif item:IsA("BasePart") then
+            return item.Position
+        end
+        return nil
+    end
 
-            if #availableMythics > 0 then
-                -- เรียงตาม Priority
-                table.sort(availableMythics, function(a, b)
-                    local priorityA = 999
-                    local priorityB = 999
+    local function findClosestFood()
+        local hrp = getHRP()
+        if not hrp then return nil end
 
-                    for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
-                        if a.name == unitName then priorityA = i end
-                        if b.name == unitName then priorityB = i end
+        local closest, closestDist = nil, math.huge
+
+        for _, item in ipairs(workspace.Items:GetChildren()) do
+            local restore = item:GetAttribute("RestoreHunger")
+            if restore and restore > 0 then
+                local owner = item:GetAttribute("Owner")
+                local interaction = item:GetAttribute("Interaction")
+                local skip = false
+
+                if owner and owner ~= LocalPlayer.UserId then skip = true end
+                if interaction and interaction ~= "Item" and interaction ~= "Tool" then skip = true end
+                if LocalPlayer:GetAttribute("Class") == "Bunny" and item:GetAttribute("HasMeat") then skip = true end
+
+                if not skip then
+                    local pos = getItemPos(item)
+                    if pos then
+                        local dist = (pos - hrp.Position).Magnitude
+                        if dist < closestDist then
+                            closestDist = dist
+                            closest = item
+                        end
                     end
-
-                    return priorityA < priorityB
-                end)
-
-                local fallbackUnit = availableMythics[1].name
-                print(string.format("   Found fallback Mythic: %s", fallbackUnit))
-
-                shouldDoTraitReroll = true
-                traitRerollTargetUnit = fallbackUnit
-            else
-                warn("   ⚠️ No fallback Mythic units found")
+                end
             end
         end
-    -- กรณีที่ 2: ระบุชื่อ unit เฉพาะ (เช่น "Shadow")
-    else
-        shouldDoTraitReroll = true
-        traitRerollTargetUnit = normalizedTargetUnit  -- ใช้ชื่อที่ระบุ
+        return closest, closestDist
+    end
+
+    local function pullItem(item)
+        local hrp = getHRP()
+        if not hrp then return false end
+
+        local success = pcall(function()
+            local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+            local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+
+            StartDrag:FireServer(item)
+            task.wait(0.1)
+
+            if item:IsA("Model") then
+                item:PivotTo(CFrame.new(hrp.Position))
+            else
+                item.CFrame = CFrame.new(hrp.Position)
+            end
+
+            task.wait(0.1)
+            StopDrag:FireServer(item)
+        end)
+        return success
+    end
+
+    local function consumeItem(item)
+        if not Client.PlayerHandler.Alive then return false end
+
+        local parent = item.Parent
+        item.Parent = ReplicatedStorage.TempStorage
+
+        -- pcall กัน invoke throw (ไอเทมหาย/ย้ายระหว่าง pull): เดิม error ฆ่า coroutine ของ auto-eat ถาวร
+        -- และไอเทมค้างใน TempStorage - คืนกลับทุกกรณี
+        local ok, result = pcall(function()
+            return Client.Events.RequestConsumeItem:InvokeServer(item)
+        end)
+        if not ok or not (result and result.Success) then
+            item.Parent = parent
+            return false
+        end
+
+        return true
+    end
+
+    -- Continuous loop
+    while true do
+        local currentHunger = getHunger()
+
+        if currentHunger < MIN_HUNGER then
+            local food = findClosestFood()
+            if food then
+                pullItem(food)
+                consumeItem(food)
+            end
+        end
+
+        task.wait(0.2)
+    end
+end)
+
+print("✅ Auto-Eat Running")
+
+-- ============================================
+-- DEATH WATCHER: ตายแล้วรอ 5 วิ กดเล่นใหม่
+-- เดิมฟังแค่ Humanoid.Died ซึ่งตอนตาย "ระหว่าง Stronghold" ไม่ยอมฟิง
+-- (เกมใช้ระบบเลือด custom - เหมือนมอนที่อ่านเลือดจาก attribute "Health")
+-- จึงเช็คหลายสัญญาณพร้อมกันแบบ poll ตลอด:
+--   1) Humanoid.Health <= 0          (ตายแบบปกติ)
+--   2) attribute "Health" <= 0       บนโมเดลตัวละคร (ระบบเลือด custom)
+--   3) attribute "Dead" == true      flag ตายของเกม
+--   4) อยู่แมพฟาร์มแต่ Character หายค้าง > 2 วิ (ค้างหน้าจอเลือกเล่นใหม่)
+-- ============================================
+
+task.spawn(function()
+    local AcceptPlayAgain = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("AcceptPlayAgain")
+    local handling = false
+
+    -- รอ character แรกก่อน กัน false positive ตอนสคริปต์เพิ่งเริ่ม/เพิ่งเข้าแมพ
+    if not (LocalPlayer.Character and LocalPlayer.Character.Parent) then
+        LocalPlayer.CharacterAdded:Wait()
+    end
+
+    -- เช็คว่า "ตาย" จากหลายสัญญาณ (สัญญาณไหนเจอก่อนก็ถือว่าตาย)
+    local function isDeadNow()
+        local char = LocalPlayer.Character
+        if not (char and char.Parent) then return false end -- เคสนี้จับใน loop หลักด้วย timer
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health <= 0 then return true end
+
+        local attrHP = char:GetAttribute("Health")
+        if type(attrHP) == "number" and attrHP <= 0 then return true end
+
+        if char:GetAttribute("Dead") == true then return true end
+
+        return false
+    end
+
+    local function clickPlayAgain()
+        if handling then return end
+        handling = true
+        print("[DEATH] Character died - waiting 5s then respawning")
+        pcall(updateStatus, "Died - Play Again in 5s...")
+        task.wait(5)
+
+        -- กดซ้ำจนกว่าจะเกิดใหม่จริง (กันกดครั้งเดียวแล้วหลุด)
+        print("Clicking Play Again...")
+        for _ = 1, 15 do
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if char and char.Parent and hum and hum.Health > 0 then
+                print("[DEATH] Respawned!")
+                break
+            end
+            pcall(updateStatus, "Died - Clicking Play Again...")
+            pcall(function() AcceptPlayAgain:FireServer() end)
+            task.wait(1)
+        end
+        handling = false
+    end
+
+    -- poll เร็วๆ ตลอดเวลา - จับตายทุกรูปแบบ รวมตอนอยู่ Stronghold
+    local missingSince = nil
+    while true do
+        local char = LocalPlayer.Character
+        if char and char.Parent then
+            missingSince = nil
+            if not handling and isDeadNow() then
+                clickPlayAgain()
+            end
+        elseif game.PlaceId ~= 79546208627805 then
+            -- อยู่แมพฟาร์มแต่ Character หายไป = ตายค้างหน้าจอเล่นใหม่
+            missingSince = missingSince or os.clock()
+            if not handling and os.clock() - missingSince >= 2 then
+                missingSince = nil
+                print("[DEATH] Character missing in farm map - treating as death")
+                clickPlayAgain()
+            end
+        end
+        task.wait(0.25)
+    end
+end)
+
+print("✅ Death Watcher Running")
+
+-- ============================================
+-- HP ZERO WATCHER: เซ็ตเลือดเป็น 0 เฉพาะ "มอน StrongholdEnemy" ตลอดเวลา
+-- เช็คจาก attribute "StrongholdEnemy" บนตัวโมเดลใน workspace.Characters
+-- (ไม่กรองด้วยชื่อ/ระยะแล้ว - Juggernaut Cultist ฯลฯ มี flag นี้ = true)
+-- สำคัญ: บางตัวระบบอ่านเลือดจาก attribute "Health" บนโมเดลหลักเอง ไม่ใช่ Humanoid
+-- เลือด 0 = ตายปลอม fight loop จะตีต่อ 1 รอบให้ตายจริง
+-- ============================================
+
+-- เช็คว่าโมเดลนี้เป็นมอน Stronghold หรือไม่ (จาก attribute บนโมเดลโดยตรง)
+local function isStrongholdEnemy(model)
+    if typeof(model) ~= "Instance" or not model.Parent then return false end
+    if model:GetAttribute("StrongholdEnemy") ~= true then return false end
+    if Players:GetPlayerFromCharacter(model) then return false end
+    return true
+end
+
+-- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
+-- (Humanoid บางตัวอาจอยู่ลึกในโมเดล ใช้ recursive fallback) - คืน true ถ้าช่องทางไหนเป็น 0
+-- ข้อยกเว้น: Deer = ห้ามลดเลือดเด็ดขาด (จัดการด้วย Deer Watcher แทน)
+local function zeroEnemyHealth(model)
+    if model.Name == "Deer" then return false end
+    pcall(function() model:SetAttribute("Health", 0) end)
+
+    local zeroed = model:GetAttribute("Health") == 0
+    local hum = model:FindFirstChildOfClass("Humanoid")
+        or model:FindFirstChildWhichIsA("Humanoid", true)
+    if hum then
+        pcall(function() hum.Health = 0 end)
+        if hum.Health == 0 then zeroed = true end
+    end
+    return zeroed
+end
+
+task.spawn(function()
+    while true do
+        local chars = workspace:FindFirstChild("Characters")
+        if chars then
+            for _, model in ipairs(chars:GetChildren()) do
+                if isStrongholdEnemy(model) then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                    local attrHealth = model:GetAttribute("Health")
+                    local needsZero = (hum ~= nil and hum.Health > 0)
+                        or (attrHealth ~= nil and attrHealth > 0)
+                    if needsZero then
+                        zeroEnemyHealth(model)
+                    end
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+print("✅ HP Zero Watcher Running")
+
+-- ============================================
+-- DEER WATCHER: เจอ workspace.Characters.Deer = วาร์ปมันไปไกลๆ แล้วลบโมเดลทิ้งทันที
+-- ไม่ลดเลือด Deer (zeroEnemyHealth + findCultists ดักชื่อไว้แล้ว)
+-- ถ้า server ส่งมันกลับมาใหม่ = เจอซ้ำ วาร์ป + ลบใหม่ วนแบบนี้ไปเรื่อยๆ
+-- ============================================
+task.spawn(function()
+    while true do
+        local chars = workspace:FindFirstChild("Characters")
+        local deer = chars and chars:FindFirstChild("Deer")
+        if deer then
+            pcall(function()
+                -- วาร์ปไปไกลๆ ก่อน (สุดยอดขึ้นไป 5000 studs จากตำแหน่งเดิม)
+                local farPos
+                if deer:IsA("Model") then
+                    farPos = deer:GetPivot().Position + Vector3.new(0, 5000, 0)
+                    deer:PivotTo(CFrame.new(farPos))
+                else
+                    local root = deer:FindFirstChild("HumanoidRootPart") or deer.PrimaryPart
+                        or deer:FindFirstChildWhichIsA("BasePart")
+                    if root then
+                        farPos = root.Position + Vector3.new(0, 5000, 0)
+                        root.CFrame = CFrame.new(farPos)
+                    end
+                end
+            end)
+            task.wait(0.1)
+            pcall(function() deer:Destroy() end)
+            print("[Deer] Found Deer - warped far away & destroyed")
+        end
+        task.wait(0.2)
+    end
+end)
+
+print("✅ Deer Watcher Running")
+
+-- ============================================
+-- STEP 3: Farm Trees and Upgrade Fire
+-- ============================================
+
+print("\n[Step 3] Starting tree farming and fire upgrade...")
+updateStatus("Finding Fire...")
+
+local player = LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- respawn แล้วอัปเดตตัวแปรที่ warp ใช้ ให้เป็นของสดตลอด
+player.CharacterAdded:Connect(function(char)
+    character = char
+    humanoidRootPart = char:WaitForChild("HumanoidRootPart", 10)
+    humanoid = char:WaitForChild("Humanoid", 10)
+end)
+
+-- เปิดโล่รอบตัวตั้งแต่เริ่มฟาร์ม (weld ติดตัว ตามเราทันทีจนจบเกม)
+buildShield()
+
+local mainFire = retryUntil("find MainFire", function()
+    local map = workspace:FindFirstChild("Map")
+    local camp = map and map:FindFirstChild("Campground")
+    return camp and camp:FindFirstChild("MainFire")
+end)
+
+local firePart = retryUntil("find Fire part", function()
+    return mainFire:FindFirstChildWhichIsA("BasePart", true)
+end)
+
+local firePos = firePart.Position
+updateStatus("Finding Trees...")
+
+local trees = retryUntil("find Small Tree", function()
+    local found = {}
+    for _, item in ipairs(workspace:GetDescendants()) do
+        if item:GetAttribute("Health") and item.Name == "Small Tree" then
+            table.insert(found, item)
+        end
+    end
+    if #found > 0 then return found end
+    return nil
+end, 1)
+
+updateStatus("Sorting Trees...")
+
+table.sort(trees, function(a, b)
+    local posA = a:IsA("Model") and a:GetPivot().Position or a.Position
+    local posB = b:IsA("Model") and b:GetPivot().Position or b.Position
+    local distA = (posA - firePos).Magnitude
+    local distB = (posB - firePos).Magnitude
+    return distA < distB
+end)
+
+updateStatus("Finding Best Axe...")
+
+-- เลือกขวานสำหรับ "ตัดต้นไม้" → ใช้ WeaponResourceDamage สูงสุด
+local bestAxeChop = nil
+do
+    local inv = player:FindFirstChild("Inventory")
+    if inv then
+        local best, bestDmg = nil, -1
+        for _, tool in ipairs(inv:GetChildren()) do
+            if tool:GetAttribute("ToolName") == "GenericAxe" then
+                local dmg = tool:GetAttribute("WeaponResourceDamage") or 0
+                if dmg > bestDmg then
+                    bestDmg = dmg
+                    best = tool
+                end
+            end
+        end
+        bestAxeChop = best  -- nil ได้ถ้าไม่มี GenericAxe (RequestEquipItem(nil) จะ throw ซึ่งดีกว่า silent bug)
     end
 end
 
-if shouldDoTraitReroll and traitRerollTargetUnit then
-    printStep("Checking Trait Reroll Config...")
+-- เลือกขวานสำหรับ "ตีมอน" → ใช้ WeaponDamage สูงสุด
+local bestAxeCombat = nil
+do
+    local inv = player:FindFirstChild("Inventory")
+    if inv then
+        local best, bestDmg = nil, -1
+        for _, tool in ipairs(inv:GetChildren()) do
+            if tool:GetAttribute("ToolName") == "GenericAxe" then
+                local dmg = tool:GetAttribute("WeaponDamage") or 0
+                if dmg > bestDmg then
+                    bestDmg = dmg
+                    best = tool
+                end
+            end
+        end
+        bestAxeCombat = best
+    end
+end
 
-    local targetUnitName = traitRerollTargetUnit
-    local targetTrait = TRAIT_REROLL_CONFIG.TargetTrait
+updateStatus("Equipping Axe...")
 
-    -- เช็คว่า SUMMON_CONFIG เป็น Secret unit หรือไม่
-    local isSecretSummon = false
-    if hasSummonConfig and CHANGE_ACC_SECRETS then  -- ต้องเปิด Config ด้วย
-        for _, configUnit in ipairs(SUMMON_CONFIG) do
-            for _, secretUnit in ipairs(SECRET_UNITS) do
-                if configUnit == secretUnit then
-                    isSecretSummon = true
-                    print(string.format("   ℹ️ Config targets Secret unit '%s' + Change_Acc_Secrets enabled - will send DONE after Trait Reroll", configUnit))
+local Client = require(player.PlayerScripts.Client)
+
+local toolHandle = retryUntil("equip axe", function()
+    Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+    for _ = 1, 10 do
+        local char = LocalPlayer.Character
+        local th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then return th end
+        task.wait(0.1)
+    end
+    return nil
+end, 0.5)
+
+-- ค่าเริ่มต้นของ axe (combat = bestAxeCombat; chop loop จะ re-equip axeChop ก่อนตัดเอง)
+local axe = bestAxeCombat
+
+local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
+local ownerId = tostring(player.UserId) .. "_" .. player.UserId
+
+-- ============================================
+-- VAMPIRE CLASS HELPERS
+-- ============================================
+local vampireScythe = LocalPlayer.Inventory
+    and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
+local currentClass = LocalPlayer:GetAttribute("Class")
+local isVampire = currentClass == "Vampire"
+local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
+print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
+local myChar = workspace:WaitForChild(LocalPlayer.Name)
+
+-- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
+local function keepHPOne()
+    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 1 then
+        pcall(function() hum.Health = 1 end)
+    end
+end
+
+-- เซ็ต HP กลับ 100 (เรียกเมื่อ Lifesteal Quest เสร็จ)
+local function restoreHP()
+    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health < 100 then
+        pcall(function() hum.Health = 100 end)
+    end
+end
+
+-- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
+-- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
+-- ใช้ classStatCache (อัปเดตจาก ClassStatUpdated event) เพราะ ClassProgress มีแค่ใน Lobby
+local function isVampireLifestealDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+    if not reqs or not reqs.LifestealHealing then return true end
+    local have = classStatCache["Vampire"]
+        and classStatCache["Vampire"]["LifestealHealing"] or 0
+    return have >= reqs.LifestealHealing
+end
+
+-- เช็ค Quest DealDamage ครบไหม
+local function isVampireDealDamageDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+    if not reqs or not reqs.DealDamage then return true end
+    local have = classStatCache["Vampire"]
+        and classStatCache["Vampire"]["DealDamage"] or 0
+    return have >= reqs.DealDamage
+end
+
+-- เช็คทั้ง 2 stat ครบไหม (ใช้สำหรับ HP Watcher / keepMap / Stronghold flow)
+local function isVampireAllQuestDone()
+    return isVampireLifestealDone() and isVampireDealDamageDone()
+end
+
+-- ============================================
+-- ALIEN SCIENTIST CLASS HELPERS
+-- ============================================
+-- Pre-load Dissolve Ray tool from Inventory
+local dissolveRay = LocalPlayer.Inventory
+    and LocalPlayer.Inventory:FindFirstChild("Dissolve Ray")
+local isAlienScientist = currentClass == "Alien Scientist"
+
+-- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
+-- Remote อยู่ที่ ReplicatedStorage.RemoteEvents.RequestDissolveEnemy (ตามตัวอย่างจาก Cobalt)
+local dissolveRemote = game:GetService("ReplicatedStorage")
+    :FindFirstChild("RemoteEvents")
+    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
+
+-- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
+local function isAlienScientistAllQuestDone()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Alien Scientist"]
+        and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+    if not reqs or not reqs.Dissolves then return true end
+    local have = classStatCache["Alien Scientist"]
+        and classStatCache["Alien Scientist"]["Dissolves"] or 0
+    return have >= reqs.Dissolves
+end
+
+-- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
+-- ข้าม: Deer, Owl, ชื่อที่มีคำว่า "Cultist", NPC HP > 100, Friendly tag, Pet tag, StrongholdEnemy
+local SKIP_EXACT = {
+    ["Deer"] = true,
+    ["Owl"] = true,
+}
+local SKIP_KEYWORDS = {
+    "Cultist",  -- ข้ามทุกชื่อที่มีคำว่า Cultist (Cultist, Ice Cultist, Cultist Brute, etc.)
+}
+local function shouldSkipName(name)
+    if SKIP_EXACT[name] then return true end
+    for _, keyword in ipairs(SKIP_KEYWORDS) do
+        if string.find(name, keyword, 1, true) then  -- 1, true = plain text (case-sensitive)
+            return true
+        end
+    end
+    return false
+end
+
+-- ============================================
+-- BIG GAME HUNTER CLASS HELPERS
+-- ============================================
+-- (อ้างอิงจาก decompile ของ BigGameHunterClass module)
+-- ใช้ axe ตีมอนที่ดรอปของ BGH กินได้ (Wolf, Alpha Wolf, Bear, Polar Bear, Boar,
+--  Arctic Fox, Mammoth, Scorpion, Blue Frog, Bunny) — skip Cultist ทั้งหมด
+-- ถ้า WolfKills ยังไม่ครบ → ตีเฉพาะ "Wolf" ธรรมดาก่อน
+--
+-- *** ประกาศหลัง shouldSkipName เพื่อให้ upvalue resolve ถูกต้อง
+--     (locals เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers) ***
+_G.BGH = _G.BGH or {}
+local BGH = _G.BGH
+
+BGH.isBigGameHunter = currentClass == "Big Game Hunter"
+
+-- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
+-- ไม่รวม Mammoth (user ไม่ต้องการตี/เก็บ Mammoth Tusk)
+BGH.MONSTER_PRIORITY = {
+    "Wolf", "Scorpion", "Alpha Wolf", "Bear",
+    "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
+}
+BGH.PRIORITY_INDEX = {}
+for i, n in ipairs(BGH.MONSTER_PRIORITY) do
+    BGH.PRIORITY_INDEX[n] = i
+end
+
+-- Pelt types ตามลำดับความสำคัญ (ใช้เช็ค Complete ใน PeltList)
+BGH.PELT_ORDER = {
+    "Wolf Pelt",
+    "Scorpion Shell",
+    "Alpha Wolf Pelt",
+    "Bear Pelt",
+    "Polar Bear Pelt",
+    "Boar Tusk",
+    "Arctic Fox Pelt",
+    "Blue Frog Leg",
+    "Bunny Foot",
+}
+
+-- Pelt names ที่ BigGameHunterClass กินได้ (จาก decompile u19)
+-- ไม่รวม Mammoth Tusk (user ไม่ต้องการ)
+BGH.PELT_ITEMS = {
+    ["Bunny Foot"] = true,
+    ["Wolf Pelt"] = true,
+    ["Arctic Fox Pelt"] = true,
+    ["Alpha Wolf Pelt"] = true,
+    ["Bear Pelt"] = true,
+    ["Polar Bear Pelt"] = true,
+    ["Scorpion Shell"] = true,
+    ["Boar Tusk"] = true,
+    ["Blue Frog Leg"] = true,
+}
+-- Skip Cultist King Antler (user: "ไม่สนใจมัน")
+BGH.PELT_SKIP = {
+    ["Cultist King Antler"] = true,
+}
+
+-- สร้าง functions ทั้งหมดใน do block เพื่อไม่ให้ locals ไปนับใน outer chunk
+do
+
+-- เช็ค Quest ConsumePelt + WolfKills ครบทั้งคู่ (Lv ถัดไป)
+-- ลอง cache ก่อน → fallback อ่านจาก ClassProgress folder (server replicate)
+BGH.isBigGameHunterAllQuestDone = function()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Big Game Hunter"]
+        and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+    if not reqs then return true end
+
+    local function getStat(statKey)
+        -- 1. ลอง classStatCache ก่อน (real-time จาก ClassStatUpdated)
+        if classStatCache["Big Game Hunter"] and classStatCache["Big Game Hunter"][statKey] then
+            return classStatCache["Big Game Hunter"][statKey]
+        end
+        -- 2. Fallback: อ่านจาก ClassProgress folder
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        local folder = cp and cp:FindFirstChild("Big Game Hunter")
+        if folder then
+            return folder:GetAttribute(statKey) or 0
+        end
+        return 0
+    end
+
+    local have_consume = getStat("ConsumePelt")
+    local have_wolves = getStat("WolfKills")
+    return have_consume >= (reqs.ConsumePelt or 0)
+        and have_wolves >= (reqs.WolfKills or 0)
+end
+
+-- เช็ค quest WolfKills ของ Lv ถัดไป (ใช้สำหรับ Wolf-only gate)
+BGH.isWolfKillsQuestDone = function()
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local reqs = CLASS_QUESTS["Big Game Hunter"]
+        and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+    if not reqs or not reqs.WolfKills then return true end
+    local have = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+    return have >= reqs.WolfKills
+end
+
+-- คืน list ของ monster names ที่ยัง active (PeltList ยังไม่ Complete)
+-- ถ้า PeltList ยังไม่ replicate → fallback คืน priority list ทั้งหมด
+-- ลำดับตาม BGH.PELT_ORDER (Wolf → Scorpion → ... → Bunny)
+BGH.getActivePeltTypes = function()
+    local peltToMonster = {
+        ["Wolf Pelt"] = "Wolf",
+        ["Scorpion Shell"] = "Scorpion",
+        ["Alpha Wolf Pelt"] = "Alpha Wolf",
+        ["Bear Pelt"] = "Bear",
+        ["Polar Bear Pelt"] = "Polar Bear",
+        ["Boar Tusk"] = "Boar",
+        ["Arctic Fox Pelt"] = "Arctic Fox",
+        ["Blue Frog Leg"] = "Blue Frog",
+        ["Bunny Foot"] = "Bunny",
+    }
+
+    local PeltList = LocalPlayer:FindFirstChild("PeltList")
+    local active = {}
+
+    if not PeltList then
+        for _, peltName in ipairs(BGH.PELT_ORDER) do
+            table.insert(active, peltToMonster[peltName])
+        end
+        return active
+    end
+
+    for _, peltName in ipairs(BGH.PELT_ORDER) do
+        local peltObj = PeltList:FindFirstChild(peltName)
+        if peltObj then
+            -- Attribute "Complete" จะปรากฏเมื่อกินครบ limit เท่านั้น
+            -- ก่อนหน้านั้น attribute เป็น nil → ถือว่ายัง active
+            local complete = peltObj:GetAttribute("Complete") == true
+            if not complete then
+                table.insert(active, peltToMonster[peltName])
+            end
+            -- ถ้า Complete = true → ไม่ใส่ใน active (skip — เลิกตี type นี้)
+        else
+            -- ไม่มีใน PeltList → น่าจะ unlock แล้ว (ถือว่า active)
+            table.insert(active, peltToMonster[peltName])
+        end
+    end
+
+    return active
+end
+
+-- BGH-specific monster finder:
+-- - skip "Cultist*" (ใช้ shouldSkipName เดิม)
+-- - skip StrongholdEnemy
+-- - **ไม่ skip HP > 100** (BGH ตี Bear/Polar Bear ได้)
+-- - **ไม่ skip** Friendly/Pet/Ally (BGH ตีได้ทุกอย่างที่ดรอปของได้)
+-- - WolfKills gate: ถ้ายังไม่ครบ → คืน Wolf ธรรมดาก่อนตัวเดียว (override PeltList)
+-- - PeltList filter: ตีเฉพาะ monster ที่ PeltList ยังไม่ Complete
+-- - เรียงตาม BGH.MONSTER_PRIORITY
+BGH.findMonsters = function()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+
+    local wolfOnlyMode = not BGH.isWolfKillsQuestDone()
+    local activeMonsters = BGH.getActivePeltTypes()
+
+    for _, model in ipairs(chars:GetChildren()) do
+        if not shouldSkipName(model.Name) then
+            if model:GetAttribute("StrongholdEnemy") ~= true then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                    or model:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Parent and hum.Health > 0 then
+                    if BGH.PRIORITY_INDEX[model.Name] then
+                        if wolfOnlyMode then
+                            -- Wolf gate: override PeltList (ตีเฉพาะ Wolf)
+                            if model.Name == "Wolf" then
+                                table.insert(list, model)
+                            end
+                        else
+                            -- filter ตาม PeltList active
+                            if table.find(activeMonsters, model.Name) then
+                                table.insert(list, model)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not wolfOnlyMode then
+        table.sort(list, function(a, b)
+            return (BGH.PRIORITY_INDEX[a.Name] or 999) < (BGH.PRIORITY_INDEX[b.Name] or 999)
+        end)
+    end
+    return list
+end
+
+-- กิน pelt ตัวเดียว (pattern เดียวกับ decompile AttemptConsumePelt)
+local function consumeBGHPelt(peltModel)
+    if not (peltModel and peltModel.Parent) then return false end
+    local name = peltModel.Name
+    if not BGH.PELT_ITEMS[name] or BGH.PELT_SKIP[name] then return false end
+    pcall(function() peltModel.Parent = ReplicatedStorage.TempStorage end)
+    pcall(function()
+        Client.Events.RequestBGHConsumePelt:FireServer(peltModel)
+    end)
+    return true
+end
+
+-- หา pelt ใกล้ origin ที่กินได้
+local function findBGHPelts(origin, radius)
+    local found = {}
+    radius = radius or 50
+    pcall(function()
+        local items = workspace:FindFirstChild("Items")
+        if not items then return end
+        for _, item in ipairs(items:GetChildren()) do
+            if BGH.PELT_ITEMS[item.Name] and not BGH.PELT_SKIP[item.Name] then
+                local pos
+                if item:IsA("Model") then
+                    pos = item.PrimaryPart and item.PrimaryPart.Position or item:GetPivot().Position
+                elseif item:IsA("BasePart") then
+                    pos = item.Position
+                end
+                if pos and (pos - origin).Magnitude <= radius then
+                    table.insert(found, item)
+                end
+            end
+        end
+    end)
+    return found
+end
+
+-- ดึง pelt มาใกล้ตัว (pattern เดียวกับ pullItem ใน Auto-Eat)
+local function pullBGHPelt(peltModel)
+    local hrp = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp or not (peltModel and peltModel.Parent) then return false end
+
+    local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+    local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+    if not (StartDrag and StopDrag) then return false end
+
+    local ok = pcall(function()
+        StartDrag:FireServer(peltModel)
+        task.wait(0.1)
+        if peltModel:IsA("Model") then
+            peltModel:PivotTo(CFrame.new(hrp.Position))
+        else
+            peltModel.CFrame = CFrame.new(hrp.Position)
+        end
+        task.wait(0.1)
+        StopDrag:FireServer(peltModel)
+    end)
+    return ok
+end
+
+-- กิน pelt 1 ตัว พร้อม retry: กินตรงๆ → ถ้า fail (ConsumePelt stat ไม่ขยับ) → pull มาใกล้ → กินใหม่
+-- คืน true ถ้ากินสำเร็จ (stat เพิ่มขึ้น) — false ถ้า 2 tries หมดแล้วยังไม่ได้
+local function consumeBGHPeltWithRetry(peltModel)
+    if not (peltModel and peltModel.Parent) then return false end
+    local name = peltModel.Name
+    if not BGH.PELT_ITEMS[name] or BGH.PELT_SKIP[name] then return false end
+
+    -- เช็ค ConsumePelt stat ก่อน
+    local have_before = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+
+    -- Try 1: กินตรงๆ
+    consumeBGHPelt(peltModel)
+    task.wait(0.5)
+    local have_after = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+    if have_after > have_before then
+        return true
+    end
+
+    -- Try 2: pull มาใกล้ตัว แล้วกินใหม่
+    if not (peltModel and peltModel.Parent) then
+        return false  -- หายไปแล้ว (server อาจ consume สำเร็จหลัง delay)
+    end
+    pullBGHPelt(peltModel)
+    task.wait(0.3)
+    consumeBGHPelt(peltModel)
+    task.wait(0.5)
+    have_after = classStatCache["Big Game Hunter"]
+        and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+    return have_after > have_before
+end
+
+-- กิน pelt ทุกตัวใกล้ origin (พร้อม pull retry)
+BGH.consumePeltsNear = function(origin, radius)
+    local pelts = findBGHPelts(origin, radius)
+    local eaten = 0
+    for _, p in ipairs(pelts) do
+        if consumeBGHPeltWithRetry(p) then
+            eaten = eaten + 1
+        end
+    end
+    return eaten
+end
+
+end  -- end of BGH do block
+
+local HP_SKIP_THRESHOLD = 100  -- ข้าม NPC ที่ HP > 100 (Mossy Mammoth, etc.)
+
+local function findNightMonsters()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+
+    for _, model in ipairs(chars:GetChildren()) do
+        -- ข้ามชื่อที่ห้ามตี (exact + keywords)
+        if not shouldSkipName(model.Name) then
+            -- ข้าม Cultist (StrongholdEnemy)
+            if model:GetAttribute("StrongholdEnemy") ~= true then
+                -- ข้าม Friendly/Pet tag
+                local hasFactionTag = model:HasTag("Friendly")
+                    or model:HasTag("Pet")
+                    or model:HasTag("Ally")
+                if not hasFactionTag then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                        or model:FindFirstChildWhichIsA("Humanoid", true)
+                    if hum and hum.Parent and hum.Health > 0 then
+                        -- ข้าม NPC ที่ HP > threshold (Mossy Mammoth, Bear, Hellephant, etc.)
+                        if hum.Health > HP_SKIP_THRESHOLD then
+                            continue
+                        end
+                        table.insert(list, model)
+                    end
+                end
+            end
+        end
+    end
+    return list
+end
+
+-- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
+local function checkAnyCultistSpawned()
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return false end
+    for _, c in ipairs(chars:GetChildren()) do
+        if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+    end
+    return false
+end
+
+local fireFrame = retryUntil("find MainFire BillboardGui", function()
+    local center = mainFire:FindFirstChild("Center")
+    local gui = center and center:FindFirstChild("BillboardGui")
+    local frame = gui and gui:FindFirstChild("Frame")
+    if frame and frame:FindFirstChild("TextLabel") and frame:FindFirstChild("RealTimer") then
+        return frame
+    end
+    return nil
+end, 0.3)
+
+local textLabel = fireFrame.TextLabel
+local timerLabel = fireFrame.RealTimer
+
+local maxLevel = 7
+
+local function getCurrentLevel()
+    local fireText = textLabel.Text
+
+    if fireText:find("FIRE FULLY UPGRADED") or fireText:find("MAP FULLY REVEALED") then
+        return maxLevel
+    end
+
+    if fireText == "" or fireText:match("^%s*$") then
+        return maxLevel
+    end
+
+    local levelMatch = string.match(fireText, "level (%d+)")
+    return tonumber(levelMatch) or 1
+end
+
+-- weak table — Item object ถูก destroy → key หาย → ดึงใหม่ได้
+local warpedItems = setmetatable({}, {__mode = "k"})
+local collectedChildren = {}
+
+local CRAFTING_BENCH_ITEMS = {
+    ["Chair"] = true,
+    -- Bolt/Broken Fan/Microwave/Log/Old Radio/Sheet Metal → ดึงเฉพาะตอน Step 3.5 Wood chopping (manual)
+}
+-- ของที่ดึงไปกองไฟ (เฉพาะตอนบิน)
+local FIRE_FUEL_ITEMS = {
+    ["Fuel Canister"] = true,
+    ["Oil Barrel"] = true,
+    ["Coal"] = true,
+    ["Log"] = true,  -- Log ดึงไปกองไฟ (ไม่ใช่ CraftingBench)
+}
+local CRAFTING_BENCH_SKIP_FIRE = {}
+
+local function getCraftingTouchZone()
+    local bench = workspace:FindFirstChild("Map")
+        and workspace.Map:FindFirstChild("Campground")
+        and workspace.Map.Campground:FindFirstChild("CraftingBench")
+    return bench and bench:FindFirstChild("TouchZone")
+end
+
+local function warpItemToTarget(item, targetPos)
+    if warpedItems[item] then return end
+
+    task.spawn(function()
+        pcall(function()
+            local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+            local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+
+            StartDrag:FireServer(item)
+            task.wait(0.1)
+
+            if item:IsA("Model") then
+                item:PivotTo(CFrame.new(targetPos))
+            else
+                item.CFrame = CFrame.new(targetPos)
+            end
+
+            task.wait(0.1)
+            StopDrag:FireServer(item)
+        end)
+    end)
+    warpedItems[item] = true
+end
+
+-- ดึง item ทีละชิ้นไปยังตำแหน่งเป้าหมาย (sequential — รอ Drag เสร็จก่อนตัวถัดไป)
+-- Pattern เดียวกับ pullBGHPelt: RequestStartDraggingItem → PivotTo → StopDraggingItem
+local function dragItemToTarget(item, targetPos)
+    if warpedItems[item] then return end
+    if not (item and item.Parent) then return end
+
+    local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
+    local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
+    if not (StartDrag and StopDrag) then return end
+
+    pcall(function()
+        StartDrag:FireServer(item)
+        task.wait(0.1)
+        if item:IsA("Model") then
+            item:PivotTo(CFrame.new(targetPos))
+        else
+            item.CFrame = CFrame.new(targetPos)
+        end
+        task.wait(0.1)
+        StopDrag:FireServer(item)
+    end)
+    warpedItems[item] = true
+end
+
+-- ดึง item ไปยัง CraftingBench (เรียก dragItemToTarget แบบ sequential)
+local function dragItemToCraftingBench(item, craftPos)
+    dragItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
+end
+
+local function warpItemToFire(item)
+    warpItemToTarget(item, firePos + Vector3.new(0, 10, 0))
+end
+
+local LOST_CHILD_NAMES = {
+    "Lost Child",
+    "Lost Child2",
+    "Lost Child3",
+    "Lost Child4",
+}
+local LOST_CHILD_TOTAL = #LOST_CHILD_NAMES
+
+-- เช็คสถานะเด็กจาก attribute (อ้างอิงจาก decompile ของเกม: KidClueClient/_DinoKidQuestClient/GiveKidItemClient)
+-- ยังไม่ช่วย = Lost=true + Interaction="CanBeBagged" / ช่วยแล้ว = Lost=false, Interaction="Befriend"..KidId (+Rescued/Friending)
+-- สำคัญ: เด็กที่ช่วยแล้ว "โมเดลไม่หายไปไหน" แค่พลิก attribute - ยิง prompt ใส่ = กด "Ask for Clue" แล้วเกมเด้ง pop-up รัวๆ
+local function kidAlreadyRescued(c)
+    if c:GetAttribute("Lost") == false then return true end
+    local interaction = c:GetAttribute("Interaction")
+    if type(interaction) == "string" and string.sub(interaction, 1, 8) == "Befriend" then return true end
+    return c:GetAttribute("Rescued") == true or c:GetAttribute("Friending") == true
+end
+
+local function kidStillLost(c)
+    return c:GetAttribute("Lost") == true and c:GetAttribute("Interaction") == "CanBeBagged"
+end
+
+local function collectLostChildren()
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return end
+
+    for _, name in ipairs(LOST_CHILD_NAMES) do
+        if not collectedChildren[name] then
+            local c = chars:FindFirstChild(name)
+            if c then
+                if kidAlreadyRescued(c) then
+                    -- mark ว่าจบแล้ว (ปลอดภัย: ตัวที่ช่วยแล้วไม่มีวันอยู่ใน ItemBag) - ห้ามยิง prompt
+                    collectedChildren[name] = true
+                elseif kidStillLost(c) then
+                    local head = c:FindFirstChild("Head")
+                    local attachment = head and head:FindFirstChild("ProximityAttachment")
+                    local prompt = attachment and attachment:FindFirstChild("ProximityInteraction")
+                    if prompt then
+                        -- วาร์ปเราไปหาเด็ก แล้วยิง prompt ซ้ำจนกว่าเด็กจะหาย หรือสถานะเปลี่ยน (ถูกช่วยแล้ว)
+                        local attempts = 0
+                        while chars:FindFirstChild(name) and kidStillLost(c) and attempts < 10 do
+                            -- ดึง hrp ใหม่ทุก iteration กันตาย/เกิดใหม่กลางลูป (part เก่าถูกทำลาย = วาร์ปเงียบ)
+                            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            local root2 = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
+                            if hrp and root2 then
+                                hrp.CFrame = CFrame.new(root2.Position + Vector3.new(0, 2, 0))
+                                task.wait(0.1)
+                                if prompt.Enabled then
+                                    pcall(function()
+                                        if typeof(fireproximityprompt) == "function" then
+                                            fireproximityprompt(prompt, 0, true)
+                                        else
+                                            prompt.HoldDuration = 0
+                                            prompt:InputHoldBegin()
+                                            task.wait(0.05)
+                                            prompt:InputHoldEnd()
+                                        end
+                                    end)
+                                end
+                            end
+                            attempts += 1
+                            task.wait(0.2)
+                        end
+                        if not chars:FindFirstChild(name) then
+                            collectedChildren[name] = true
+                            local count = 0
+                            for _ in pairs(collectedChildren) do count += 1 end
+                            print(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
+                            updateStatus(string.format("Lost Children: %d/%d", count, LOST_CHILD_TOTAL))
+                        end
+                    end
+                end
+                -- attribute ยังไม่ยืนยันทั้งสองทาง (ยังไม่ sync) = ข้ามรอบนี้ ไม่ mark ไม่กด
+            end
+        end
+    end
+end
+
+local function allChildrenCollected()
+    for _, name in ipairs(LOST_CHILD_NAMES) do
+        if not collectedChildren[name] then return false end
+    end
+    return true
+end
+
+local function dropAllLostChildren(retryDepth)
+    retryDepth = retryDepth or 0 -- เพดานความลึกของ retry: เดิมเรียกซ้ำไม่จำกัด (ลิมิต 5 รอบใน for ไม่มีวันทำงานจริง)
+
+    -- Inner function: ปล่อยเด็ก 1 รอบ (เรียกซ้ำได้โดยไม่ recursive ทั้งฟังก์ชัน)
+    local function dropOneRound()
+        local inv = LocalPlayer:FindFirstChild("Inventory")
+        local oldSack = inv and inv:FindFirstChild("Old Sack")
+        if not oldSack then
+            warn("Cannot drop children: Old Sack not found in inventory")
+            return 0, {}
+        end
+
+        -- วาร์ปไปบนกองไฟ 10 studs (มุมเดียว — ตรงบน)
+        local targetPos = firePos + Vector3.new(0, 10, 0)
+        local warped = false
+        -- Warp + check วนจนกว่าใกล้กองไฟ ≤ 20 studs
+        for attempt = 1, 10 do
+            for _ = 1, 5 do
+                pcall(function()
+                    humanoidRootPart.CFrame = CFrame.new(targetPos)
+                end)
+                task.wait(0.3)
+                if (humanoidRootPart.Position - targetPos).Magnitude < 10 then
+                    warped = true
                     break
                 end
             end
-            if isSecretSummon then break end
+            if warped then
+                if (humanoidRootPart.Position - firePos).Magnitude <= 20 then
+                    break  -- ใกล้พอแล้ว → drop ได้
+                end
+                warped = false  -- ไกลเกิน 20 → ลองใหม่
+            end
+            task.wait(1)  -- รอ BodyVelocity settle
         end
-    end
 
-    -- ถ้า TargetUnit เป็น "auto" → เลือกตาม Priority
-    if targetUnitName == "auto" then
-        if hasSummonConfig and hasTargetUnitConfig then
-            -- เลือกจาก SummonConfig ที่ได้
-            local availableUnits = checkInventoryForUnits(SUMMON_CONFIG, true)
+        if not warped then
+            warn("Failed to warp close to campfire - last distance:", (humanoidRootPart.Position - firePos).Magnitude)
+            return 0, {}
+        end
 
-            if #availableUnits > 0 then
-                -- เรียงตาม Priority
-                table.sort(availableUnits, function(a, b)
-                    local priorityA = 999
-                    local priorityB = 999
+        task.wait(1.5)
 
-                    for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
-                        if a.name == unitName then priorityA = i end
-                        if b.name == unitName then priorityB = i end
-                    end
+        -- equip sack ก่อนปล่อย
+        Client.InventoryHandler.RequestEquipItem(oldSack)
+        task.wait(0.3)
+        inv = LocalPlayer:FindFirstChild("Inventory")
+        oldSack = inv and inv:FindFirstChild("Old Sack")
+        if not oldSack then
+            warn("Old Sack disappeared after equip attempt")
+            return 0, {}
+        end
 
-                    return priorityA < priorityB
+        local BagDrop = ReplicatedStorage.RemoteEvents.RequestBagDropItem
+        local droppedCount = 0
+        local droppedNames = {}
+        for name in pairs(collectedChildren) do
+            table.insert(droppedNames, name)
+        end
+
+        -- ปล่อยเด็กทีละตัวด้วยดีเลย์
+        for name in pairs(collectedChildren) do
+            local bag = LocalPlayer:FindFirstChild("ItemBag")
+            local bagChild = bag and bag:FindFirstChild(name)
+            if bagChild then
+                pcall(function()
+                    BagDrop:FireServer(oldSack, bagChild, false)
                 end)
+                droppedCount = droppedCount + 1
+                task.wait(0.2)
+            end
+        end
 
-                targetUnitName = availableUnits[1].name
-                print(string.format("   Auto-selected: %s (Priority)", targetUnitName))
-            else
-                -- ไม่เจอ Config units → ลอง Fallback ไป Mythic
-                warn("   ⚠️ No summon config units found in inventory")
+        task.wait(1)
 
-                -- ถ้าเป็น Secret Summon + Change_Acc_Secrets → ใช้ Mythic Fallback
-                if isSecretSummon and CHANGE_ACC_SECRETS then
-                    print("   ℹ️ Checking Mythic fallback for Trait Reroll...")
-                    local mythicUnits = checkInventoryForUnits(MYTHIC_UNITS, true)
-
-                    if #mythicUnits > 0 then
-                        -- เรียงตาม Priority
-                        table.sort(mythicUnits, function(a, b)
-                            local priorityA = 999
-                            local priorityB = 999
-
-                            for i, unitName in ipairs(TRAIT_REROLL_PRIORITY) do
-                                if a.name == unitName then priorityA = i end
-                                if b.name == unitName then priorityB = i end
-                            end
-
-                            return priorityA < priorityB
-                        end)
-
-                        targetUnitName = mythicUnits[1].name
-                        print(string.format("   ✅ Auto-selected Mythic fallback: %s (Priority)", targetUnitName))
-                    else
-                        targetUnitName = nil
-                    end
-                else
-                    targetUnitName = nil
+        -- ตรวจสอบว่ากระเป๋าว่างจริงก่อนล้างตาราง
+        local bag = LocalPlayer:FindFirstChild("ItemBag")
+        local remainingChildren = 0
+        if bag then
+            for _, child in pairs(bag:GetChildren()) do
+                if child:IsA("Model") and table.find(LOST_CHILD_NAMES, child.Name) then
+                    remainingChildren = remainingChildren + 1
                 end
             end
+        end
+
+        if remainingChildren == 0 then
+            collectedChildren = {}
         else
-            warn("   ⚠️ Cannot use 'auto' without SummonConfig or target unit")
-            targetUnitName = nil
+            warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
+        end
+
+        return droppedCount, droppedNames
+    end
+
+    -- ปล่อยรอบแรก
+    local droppedCount, droppedNames = dropOneRound()
+
+    -- เช็คสถานะ Lost หลังปล่อย: รอ 5 วิ ถ้าเด็กตัวไหนยังขึ้น Lost = เกมไม่ยอมรับการปล่อย
+    -- ให้ไปเก็บใหม่แล้วปล่อยรอบใหม่ที่กองไฟ (สูงสุด 5 รอบ กันวนไม่รู้จบ)
+    if droppedCount > 0 and #droppedNames > 0 then
+        for attempt = 1, 5 do
+            task.wait(5)
+
+            local charsNow = workspace:FindFirstChild("Characters")
+            local stillLost = {}
+            if charsNow then
+                for _, name in ipairs(droppedNames) do
+                    local c = charsNow:FindFirstChild(name)
+                    if c and c:GetAttribute("Lost") == true then
+                        table.insert(stillLost, name)
+                    end
+                end
+            end
+
+            if #stillLost == 0 then
+                if attempt > 1 then
+                    print("[LostChild] All dropped children saved (Lost cleared)")
+                end
+                break
+            end
+
+            warn("[LostChild] Still Lost after 5s: " .. table.concat(stillLost, ", ")
+                .. " - recollecting & re-dropping (attempt " .. attempt .. "/5)")
+            updateStatus("Lost Child still Lost - recollecting...")
+
+            -- เคลียร์รายชื่อที่ยัง Lost ออกจากตาราง เพื่อให้ collectLostChildren เก็บใหม่ได้
+            for _, name in ipairs(stillLost) do
+                collectedChildren[name] = nil
+            end
+
+            -- เช็ค retryDepth ก่อนวนรอบใหม่
+            if retryDepth >= 5 then
+                warn("[LostChild] Retry depth limit (5) reached - giving up for this round")
+                break
+            end
+
+            -- เก็บเด็กกลับเข้า Inventory (ไม่ return — ปล่อยอีกรอบใน loop นี้)
+            collectLostChildren()
+
+            -- ปล่อยอีกรอบ (อยู่ใน loop เดิม ไม่ recursive)
+            local redroppedCount, redroppedNames = dropOneRound()
+            if redroppedCount == 0 or #redroppedNames == 0 then
+                warn("[LostChild] Re-drop failed, will try again next iteration")
+                -- ใช้ droppedNames เดิมสำหรับเช็ครอบหน้า
+            else
+                droppedNames = redroppedNames
+            end
         end
     end
 
-    if targetUnitName then
-        -- เช็คว่ามีตัวที่ต้องการหรือไม่
-        local unitsWithTrait = checkInventoryForUnits({targetUnitName}, true)
+    -- re-equip axe หลังปล่อย
+    Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+end
 
-        if #unitsWithTrait > 0 then
-            -- เลือกตัวที่ดีที่สุดสำหรับสุ่ม Trait (เลือก Shiny ก่อน)
-            local unitInfo = selectBestUnitForReroll(unitsWithTrait)
-            local currentTrait = unitInfo.trait
+local platform = Instance.new("Part")
+platform.Size = Vector3.new(10, 1, 10)
+platform.Anchored = true
+platform.CanCollide = true
+platform.Transparency = 1
+platform.Parent = workspace
 
-            print(string.format("   Selected unit: %s (Trait: %s, Shiny: %s, Full Key: %s)",
-                unitInfo.name, currentTrait, tostring(unitInfo.isShiny or false), unitInfo.fullKey))
+-- (กำแพงป้องกันเดิมถูกแทนด้วย GLOBAL SHIELD แบบ weld ติดตัวด้านบนแล้ว)
+local airHeight = 20
+local treeIndex = 1
 
-            -- เช็คว่ามี Trait ที่ต้องการแล้วหรือไม่
-            local hasTargetTrait = false
+local function flyAndWarpItems()
+    updateStatus("Flying & Warping Items...")
 
-            if not targetTrait then
-                -- nil = สุ่มแบบสุ่ม (ได้อะไรก็ได้ที่ไม่ใช่ None)
-                hasTargetTrait = (currentTrait ~= "None")
-            elseif type(targetTrait) == "table" then
-                if #targetTrait == 0 then
-                    -- {} = empty table → ไม่ต้องสุ่ม Trait
-                    hasTargetTrait = true
+    for radius = 20, 1000, 40 do
+        local steps = 50 + math.floor(radius / 40) * 5
+        local circumference = 2 * math.pi * radius
+        local speed = 1000
+        local duration = circumference / speed
+
+        for i = 0, steps do
+            -- ถ้า Level ถึง 7 และเก็บเด็กครบแล้ว → หยุดบิน
+            if getCurrentLevel() >= maxLevel and allChildrenCollected() then
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                return true
+            end
+            -- ถ้า Level ถึง 7 แต่เด็กยังไม่ครบ → บินต่อ radius ถัดไป
+
+            local alpha = i / steps
+            local angle = alpha * math.pi * 2
+            local offsetX = math.cos(angle) * radius
+            local offsetZ = math.sin(angle) * radius
+            local circlePos = firePos + Vector3.new(offsetX, airHeight, offsetZ)
+
+            humanoidRootPart.CFrame = CFrame.new(circlePos)
+            platform.Position = circlePos - Vector3.new(0, 3, 0)
+
+            for _, item in ipairs(workspace.Items:GetChildren()) do
+                if not warpedItems[item] and item.Name ~= "Sapling" then
+                    local name = item.Name
+                    -- Whitelist: ดึงเฉพาะที่อนุญาต (กัน Structure parts จาก Cabin/Model/Part)
+                    local isAllowed = CRAFTING_BENCH_ITEMS[name]
+                        or FIRE_FUEL_ITEMS[name]
+                        or (item:GetAttribute("Scrappable")
+                            and name ~= "Part" and name ~= "Cabin" and name ~= "Model"
+                            and name ~= "woodplanks")
+                    -- Slept == true เท่านั้นที่ดึงได้ ยกเว้น Log (Log ดึงได้เลยไม่ต้องเช็ค)
+                    local canPull = isAllowed and (name == "Log" or item:GetAttribute("Slept") == true)
+                    if canPull then
+                        -- CraftingBench
+                        if CRAFTING_BENCH_ITEMS[name] then
+                            local tz = getCraftingTouchZone()
+                            local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                                or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                            if tzPos then
+                                warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                            end
+                        -- กองไฟ
+                        elseif FIRE_FUEL_ITEMS[name] then
+                            warpItemToFire(item)
+                        -- Scrappable (Scrap) แต่ไม่ใช่ Structure
+                        else
+                            local tz = getCraftingTouchZone()
+                            local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                                or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                            if tzPos then
+                                warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                            end
+                        end
+                    end
+                end
+            end
+
+            collectLostChildren()
+
+            task.wait(duration / steps)
+        end
+    end
+
+    -- (silent — ไม่ print Flight complete เพราะถี่เกินไป)
+
+    -- Warp back to fire after flight
+    humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+    platform.Position = firePos + Vector3.new(5, 0, 0)
+    task.wait(0.1)
+
+    -- ดึงของทุก item ใน workspace.Items (ไม่จำกัดระยะ) — กันเคส item เกิดหลัง fly scan
+    for _, item in ipairs(workspace.Items:GetChildren()) do
+        if not warpedItems[item] and item.Name ~= "Sapling" then
+            local name = item.Name
+            -- Whitelist: ดึงเฉพาะที่อนุญาต (กัน Structure parts จาก Cabin/Model/Part)
+            local isAllowed = CRAFTING_BENCH_ITEMS[name]
+                or FIRE_FUEL_ITEMS[name]
+                or (item:GetAttribute("Scrappable")
+                    and name ~= "Part" and name ~= "Cabin" and name ~= "Model"
+                    and name ~= "woodplanks")
+            -- Slept == true เท่านั้นที่ดึงได้ ยกเว้น Log (Log ดึงได้เลยไม่ต้องเช็ค)
+            local canPull = isAllowed and (name == "Log" or item:GetAttribute("Slept") == true)
+            if canPull then
+                -- CraftingBench
+                if CRAFTING_BENCH_ITEMS[name] then
+                    local tz = getCraftingTouchZone()
+                    local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                        or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                    if tzPos then
+                        warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                    end
+                -- กองไฟ
+                elseif FIRE_FUEL_ITEMS[name] then
+                    warpItemToFire(item)
+                -- Scrappable (Scrap) แต่ไม่ใช่ Structure
                 else
-                    -- เช็คว่ามีใน list หรือไม่
-                    for _, trait in ipairs(targetTrait) do
-                        if currentTrait == trait then
-                            hasTargetTrait = true
+                    local tz = getCraftingTouchZone()
+                    local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                        or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                    if tzPos then
+                        warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                    end
+                end
+            end
+        end
+    end
+
+    -- ถ้าเก็บเด็กไม่ครบ ให้บินวนหาใหม่อีกรอบก่อน drop
+    if not allChildrenCollected() then
+        print("[LostChild] Not all found (" .. LOST_CHILD_TOTAL .. " needed) - searching again with extended range...")
+        updateStatus("Searching Lost Children (extended)...")
+        for radius = 20, 1500, 40 do
+            -- ต้องบินครบรอบก่อน ไม่หยุดกลางคัน
+            local steps = 60
+            local circumference = 2 * math.pi * radius
+            local speed = 1000
+            local duration = circumference / speed
+            for i = 0, steps do
+                local angle = (i / steps) * math.pi * 2
+                local circlePos = firePos + Vector3.new(math.cos(angle) * radius, airHeight, math.sin(angle) * radius)
+                humanoidRootPart.CFrame = CFrame.new(circlePos)
+                platform.Position = circlePos - Vector3.new(0, 3, 0)
+                collectLostChildren()
+                task.wait(duration / steps)
+            end
+            -- เช็คหลังครบรอบเท่านั้น
+            if allChildrenCollected() then break end
+        end
+    end
+
+    dropAllLostChildren()
+
+    -- Timer check ถูกลบออกแล้ว — ทำจนถึง level 7 เท่านั้น
+    return true
+end
+
+updateStatus("Initial Flight...")
+flyAndWarpItems()
+
+local currentLevel = getCurrentLevel()
+task.wait(0.3)
+print(string.format("📊 Current Level: %d — flying to gather more items", currentLevel))
+updateStatus("Upgrading Fire...")
+
+local levelChanged = false
+task.spawn(function()
+    while currentLevel < maxLevel do
+        task.wait(0.1)
+        local newLevel = getCurrentLevel()
+        if newLevel ~= currentLevel then
+            currentLevel = newLevel
+            levelChanged = true
+
+            if currentLevel >= maxLevel then
+                print("🎉 Max level reached!")
+                updateStatus("🎉 Fire Complete!")
+            else
+                print(string.format("🎉 Level changed to %d!", currentLevel))
+                updateStatus("Upgrading Fire...")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                platform.Position = firePos + Vector3.new(5, 0, 0)
+            end
+
+            if currentLevel >= maxLevel then
+                break
+            end
+        end
+
+        -- Timer check ถูกลบออก — ทำจนถึง level 7 เท่านั้น
+    end
+
+    -- Timer check ถูกลบออก
+
+end)
+
+local treesSinceFlight = 0
+
+while currentLevel < maxLevel do
+    currentLevel = getCurrentLevel()
+    if currentLevel >= maxLevel then
+        print("✅ Max level reached")
+        updateStatus("✅ Fire Complete!")
+        humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        break
+    end
+
+    task.wait(0.2)
+
+    if levelChanged then
+        levelChanged = false
+        treesSinceFlight = 0
+
+        currentLevel = getCurrentLevel()
+        if currentLevel >= maxLevel then
+            print("✅ Max level reached")
+            updateStatus("✅ Fire Complete!")
+            humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+            break
+        end
+
+        print(string.format("🎉 Level increased to %d!", currentLevel))
+        updateStatus("Upgrading Fire...")
+
+        flyAndWarpItems()
+
+        if getCurrentLevel() >= maxLevel then
+            print("✅ Max level reached")
+            updateStatus("✅ Fire Complete!")
+            humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+            break
+        end
+    else
+        updateStatus("Cutting Trees...")
+
+        if treeIndex > #trees then
+            print("⚠️ No more trees, flying...")
+            updateStatus("Finding Trees...")
+            flyAndWarpItems()
+
+            if getCurrentLevel() >= maxLevel then
+                print("✅ Max level reached")
+                updateStatus("✅ Fire Complete!")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                break
+            end
+        else
+            if getCurrentLevel() >= maxLevel then
+                print("✅ Max level reached")
+                updateStatus("✅ Fire Complete!")
+                humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+                break
+            end
+
+            -- ตัดต้นไม้หลายต้น: for loop วนจนกว่า level 7 หรือต้นหมด
+            for treeIndex = treeIndex, #trees do
+                if getCurrentLevel() >= maxLevel then break end
+
+                local tree = trees[treeIndex]
+                if not (tree and tree.Parent) then continue end
+
+                -- เช็คว่า tree ยังอยู่ที่ parent เดิม (workspace.Map.Foliage) มั้ย
+                -- ถ้า tree เคยอยู่ใน Foliage แต่ตอนนี้ย้ายไปที่อื่น (เช่น fallen log / debris)
+                -- = ถูกโค่นแล้ว ข้ามไปต้นถัดไปได้เลย
+                if tree:IsDescendantOf(workspace.Map.Foliage) == false then
+                    continue
+                end
+                local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+
+                -- วาร์ปไปข้างต้นไม้ 5 studs
+                local cutPos = treePos + Vector3.new(5, 0, 0)
+                humanoidRootPart.CFrame = CFrame.lookAt(cutPos, treePos)
+                platform.Position = cutPos - Vector3.new(0, 3, 0)
+                task.wait(0.1)
+
+                -- ตีต้นไม้จนกว่าจะตาย (backstop 500 ตี)
+                local hitCount = 0
+                local failStreak = 0
+                while tree.Parent and hitCount < 500 do
+                    if getCurrentLevel() >= maxLevel then break end
+
+                    -- อัพเดท axe ทุกครั้งก่อนตี
+                    local char = LocalPlayer.Character
+                    local th = char and char:FindFirstChild("ToolHandle")
+                    local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+
+                    if not currentAxe then
+                        warn("Axe lost, re-equipping...")
+                        Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+                        task.wait(0.3)
+                        char = LocalPlayer.Character
+                        th = char and char:FindFirstChild("ToolHandle")
+                        currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                        if not currentAxe then break end
+                    end
+
+                    humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if not humanoidRootPart then break end
+
+                    local success, err = pcall(function()
+                        Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
+                    end)
+
+                    if success then
+                        failStreak = 0
+                    else
+                        failStreak = failStreak + 1
+                        if hitCount == 0 then
+                            warn("First hit failed:", err)
+                        end
+                        if failStreak >= 5 then
+                            warn("Tree not taking damage after 5 consecutive failed hits - skipping")
+                            break
+                        end
+                    end
+
+                    task.wait(0.18)
+                    hitCount = hitCount + 1
+                end
+
+                if tree.Parent and hitCount >= 500 then
+                    warn("Hit cap (500) reached on one tree - skipping")
+                end
+
+                if getCurrentLevel() >= maxLevel then
+                    break
+                end
+
+                -- ดึง Log ไปกองไฟทันทีหลังตัดเสร็จ (กัน Log ตกค้างที่ต้นไม้)
+                for _, item in ipairs(workspace.Items:GetChildren()) do
+                    if item.Name == "Log" and item.Parent == workspace.Items and not warpedItems[item] then
+                        warpItemToFire(item)
+                    elseif (item:GetAttribute("BurnFuel") or 0) > 0 and item.Parent == workspace.Items and not warpedItems[item] then
+                        warpItemToFire(item)
+                    end
+                end
+
+                treesSinceFlight = treesSinceFlight + 1
+
+                -- ตัดครบ 3 ต้น → fly + ออก for loop
+                if treesSinceFlight >= 3 then
+                    break
+                end
+
+                task.wait(0.1)
+            end
+        end
+    end
+end
+
+print("🎉 Fire reached max level!")
+updateStatus("✅ Fire Complete!")
+
+-- ปล่อยเด็กทั้งหมดก่อนไป Stronghold (กรณีบินรอบสุดท้ายไม่ได้ drop)
+dropAllLostChildren()
+
+-- ============================================
+-- STEP 3.5: Check Wood/Scrap, craft bench upgrade + beds
+-- ============================================
+
+print("\n[Step 3.5] Checking resources for crafting...")
+
+local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
+local campground = workspace.Map.Campground
+
+local function getTotalScrap() return campground:GetAttribute("TotalScrap") or 0 end
+local function getTotalWood()  return campground:GetAttribute("TotalWood")  or 0 end
+
+local NEED_WOOD  = 50
+local NEED_SCRAP = 26
+
+-- หา Wood ที่ขาด: ตัดต้นไม้แล้วดึงไม้ไปโต๊ะคราฟ
+if getTotalWood() < NEED_WOOD then
+    print("[Step 3.5] Wood insufficient - chopping trees...")
+    updateStatus("Chopping trees for Wood...")
+    Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+    task.wait(0.3)
+    local craftTZ = getCraftingTouchZone()
+    local craftPos = craftTZ and (craftTZ:IsA("BasePart") and craftTZ.Position or craftTZ:GetPivot().Position)
+    local tIdx = 1
+    while getTotalWood() < NEED_WOOD do
+        local tree = trees[tIdx]
+        if not tree or not tree.Parent or not tree:IsDescendantOf(workspace.Map.Foliage) then
+            tIdx += 1
+            continue
+        end
+        local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            warn("[Step 3.5] HumanoidRootPart not found - waiting...")
+            task.wait(1)
+            continue
+        end
+
+        Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+        task.wait(0.3)
+
+        -- วาร์ปไปข้างต้นไม้ 5 studs และหันหน้าเข้าหาต้นไม้
+        local cutPos = treePos + Vector3.new(5, 0, 0)
+        hrp.CFrame = CFrame.lookAt(cutPos, treePos)
+        platform.Position = cutPos - Vector3.new(0, 3, 0)
+
+        task.wait(0.1)
+
+        local treeDestroyed = false
+        while tree.Parent do
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+            if not currentAxe then
+                print("[Step 3.5] Axe lost - re-equipping...")
+                Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+                task.wait(0.3)
+                char = LocalPlayer.Character
+                th = char and char:FindFirstChild("ToolHandle")
+                currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                if not currentAxe then break end
+            end
+
+            hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then break end
+
+            local success = pcall(function()
+                Event:InvokeServer(tree, currentAxe, ownerId, hrp.CFrame, false)
+            end)
+
+            if not success then
+                warn("[Step 3.5] Hit failed - tree may be invalid")
+            end
+
+            pcall(updateStatus, string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+            task.wait(0.2)
+
+            if not tree.Parent then
+                treeDestroyed = true
+                break
+            end
+        end
+
+        hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        -- ดึงของจาก workspace.Items ทันที (async ไม่ block — ไปต้นต่อไปได้เลย)
+        -- Wood chopping (Step 3.5): Log → CraftingBench (เพิ่ม TotalWood), Chair → CraftingBench
+        for _, item in ipairs(workspace.Items:GetChildren()) do
+            if item.Name == "Log" and item.Parent == workspace.Items and craftPos and not warpedItems[item] then
+                warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))  -- Log → CraftingBench
+            elseif item.Name == "Chair" and craftPos and not warpedItems[item] then
+                warpItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
+            end
+        end
+        updateStatus(string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
+        -- ถ้า Wood ถึง NEED_WOOD แล้ว → ออก loop ทันที
+        if getTotalWood() >= NEED_WOOD then
+            break
+        end
+        tIdx += 1
+        if tIdx > #trees then break end
+    end
+    Client.InventoryHandler.RequestEquipItem(bestAxeChop)
+    task.wait(0.3)
+
+    -- วาร์ปกลับไปยืนที่กองไฟ (จุดยืนมาตรฐานข้างกองไฟ) หลังตัดไม้เสร็จ
+    local backHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if backHrp then
+        backHrp.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        platform.Position = firePos + Vector3.new(5, 0, 0)
+    end
+end
+
+-- หา Scrap ที่ขาด: บินวนหา items แล้วดึงไปโต๊ะคราฟ
+if getTotalScrap() < NEED_SCRAP then
+    print("[Step 3.5] Scrap insufficient - searching items...")
+    updateStatus("Searching Scrap items...")
+    local craftTZ2 = getCraftingTouchZone()
+    local craftPos2 = craftTZ2 and (craftTZ2:IsA("BasePart") and craftTZ2.Position or craftTZ2:GetPivot().Position)
+    for radius = 20, 200, 40 do
+        if getTotalScrap() >= NEED_SCRAP then break end
+        local steps = 20
+        for i = 0, steps do
+            if getTotalScrap() >= NEED_SCRAP then break end
+            local angle = (i / steps) * math.pi * 2
+            local pos = firePos + Vector3.new(math.cos(angle)*radius, airHeight, math.sin(angle)*radius)
+            humanoidRootPart.CFrame = CFrame.new(pos)
+            if craftPos2 then
+                for _, item in ipairs(workspace.Items:GetChildren()) do
+                    if not warpedItems[item] and item:GetAttribute("Scrappable") then
+                        -- Blacklist: skip Structure parts (พื้น/กำแพง/โครงสร้าง/โมเดลที่ server recycle)
+                        local name = item.Name
+                        local isStructure = name == "Part" or name == "woodplanks"
+                            or name:find("Floor") or name:find("Framework") or name:find("Wedge")
+                            or name == "Cabin" or name == "Model" or name == "Shelter"
+                            or name:find("Note") or name:find("Desk") or name:find("Hardhat")
+                            or name:find("Door") or name:find("Window") or name:find("Table")
+                            or name:find("Roof") or name:find("Cabinet") or name:find("Box")
+                            -- Part ที่เป็น WoodPlanks (พื้น/ผนัง) = โครงสร้าง
+                            or (item:IsA("BasePart") and item.Material == Enum.Material.WoodPlanks)
+                        if isStructure then
+                            -- skip
+                        else
+                            warpItemToTarget(item, craftPos2 + Vector3.new(0, 2, 0))
+                        end
+                    end
+                end
+            end
+            -- เก็บ Scrappable ไว้เฉพาะ Scrap search (Step 3.5) — CraftingBench filter ใช้ exact name แล้ว
+            task.wait(0.1)
+        end
+    end
+
+    -- วาร์ปกลับไปยืนที่กองไฟหลังค้นหา Scrap เสร็จ (จุดยืนมาตรฐานเหมือนตอนตัดไม้)
+    local backHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if backHrp then
+        backHrp.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
+        platform.Position = firePos + Vector3.new(5, 0, 0)
+    end
+end
+
+-- รอจนครบ
+local waitCraft = 0
+while (getTotalWood() < NEED_WOOD or getTotalScrap() < NEED_SCRAP) and waitCraft < 30 do
+    updateStatus(string.format("Waiting resources... Wood:%d/%d Scrap:%d/%d",
+        getTotalWood(), NEED_WOOD, getTotalScrap(), NEED_SCRAP))
+    task.wait(1)
+    waitCraft += 1
+end
+print(string.format("[Step 3.5] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
+
+-- อัพโต๊ะคราฟ 2 และ 3
+updateStatus("Upgrading Crafting Bench 2...")
+pcall(function() CraftEvent:InvokeServer("Crafting Bench 2") end)
+task.wait(0.5)
+updateStatus("Upgrading Crafting Bench 3...")
+pcall(function() CraftEvent:InvokeServer("Crafting Bench 3") end)
+task.wait(0.5)
+
+-- วางเตียง: หา blueprint nil แล้ว InvokeServer RequestPlaceStructure
+local PlaceEvent = ReplicatedStorage.RemoteEvents.RequestPlaceStructure
+local alecCircle = workspace.Map.Campground:FindFirstChild("alecCircle")
+
+local function getCirclePositions()
+    return {
+        Vector3.new(-20, 4, 10),
+        Vector3.new(-20, 4, 5),
+        Vector3.new(-20, 4, 0),
+    }
+end
+
+local function findBlueprint(name)
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local bpInv = inv and inv:FindFirstChild(name .. " Blueprint")
+    if bpInv then return bpInv end
+    if typeof(getnilinstances) ~= "function" then return nil end
+    for _, obj in ipairs(getnilinstances()) do
+        if obj.Name == name .. " Blueprint" then return obj end
+    end
+end
+
+local BED_ITEMS = {"Old Bed", "Regular Bed", "Good Bed"}
+local usedPositions = {}
+
+for _, bedName in ipairs(BED_ITEMS) do
+    updateStatus("Crafting " .. bedName .. "...")
+    pcall(function() CraftEvent:InvokeServer(bedName) end)
+    task.wait(0.5)
+
+    local bp = nil
+    local waited = 0
+    while not bp and waited < 5 do
+        bp = findBlueprint(bedName)
+        task.wait(0.2)
+        waited += 0.2
+    end
+
+    if bp then
+        local placed = false
+        local attempts = 0
+        -- เพดาน 10 ครั้ง: เดิม while not placed ไม่มีเพดาน = วางไม่สำเร็จถาวรแล้วสคริปต์ค้างที่ Step 3.5 ตลอด
+        while not placed and attempts < 10 do
+            attempts += 1
+            -- re-equip ทุกรอบเผื่อหลุด
+            Client.InventoryHandler.RequestEquipItem(bp)
+            task.wait(0.3)
+
+            -- เช็คว่า BP หายจาก Inventory = วางสำเร็จแล้ว
+            local inv2 = LocalPlayer:FindFirstChild("Inventory")
+            if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
+                placed = true
+                print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
+                break
+            end
+
+            local positions = getCirclePositions()
+            for _, pos in ipairs(positions) do
+                local alreadyUsed = false
+                for _, used in ipairs(usedPositions) do
+                    if (pos - used).Magnitude < 3 then alreadyUsed = true break end
+                end
+                if not alreadyUsed then
+                    -- ไม่ต้องวาร์ปตัวเองไปหน้ากองไฟก่อนวางแล้ว - PlaceEvent ส่งพิกัด CFrame ไปเอง
+                    pcall(function()
+                        local center = alecCircle and select(1, alecCircle:GetBoundingBox()).Position or pos
+                        -- ถ้า center อยู่ตรง pos (ระยะแบนระนาบ ~ 0) CFrame.lookAt จะได้ NaN = เซิร์ฟปัดทุกครั้ง วางไม่เคยสำเร็จ
+                        local placeCF
+                        if (center.X - pos.X) ^ 2 + (center.Z - pos.Z) ^ 2 < 0.05 ^ 2 then
+                            placeCF = CFrame.new(pos)
+                        else
+                            placeCF = CFrame.lookAt(pos, Vector3.new(center.X, pos.Y, center.Z))
+                        end
+                        PlaceEvent:InvokeServer(bp, {
+                            Valid = true,
+                            CFrame = placeCF,
+                            Position = pos,
+                        }, placeCF, nil)
+                    end)
+                    task.wait(0.3)
+                    -- เช็ค BP หายไหม
+                    inv2 = LocalPlayer:FindFirstChild("Inventory")
+                    if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
+                        table.insert(usedPositions, pos)
+                        placed = true
+                        print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
+                        break
+                    end
+                end
+            end
+
+            if not placed then
+                print(string.format("[Step 3.5] Attempt %d failed for %s - retrying...", attempts, bedName))
+                task.wait(0.2)
+            end
+        end
+
+        if not placed then
+            warn("[Step 3.5] Could not place " .. bedName .. " after " .. attempts .. " attempts - skipping")
+        end
+    else
+        warn("[Step 3.5] Blueprint not found for " .. bedName)
+    end
+    task.wait(0.3)
+end
+
+print("[Step 3.5] Crafting complete!")
+updateStatus("Crafting done!")
+
+-- platform ต้องอยู่ต่อ เพราะ STEP 3.6/4/5/6 ยังบินและต้องมีแท่นรองใต้เท้า
+
+-- ============================================
+-- Shared: Stronghold helpers
+-- ============================================
+
+local function getStrongholdRoot()
+    local map = workspace:FindFirstChild("Map")
+    local landmarks = map and map:FindFirstChild("Landmarks")
+    return landmarks and landmarks:FindFirstChild("Stronghold")
+end
+
+local function getStrongholdBuilding()
+    local sh = getStrongholdRoot()
+    return sh and sh:FindFirstChild("Building")
+end
+
+local function getStrongholdFunctional()
+    local sh = getStrongholdRoot()
+    return sh and sh:FindFirstChild("Functional")
+end
+
+-- คืน center + size ของ Floor (ใช้ GetBoundingBox เพราะ pivot อาจไม่อยู่กลางจริง)
+local function getFloorInfo()
+    local building = getStrongholdBuilding()
+    if not building then return nil end
+
+    local floor = building:FindFirstChild("Floor") or building:FindFirstChild("Floor", true)
+    if not floor then return nil end
+
+    if floor:IsA("Model") then
+        local cf, size = floor:GetBoundingBox()
+        return cf.Position, size
+    elseif floor:IsA("BasePart") then
+        return floor.Position, floor.Size
+    end
+    return nil
+end
+
+-- บินวนหา Stronghold ถ้ายังไม่ stream เข้ามา
+local function flySearchStronghold()
+    local searchRadius = 800
+    local searchSteps = 100
+    local searchDuration = (2 * math.pi * searchRadius) / 1000
+
+    for i = 0, searchSteps do
+        local angle = (i / searchSteps) * math.pi * 2
+        local searchPos = firePos + Vector3.new(
+            math.cos(angle) * searchRadius,
+            airHeight,
+            math.sin(angle) * searchRadius
+        )
+        humanoidRootPart.CFrame = CFrame.new(searchPos)
+        platform.Position = searchPos - Vector3.new(0, 3, 0)
+
+        if getStrongholdBuilding() then return true end
+        task.wait(searchDuration / searchSteps)
+    end
+    return getStrongholdBuilding() ~= nil
+end
+
+local strongholdFloorPos = nil
+
+local function warpToStrongholdFloor(holdSeconds)
+    local center, size = getFloorInfo()
+
+    if not center then
+        local building = getStrongholdBuilding()
+        if not building then
+            warn("[WARN] Stronghold Building not found - skipping warp")
+            return false
+        end
+        warn("⚠️ Floor not found. Children of Building:")
+        for _, child in ipairs(building:GetChildren()) do
+            print("   -", child.Name, "(" .. child.ClassName .. ")")
+        end
+        center, size = building:GetPivot().Position, Vector3.new(0, 0, 0)
+    end
+
+    local target = center + Vector3.new(0, size.Y / 2 + 5, 0)
+    strongholdFloorPos = target
+
+    if platform and platform.Parent then
+        platform.Size = Vector3.new(16, 1, 16)
+        platform.Position = target - Vector3.new(0, 4, 0)
+    end
+
+    local reps = math.max(1, math.floor((holdSeconds or 1) / 0.1))
+    for _ = 1, reps do
+        humanoidRootPart.CFrame = CFrame.new(target)
+        task.wait(0.1)
+    end
+
+    print(string.format("✅ Warped to Stronghold Floor: %.1f, %.1f, %.1f", target.X, target.Y, target.Z))
+    return true
+end
+
+local function getStrongholdTimeRemaining()
+    for _, sh in ipairs(CollectionService:GetTagged("Stronghold")) do
+        if sh.Name ~= "AlienMothership" then
+            local f = sh:FindFirstChild("Functional")
+            if f and f:GetAttribute("OpenTime") then
+                return f:GetAttribute("OpenTime") - workspace:GetServerTimeNow()
+            end
+        end
+    end
+    return nil
+end
+
+-- ============================================
+-- STEP 3.6: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
+-- ============================================
+
+print("\n[Step 3.6] Warping to Stronghold Floor...")
+updateStatus("Warping to Stronghold Floor...")
+
+-- เข้า Stronghold แล้ว = สลับโล่เป็นโหมดโปร่ง (ไม่ชนมอน/พื้น) กันโล่ติดพื้นห้อง/ขวาง TriggerZone
+setShieldSolid(false)
+
+retryUntil("find Stronghold Building", function()
+    if getStrongholdBuilding() then return true end
+    updateStatus("Flying to Find Stronghold...")
+    flySearchStronghold()
+    return getStrongholdBuilding()
+end, 1)
+
+retryUntil("warp to Stronghold Floor", function()
+    return warpToStrongholdFloor(2)
+end, 1)
+
+----------------------------------------------------------------
+-- STEP 3.6b: Equip Laser Cannon + ยิงแทนตี
+-- ทำเฉพาะเมื่อ equipped class ตรงกับ Config.UpgradeClass[1]
+-- (ตอนนี้ Cyborg ใช้ Laser Cannon, ฆ่า Stronghold enemy ด้วยกระสุน Energy)
+-- ตรวจ Energy เต็ม 100 ก่อนยิง, ยิงหลายตัวพร้อมกัน (multi-target ใน 1 นัด)
+-- ถ้าไม่มี class ตาม UpgradeClass → ฟาร์มปกติ (ไม่ทำอะไร)
+----------------------------------------------------------------
+-- Quest table (ฝังในไฟล์ - ไม่เรียก database) ใช้เช็คว่า quest เสร็จหรือยัง
+-- Format: [className] = { [level] = { statKey = goal, ... } }
+-- (merge เข้ากับ CLASS_QUESTS ที่ hoist ไว้ข้างบน)
+do
+local _questKeys = {
+    Ranger = {
+        [2] = { EnemyKills = 80, KidRescues = 10 },
+        [3] = { EnemyKills = 200, KidRescues = 35 },
+    },
+    Medic = {
+        [2] = { RevivePlayers = 25, FindMeds = 30 },
+        [3] = { RevivePlayers = 40, FindMeds = 50 },
+    },
+    Assassin = {
+        [2] = { TravelStuds = 2500, PerfectKills = 100 },
+        [3] = { TravelStuds = 10000, PerfectKills = 250 },
+    },
+    Camper = {
+        [2] = { FoodCooked = 75, LogsBurned = 200 },
+        [3] = { FoodCooked = 150, LogsBurned = 350 },
+    },
+    Scavenger = {
+        [2] = { ScrapScrap = 450, TravelStuds = 2500 },
+        [3] = { ScrapScrap = 1000, TravelStuds = 10000 },
+    },
+    Cook = {
+        [2] = { CookMeat = 200, CookStew = 50 },
+        [3] = { CookMeat = 400, CookStew = 200 },
+    },
+    ["Escape Artist"] = {
+        [2] = { EnemiesEscaped = 20 },
+        [3] = { EnemiesEscaped = 50 },
+    },
+    Lumberjack = {
+        [2] = { CutTree = 200, PlantSapling = 70 },
+        [3] = { CutTree = 500, PlantSapling = 200 },
+    },
+    Brawler = {
+        [2] = { MeleeHit = 350, TakeMeleeHit = 200 },
+        [3] = { MeleeHit = 600, Regenerate = 5000 },
+    },
+    Hunter = {
+        [2] = { WolfKills = 120, BunnyKills = 120 },
+        [3] = { WolfKills = 250, AlphaWolfKills = 120 },
+    },
+    Alien = {
+        [2] = { AlienTechKills = 150 },
+        [3] = { AlienTechKills = 300 },
+    },
+    Farmer = {
+        [2] = { WaterFarmPlots = 40, PickCrops = 200 },
+        [3] = { WaterFarmPlots = 80, PickCrops = 500 },
+    },
+    Blacksmith = {
+        [2] = { BuildStructures = 80, UpgradeCraftingBench = 20 },
+        [3] = { BuildStructures = 250, UpgradeCraftingBench = 40 },
+    },
+    ["Base Defender"] = {
+        [2] = { BuildDefense = 60, DefenseKills = 80 },
+        [3] = { BuildDefense = 150, DefenseKills = 200 },
+    },
+    Berserker = {
+        [2] = { EnemyKillsWhileLow = 50 },
+        [3] = { EnemyKillsWhileLow = 150 },
+    },
+    Fisherman = {
+        [2] = { CatchFish = 350, CatchSharks = 5 },
+        [3] = { CatchFish = 500, CatchSharks = 15 },
+    },
+    Pyromaniac = {
+        [2] = { EnemyKillsWithFire = 150 },
+        [3] = { EnemyKillsWithFire = 400 },
+    },
+    ["Poison Master"] = {
+        [2] = { EnemyKillsWithPoison = 100 },
+        [3] = { EnemyKillsWithPoison = 250 },
+    },
+    ["Big Game Hunter"] = {
+        [2] = { ConsumePelt = 50, WolfKills = 70 },
+        [3] = { ConsumePelt = 100, WolfKills = 150 },
+    },
+    Chef = {
+        [2] = { FoodCooked = 200, CookSpecialDish = 50 },
+        [3] = { FoodCooked = 400, CookSpecialDish = 100 },
+    },
+    Gambler = {
+        [2] = { ChestOpened = 70 },
+        [3] = { ChestOpened = 150, RubyChestOpened = 10 },
+    },
+    Support = {
+        [2] = { SupportDamageAbsorbed = 500, SupportBonusDamageDealt = 200 },
+        [3] = { SupportDamageAbsorbed = 1500, SupportBonusDamageDealt = 500 },
+    },
+    ["Fire Bandit"] = {
+        [2] = { EnemyKillsWithFire = 100, SetEnemiesOnFire = 200 },
+        [3] = { EnemyKillsWithFire = 250, SetEnemiesOnFire = 500 },
+    },
+    Zookeeper = {
+        [2] = { PetsTamed = 30 },
+        [3] = { PetsTamed = 60 },
+    },
+    Beastmaster = {
+        [2] = { WolvesSummoned = 50, PetDamageDealt = 5000 },
+        [3] = { WolvesSummoned = 100, PetDamageDealt = 15000 },
+    },
+    Undead = {
+        [2] = { Revived = 30 },
+        [3] = { Revived = 60 },
+    },
+    Necromancer = {
+        [2] = { CultistsResurrected = 100, PetDamageDealt = 5000 },
+        [3] = { CultistsResurrected = 200, PetDamageDealt = 5000 },
+    },
+    Witch = {
+        [2] = { HitPotion = 100 },
+        [3] = { HitPotion = 300 },
+    },
+    Woodsman = {
+        [2] = { CutTree = 250, WoodsmanAxeKills = 50 },
+        [3] = { CutTree = 500, WoodsmanAxeKills = 100 },
+    },
+    Vampire = {
+        [2] = { LifestealHealing = 450, DealDamage = 5000 },
+        [3] = { LifestealHealing = 1000, DealDamage = 15000 },
+    },
+    Brute = {
+        [2] = { Taunts = 100, DamageBlocked = 800 },
+        [3] = { Taunts = 250, DamageBlocked = 2000 },
+    },
+    Explorer = {
+        [2] = { TravelStuds = 2500, ChestOpened = 80 },
+        [3] = { TravelStuds = 10000, ChestOpened = 200 },
+    },
+    ["Gifting Elf"] = {
+        [2] = { GivePresent = 40 },
+        [3] = { GivePresent = 90 },
+    },
+    Snowman = {
+        [2] = { HitSnowball = 500 },
+        [3] = { HitSnowball = 1000 },
+    },
+    Elemental = {
+        [2] = { OpenBiomeChest = 20, KillsInBiome = 80 },
+        [3] = { OpenBiomeChest = 50, KillsInBiome = 200 },
+    },
+    Engineer = {
+        [2] = { BuildTurret = 15, TurretKill = 300 },
+        [3] = { BuildTurret = 40, TurretKill = 600 },
+    },
+    Feaster = {
+        [2] = { EatStew = 50, TimeOverfed = 1000 },
+        [3] = { EatStew = 150, TimeOverfed = 3000 },
+    },
+    Nightcrawler = {
+        [2] = { EnemiesDefeatedInDark = 50 },
+        [3] = { EnemiesDefeatedInDark = 150 },
+    },
+    Grenadier = {
+        [2] = { ExplosiveKills = 50 },
+        [3] = { ExplosiveKills = 150 },
+    },
+    Gunslinger = {
+        [2] = { TrustyRevolverKills = 250 },
+        [3] = { TrustyRevolverKills = 500 },
+    },
+    Bunny = {
+        [2] = { EatCarrots = 200 },
+        [3] = { EatCarrots = 400 },
+    },
+    ["Alien Scientist"] = {
+        [2] = { Dissolves = 50 },
+        [3] = { Dissolves = 150 },
+    },
+}
+for k, v in pairs(_questKeys) do
+    CLASS_QUESTS[k] = v
+end
+end  -- end of do block (CLASS_QUESTS merge)
+
+local useCannon = false
+local cannonTool = nil
+local cannonEnergyCost = 75  -- EnergyCost ต่อนัด (จาก CheckEnergy.lua)
+-- เกมเก็บ Energy คงเหลือที่ LocalPlayer:GetAttribute("EnergyAmmo")
+-- Logic ยิง: 1 นัดใช้ 75 Energy → ต้องมี Energy > 75 ก่อนยิง (เช็ค >= 76)
+
+if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
+    local equippedClass = LocalPlayer:GetAttribute("Class")
+    -- Cannon ใช้ได้เฉพาะ Cyborg (Energy weapon → AlienTechKills quest)
+    if equippedClass == "Cyborg" then
+        -- เช็ค level: ถ้า Lv.3 แล้ว = เควสครบแล้ว → ฟาร์มปกติด้วยขวาน (no cannon)
+        local equippedLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
+        if equippedLevel >= 3 then
+            print(string.format("[Cannon] %s Lv.%d done, using axe", equippedClass, equippedLevel))
+        else
+            local inv = LocalPlayer:FindFirstChild("Inventory")
+            if inv then
+                cannonTool = inv:FindFirstChild("Laser Cannon")
+                if cannonTool then
+                    useCannon = true
+                    updateStatus("Equipping Laser Cannon...")
+                    pcall(function()
+                        Client.InventoryHandler.RequestEquipItem(cannonTool)
+                    end)
+                    task.wait(1.0)
+                    local char = LocalPlayer.Character
+                    local th = char and char:FindFirstChild("ToolHandle")
+                    local origItem = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+                    if origItem and origItem.Name == "Laser Cannon" then
+                        print("[Cannon] equipped")
+                        cannonTool = origItem
+                    else
+                        warn("[Cannon] equip failed (got " .. tostring(origItem and origItem.Name) .. ")")
+                        useCannon = false
+                    end
+                else
+                    warn("[Cannon] Laser Cannon not in Inventory, fallback to axe")
+                end
+            end
+        end
+    end
+end
+
+-- ฟังก์ชันยิงเฉพาะเมื่อ useCannon=true
+-- คืน true ถ้ายิงสำเร็จ (Energy เต็ม + มีเป้า)
+local function cannonTryShoot(energyThreshold)
+    energyThreshold = energyThreshold or 100
+    if not useCannon or not cannonTool then return false end
+
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local head = char:FindFirstChild("Head")
+    if not head then return false end
+
+    -- เช็ค EnergyAmmo คงเหลือ (เกมเก็บที่ LocalPlayer)
+    local energy = LocalPlayer:GetAttribute("EnergyAmmo")
+    if type(energy) == "number" and energy <= cannonEnergyCost then
+        return false  -- Energy ไม่พอ → รอ refill
+    end
+
+    -- หา enemy ในรัศมี 200 studs (เฉพาะ Stronghold enemy ที่ยังไม่ตาย)
+    local enemies = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return false end
+    for _, m in ipairs(chars:GetChildren()) do
+        if m:IsA("Model")
+            and not Players:GetPlayerFromCharacter(m)
+            and m:GetAttribute("Dead") ~= true
+            and m:GetAttribute("StrongholdEnemy") == true
+            and m:GetAttribute("Tamed") ~= true then
+            local pos = m:GetPivot().Position
+            if (pos - hrp.Position).Magnitude <= 200 then
+                table.insert(enemies, m)
+            end
+        end
+    end
+
+    if #enemies == 0 then return false end
+
+    -- Cluster enemies: จัดกลุ่มตัวที่อยู่ใกล้กัน (<= ExplosionRadius * 1.2)
+    -- ถ้ากลุ่มใหญ่เกินไปจนกระจายเกิน AOE → แยกยิงทีละ cluster
+    local cannonExplosionRadius = cannonTool:GetAttribute("ExplosionRadius") or 16
+    local clusterRadius = cannonExplosionRadius * 1.2
+    local clusters = {}
+
+    local function getPos(inst)
+        if inst:IsA("Model") then return inst:GetPivot().Position end
+        if inst:IsA("BasePart") then return inst.Position end
+        return nil
+    end
+
+    for _, e in ipairs(enemies) do
+        local pos = getPos(e)
+        if pos then
+            local placed = false
+            for _, cluster in ipairs(clusters) do
+                if (cluster.center - pos).Magnitude <= clusterRadius then
+                    table.insert(cluster.members, e)
+                    -- อัปเดต center เป็นค่าเฉลี่ย
+                    local sum = cluster.center * cluster.count
+                    sum = sum + pos
+                    cluster.count = cluster.count + 1
+                    cluster.center = sum / cluster.count
+                    placed = true
+                    break
+                end
+            end
+            if not placed then
+                table.insert(clusters, { center = pos, members = { e }, count = 1 })
+            end
+        end
+    end
+
+    -- เอา cluster แรก (ใกล้สุด) — เพื่อให้ยิงทีละกลุ่ม ไม่ใช่ยิงหมดใน 1 นัด
+    table.sort(clusters, function(a, b)
+        return (a.center - head.Position).Magnitude < (b.center - head.Position).Magnitude
+    end)
+    local targetCluster = clusters[1]
+    local targetEnemies = targetCluster.members
+
+    -- avgPos + dir จาก cluster นี้
+    local avgPos = targetCluster.center
+    local dir = (avgPos - head.Position).Unit
+    -- ป้องกัน NaN + zero vector: ถ้า dir = 0 หรือ NaN ใช้ LookVector แทน
+    if dir ~= dir or dir == Vector3.zero then
+        dir = head.CFrame.LookVector
+        if dir == Vector3.zero then dir = Vector3.new(0, 0, -1) end
+    end
+
+    local target = enemies[1]
+    local targetPart = target:FindFirstChild("HumanoidRootPart")
+        or target:FindFirstChild("Head")
+        or target.PrimaryPart
+    if not targetPart then return false end
+
+    local pcallOk, pcallErr, serverResult = pcall(function()
+        -- ยิง 3 remotes ตรงๆ (ตาม Cobalt log - ไม่ผ่าน ProjectileClass)
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
+        local RegisterProjectile = Remotes and Remotes:FindFirstChild("RegisterProjectile")
+        local ReplicateBullet = Remotes and Remotes:FindFirstChild("ReplicateBullet")
+        local ExplosiveDamage = Remotes and Remotes:FindFirstChild("ExplosiveProjectileDamageEnemy")
+
+        if not (RegisterProjectile and ReplicateBullet and ExplosiveDamage) then
+            warn("[Cannon] missing remote(s)")
+            return
+        end
+
+        local speed = cannonTool:GetAttribute("ProjectileSpeed") or 700
+        local gravity = cannonTool:GetAttribute("ProjectileGravity") or 0
+        local velocity = dir * speed
+        local pid = math.floor((tick() * 1000) % 1000000)
+
+        -- 1) RegisterProjectile
+        RegisterProjectile:InvokeServer(cannonTool, pid, false)
+
+        -- 2) ReplicateBullet
+        ReplicateBullet:FireServer("FireAllClients", pid, {
+            ProjectileGravity = gravity,
+            HeadPos = head.Position,
+            Origin = head.Position,
+            Velocity = velocity,
+            ProjectileName = "LaserMissile",
+        })
+
+        -- 3) ExplosiveProjectileDamageEnemy (AOE) - ใช้ avgPos เป็นจุดระเบิด
+        local hitList = {}
+        for _, e in ipairs(targetEnemies) do
+            if e:IsA("Model") then
+                local d = (e:GetPivot().Position - avgPos).Magnitude
+                table.insert(hitList, { Model = e, Distance = d })
+            elseif e:IsA("BasePart") then
+                local d = (e.Position - avgPos).Magnitude
+                table.insert(hitList, { Model = e, Distance = d })
+            end
+        end
+        local ownerId = tostring(pid) .. "_" .. tostring(LocalPlayer.UserId)
+        local result = ExplosiveDamage:InvokeServer(hitList, pid, ownerId, avgPos)
+        return result
+    end)
+    if not pcallOk then
+        warn("[Cannon] shoot failed: " .. tostring(pcallErr))
+        return false
+    end
+
+    -- เช็คผล: server คืน table {Success=true,...} ถ้าสำเร็จ
+    local result = serverResult
+    if type(result) == "table" then
+        if result.Success == false then
+            warn("[Cannon] server refused damage")
+            return false
+        end
+        -- สำเร็จ → นับ enemy ที่ตาย (HP <= 0 หรือ Destroyed)
+        local killed = 0
+        for _, e in ipairs(targetEnemies) do
+            if not e or not e.Parent then
+                killed += 1
+            elseif e:IsA("Model") then
+                local hum = e:FindFirstChildOfClass("Humanoid")
+                    or e:FindFirstChildWhichIsA("Humanoid", true)
+                if hum and hum.Health <= 0 then
+                    killed += 1
+                end
+            end
+        end
+        if killed > 0 then
+            print(string.format("[Cannon] killed %d/%d", killed, #enemies))
+        end
+        return true
+    end
+    return true
+end
+
+-- Background: ยิง cannon ตลอดเวลาตอนอยู่ Stronghold (ทำงานขนานกับ main loop)
+-- EnergyCost = 75 ต่อนัด (จาก CheckEnergy.lua) - server จะ validate Energy คงเหลือ
+if useCannon then
+    task.spawn(function()
+        while useCannon do
+            local shot = cannonTryShoot()
+            if not shot then
+                task.wait(0.5)  -- ไม่มีเป้า / Energy ไม่พอ → รอ
+            else
+                task.wait(0.2)  -- ยิงสำเร็จ → cooldown
+            end
+        end
+    end)
+end
+
+-- ============================================
+-- STEP 3.7: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
+-- ============================================
+print("\n[Step 3.7] Boosting FPS (cleaning up map/lighting)...")
+updateStatus("Boosting FPS...")
+
+do
+    -- ลบทุกอย่างใต้ Lighting และ MaterialService ให้เหลือแค่ตัว service เอง
+    local lightingTargets = {
+        game:GetService("Lighting"),
+        game:GetService("MaterialService"),
+    }
+    for _, parent in ipairs(lightingTargets) do
+        pcall(function()
+            for _, child in ipairs(parent:GetChildren()) do
+                pcall(function() child:Destroy() end)
+            end
+        end)
+    end
+
+    -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
+    -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
+    -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
+    -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เก็บ Campground + Ground + Landmarks (MainFire/CraftingBench/Items)
+    local keepMap = (isVampire and not isVampireAllQuestDone())
+        or (isAlienScientist and not isAlienScientistAllQuestDone())
+        or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
+    local map = workspace:FindFirstChild("Map")
+    if map then
+        local mapFolderNames = {
+            "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+            "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+            "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+        }
+        for _, folderName in ipairs(mapFolderNames) do
+            -- ข้าม "Ground" + "Landmarks" ถ้า Vampire/AlienScientist ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
+            -- ข้าม "Campground" + "Ground" + "Landmarks" ถ้า Big Game Hunter ยังทำ Quest (ต้องใช้ MainFire/CraftingBench/Items)
+            if keepMap then
+                if folderName == "Ground" or folderName == "Landmarks" then
+                    continue
+                end
+                if BGH.isBigGameHunter
+                    and not BGH.isBigGameHunterAllQuestDone()
+                    and folderName == "Campground" then
+                    continue
+                end
+            end
+            local folder = map:FindFirstChild(folderName)
+            if folder then
+                pcall(function()
+                    for _, child in ipairs(folder:GetChildren()) do
+                        -- ห้ามลบ workspace.Map.Landmarks.Stronghold
+                        if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                            pcall(function() child:Destroy() end)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+
+    -- ลบทุกอย่างใต้ workspace.Characters (ยกเว้นถ้า Vampire ยังทำ Quest อยู่)
+    if not keepMap then
+        local chars = workspace:FindFirstChild("Characters")
+        if chars then
+            pcall(function()
+                for _, child in ipairs(chars:GetChildren()) do
+                    pcall(function() child:Destroy() end)
+                end
+            end)
+        end
+    end
+
+    print("[OK] FPS boost cleanup done")
+end
+
+-- จับตำแหน่ง FinalGate ตอนเข้า Stronghold ครั้งแรก ถ้าค่าเปลี่ยน = เคลียร์แล้ว
+local function getFinalGatePos()
+    local map = workspace:FindFirstChild("Map")
+    local landmarks = map and map:FindFirstChild("Landmarks")
+    local sh = landmarks and landmarks:FindFirstChild("Stronghold")
+    local func = sh and sh:FindFirstChild("Functional")
+    local gate = func and func:FindFirstChild("FinalGate")
+    if not gate then return nil end
+
+    if gate:IsA("BasePart") then
+        return gate.Position
+    elseif gate:IsA("Model") then
+        return gate:GetPivot().Position
+    end
+
+    local part = gate:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.Position or nil
+end
+
+local finalGateBasePos = retryUntil("find FinalGate", getFinalGatePos, 0.2)
+
+print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
+    finalGateBasePos.X, finalGateBasePos.Y, finalGateBasePos.Z))
+
+-- ============================================
+-- STEP 4: Wait for Stronghold to Open
+-- ============================================
+
+-- ============================================
+-- VAMPIRE NIGHT LOOP (เฉพาะ Class Vampire)
+-- ทำ Quest LifestealHealing ตอนกลางคืน
+-- ตีด้วย Vampire Scythe + ลด HP ตัวเองเหลือ 1
+-- หยุดเมื่อ: Quest ครบ / Stronghold เปิด / ไม่ใช่กลางคืน
+-- ============================================
+
+-- Forward declarations: ต้องประกาศก่อน vampireNightLoop() เพราะ combatCenter/HOVER_HEIGHT
+-- ถูกประกาศจริงที่บรรทัด 3807 (หลัง function นี้) - ใช้ placeholder ก่อน
+local combatCenter = humanoidRootPart and humanoidRootPart.Position or Vector3.new(0, 0, 0)
+local HOVER_HEIGHT = 10
+
+local function vampireNightLoop()
+    if not isVampire then return end
+    print("[Vampire] Night loop started")
+    local lastLoggedState = nil  -- เก็บ state ที่ print ล่าสุด (กัน spam)
+    local wasNight = false  -- เก็บว่าเคยเป็น Night แล้วหรือยัง (กลางวันมา = เลิก)
+
+    -- ตรวจ dependencies ตอนเริ่ม
+    if not vampireScythe then
+        warn("[Vampire] Vampire Scythe not found in Inventory - cannot fight, will skip hits")
+    end
+    if not LocalPlayer:FindFirstChild("Inventory") then
+        warn("[Vampire] LocalPlayer.Inventory not found - cannot proceed")
+    end
+
+    -- ใช้ AlignPosition + AlignOrientation ลอยค้าง (ไม่ Anchored HRP)
+    local floatAP = nil  -- AlignPosition
+    local floatAO = nil  -- AlignOrientation
+    local followThread = nil  -- task.spawn อัปเดต Position
+    local function ensureFloating()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
+
+        -- สร้าง Attachment ถ้ายังไม่มี
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        -- สร้าง AlignPosition (ล็อคตำแหน่ง)
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 5000  -- แรงพอลอยค้าง แต่ไม่ขัดขวางการวาร์ป
+            floatAP.Responsiveness = 50
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        -- สร้าง AlignOrientation (ล็อคการหมุน)
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
+
+        -- เริ่ม task.spawn อัปเดต Position ทุก 0.5s (ตามตัว)
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
+    end
+
+    -- ลบ AlignPosition/AlignOrientation เมื่อออกจาก NightLoop
+    local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
+    end
+
+    while isVampire do
+        -- ===== State check (Daytime vs Night) — ไม่ break เมื่อ Daytime, ให้ loop ทำงานต่อ =====
+        local currentState
+        local stateOk, stateErr = pcall(function()
+            currentState = workspace:GetAttribute("State")
+        end)
+        if not stateOk then
+            warn(string.format("[Vampire] Failed to read workspace:GetAttribute('State'): %s", tostring(stateErr)))
+            task.wait(1)
+        elseif currentState == nil then
+            warn("[Vampire] workspace:GetAttribute('State') returned nil - game may not be initialized, waiting...")
+            task.wait(1)
+        elseif currentState ~= "Night" then
+            -- DAYTIME: วาร์ปกลับ + รอ Night ถัดไป (loop tick ใหม่)
+            if wasNight then
+                disableFloating()
+                -- วาร์ปกลับจุดเดิม (combatCenter หรือ finalGateBasePos) ซ้ำ 3 ครั้ง
+                local hrp = LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local returnPos = finalGateBasePos or hrp.Position
+                    for i = 1, 3 do
+                        hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait(0.8)
+                    end
+                end
+                wasNight = false
+            end
+            -- print เฉพาะตอน state เปลี่ยน
+            if lastLoggedState ~= currentState then
+                print(string.format("[Vampire] Waiting for night (State: %s)", tostring(currentState)))
+                lastLoggedState = currentState
+            end
+            task.wait(5)
+        else
+            -- ===== NIGHT: pre-checks + main work =====
+            wasNight = true
+            if lastLoggedState ~= "Night" then
+                print("[Vampire] State changed to Night")
+                lastLoggedState = "Night"
+            end
+
+            -- Pre-check 1: Quest ทั้ง 2 stat ครบ? → return (exit)
+            local ok1, result1 = pcall(isVampireAllQuestDone)
+            if not ok1 then
+                warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(result1)))
+            elseif result1 then
+                print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
+                    (classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0),
+                    (CLASS_QUESTS["Vampire"]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].LifestealHealing or 0),
+                    (classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0),
+                    (CLASS_QUESTS["Vampire"]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1]
+                        and CLASS_QUESTS["Vampire"][(LocalPlayer:GetAttribute("ClassLevel") or 1) + 1].DealDamage or 0)))
+                local restoreOk, restoreErr = pcall(restoreHP)
+                if not restoreOk then
+                    warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr)))
+                end
+                disableFloating()
+                local hrpEnd = LocalPlayer.Character
+                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrpEnd then
+                    local returnPos = finalGateBasePos or hrpEnd.Position
+                    for i = 1, 3 do
+                        hrpEnd.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait(0.8)
+                    end
+                end
+                return
+            end
+
+            -- Quest ยังไม่เสร็จ → print progress
+            local lvlNow = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqsNow = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvlNow + 1]
+            local lhNow = classStatCache["Vampire"] and classStatCache["Vampire"]["LifestealHealing"] or 0
+            local ddNow = classStatCache["Vampire"] and classStatCache["Vampire"]["DealDamage"] or 0
+            local lhGoalNow = (reqsNow and reqsNow.LifestealHealing) or 0
+            local ddGoalNow = (reqsNow and reqsNow.DealDamage) or 0
+            print(string.format("[Vampire] Quest: Lifesteal %d/%d, DealDamage %d/%d (ClassLevel=%d)",
+                lhNow, lhGoalNow, ddNow, ddGoalNow, lvlNow))
+
+            -- Pre-check 2: Stronghold เปิด? → return (main flow handle)
+            local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+            if not cultistOk then
+                warn(string.format("[Vampire] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            elseif cultistResult then
+                print("[Vampire] Stronghold opened (Cultist found), pausing NightLoop for Stronghold")
+                disableFloating()
+                return
+            end
+
+            print("[Vampire] State=Night, scanning for monsters")
+        end
+        -- ===== end state check =====
+
+        -- ถ้าไม่ใช่ Night → ข้าม main work (กลับไปเช็ค state ใหม่)
+        if currentState ~= "Night" then
+            continue
+        end
+
+        -- ===== Main work: หา Monster =====
+
+        -- หา Monster ที่ไม่ใช่ Cultist
+        local monsters
+        local findOk, findErr = pcall(findNightMonsters)
+        if not findOk then
+            warn(string.format("[Vampire] findNightMonsters() error: %s", tostring(findErr)))
+            task.wait(1)
+            continue
+        end
+        monsters = findErr  -- pcall returns result as second value when ok
+        if #monsters == 0 then
+            warn("[Vampire] No hittable monsters found in workspace.Characters - waiting 1s")
+            task.wait(1)
+            continue
+        end
+        -- (quiet - ไม่ print "Found N monster")
+
+        -- ตีทีละตัว: ตีซ้ำตัวเดียวจนกว่าจะตาย หรือครบ 100 ที → เปลี่ยนตัว
+        local MAX_HITS_PER_TARGET = 10
+        for monsterIdx, monster in ipairs(monsters) do
+            if not (monster and monster.Parent) then
+                -- (quiet - ไม่ print "Monster already destroyed")
+                continue
+            end
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                warn("[Vampire] No HumanoidRootPart - cannot warp, breaking")
+                break
+            end
+
+            -- ใช้ Anchored HRP ลอยค้าง (ล็อคตัวละคร)
+            ensureFloating()
+
+            -- equip Scythe จริง (Client.InventoryHandler) ให้ Player ถือ Scythe
+            if vampireScythe then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                end)
+            end
+
+            local root = monster:FindFirstChild("HumanoidRootPart")
+                or monster.PrimaryPart
+            if not root then
+                warn(string.format("[Vampire] [%d/%d] %s has no HumanoidRootPart/PrimaryPart, skipping",
+                    monsterIdx, #monsters, monster.Name))
+                continue
+            end
+
+            -- วาร์ปไปเหนือ (20 studs เหมือน Stronghold - airHeight)
+            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            -- อัปเดตตำแหน่งเป้าหมายของ AlignPosition (ให้ลอยตาม)
+            if floatAP then
+                floatAP.Position = hrp.Position
+            end
+            if floatAO then
+                floatAO.CFrame = hrp.CFrame
+            end
+            -- (quiet - ไม่ print "Warping")
+            task.wait(0.2)
+
+            -- ตีซ้ำตัวเดิมจนกว่าจะตาย หรือครบ 100 ที
+            local hitCount = 0
+            while monster and monster.Parent and hitCount < MAX_HITS_PER_TARGET do
+                -- ลด HP ตัวเองเหลือ 1 (ทุกตี — ต้องทำ Lifesteal)
+                local hpOk, hpErr = pcall(keepHPOne)
+                if not hpOk then
+                    warn(string.format("[Vampire] keepHPOne() error: %s", tostring(hpErr)))
+                end
+
+                -- ตีด้วย Vampire Scythe (ไม่ลดเลือดมอน)
+                if vampireScythe then
+                    local hitOk, hitErr = pcall(function()
+                        Event:InvokeServer(monster, vampireScythe, ownerId, hrp.CFrame, false)
+                    end)
+                    if not hitOk then
+                        warn(string.format("[Vampire] Event:InvokeServer() error on %s: %s",
+                            monster.Name, tostring(hitErr)))
+                    end
+                else
+                    warn("[Vampire] No Vampire Scythe - skipping hit")
+                end
+                hitCount = hitCount + 1
+
+                if hitCount == 1 then
+                    -- (quiet - ไม่ print "Hit")
+                end
+
+                -- เช็ค Quest ทั้ง 2 stat (LifestealHealing + DealDamage) ทันที
+                local questOk, questResult = pcall(isVampireAllQuestDone)
+                if not questOk then
+                    warn(string.format("[Vampire] isVampireAllQuestDone() error: %s", tostring(questResult)))
+                elseif questResult then
+                    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                    local lh = classStatCache["Vampire"]
+                        and classStatCache["Vampire"]["LifestealHealing"] or 0
+                    local dd = classStatCache["Vampire"]
+                        and classStatCache["Vampire"]["DealDamage"] or 0
+                    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
+                    local lhGoal = (reqs and reqs.LifestealHealing) or 0
+                    local ddGoal = (reqs and reqs.DealDamage) or 0
+                    print(string.format("[Vampire] Quests done: Lifesteal %d/%d, DealDamage %d/%d",
+                        lh, lhGoal, dd, ddGoal))
+                    local restoreOk2, restoreErr2 = pcall(restoreHP)
+                    if not restoreOk2 then
+                        warn(string.format("[Vampire] restoreHP() error: %s", tostring(restoreErr2)))
+                    end
+                    return  -- ออกจาก vampireNightLoop ทันที
+                end
+
+                -- เช็คว่ามอนตายหรือยัง (Dead attribute หรือ Humanoid.Health <= 0)
+                local npc = monster:FindFirstChild("NPC")
+                local isDead = false
+                if npc then
+                    if npc:GetAttribute("Dead") == true then isDead = true end
+                    if npc:IsA("Humanoid") and npc.Health <= 0 then isDead = true end
+                end
+
+                if isDead then
+                    -- (quiet - ไม่ print "Killed after N hits")
+                    break  -- ตายแล้ว → ตัวถัดไป
+                end
+
+                if hitCount >= MAX_HITS_PER_TARGET then
+                    warn(string.format("[Vampire] [%d/%d] %s survived %d hits, skipping to next",
+                        monsterIdx, #monsters, monster.Name, MAX_HITS_PER_TARGET))
+                    break  -- ครบ 100 → เปลี่ยนตัว
+                end
+
+                task.wait(0.2)
+            end
+        end
+
+        -- (quiet - ไม่ print "Finished this batch")
+        task.wait(1)
+    end
+
+    -- วาร์ปกลับ combatCenter
+    local hrp = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+            * CFrame.Angles(math.rad(-90), 0, 0)
+    end
+    print("[Vampire] Night loop ended, at Stronghold")
+end
+
+-- ============================================
+-- ALIEN SCIENTIST NIGHT LOOP
+-- ฟาร์ม quest Dissolves: equip Dissolve Ray + zeroEnemyHealth + fire RequestDissolveEnemy
+-- MAX_HITS_PER_TARGET = 3 (ถ้ายังไม่ตาย → skip ไปตัวถัดไปทันที ไม่ retry ไม่ grace)
+-- Reuse: zeroEnemyHealth, findNightMonsters, checkAnyCultistSpawned, airHeight, finalGateBasePos
+-- ============================================
+local function alienScientistNightLoop()
+    if not isAlienScientist then return end
+    print("[AlienScientist] Night loop started")
+
+    -- Floating helpers (duplicate จาก vampireNightLoop เพื่อกัน regression)
+    -- ใช้ AlignPosition + AlignOrientation ลอยค้างเหนือมอน ป้องกันตัวตกพื้นระหว่างยิง Dissolve Ray
+    local floatAP = nil  -- AlignPosition
+    local floatAO = nil  -- AlignOrientation
+    local followThread = nil  -- task.spawn อัปเดต Position
+    local function ensureFloating()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
+
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 5000
+            floatAP.Responsiveness = 50
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
+
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
+    end
+    local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
+    end
+
+    -- Cleanup floating เมื่อออกจาก function (ทุก exit path)
+    -- ต้อง hook ก่อนเริ่ม loop เพราะ return หลายจุด
+
+    local lastLoggedState, wasNight = nil, false
+    local DISSOLVE_TIMEOUT = 3       -- วินาที — ถ้าเกินนี้ monster ยังไม่หาย → skip
+    local HIT_INTERVAL = 0.2         -- วินาที — ระยะห่างระหว่าง dissolve แต่ละรอบ
+
+    -- Pre-flight checks (warn only, don't abort - inventory may fill later)
+    if not dissolveRay then
+        warn("[AlienScientist] Dissolve Ray not found in Inventory")
+    end
+    if not dissolveRemote then
+        warn("[AlienScientist] RequestDissolveEnemy remote not resolved")
+    end
+
+    -- Helper: วาร์ปกลับ Stronghold (ใช้ตอนจบ loop / กลางวันมา)
+    local function warpBackToStronghold()
+        local hrp = LocalPlayer.Character
+            and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local returnPos = finalGateBasePos or hrp.Position
+        for _ = 1, 3 do
+            hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.8)
+        end
+    end
+
+    while true do
+        -- ===== State check (Daytime vs Night) — ไม่ break เมื่อ Daytime, ให้ loop ทำงานต่อ =====
+        local stateOk, currentState = pcall(function()
+            return workspace:GetAttribute("State")
+        end)
+        if not stateOk then
+            warn(string.format("[AlienScientist] State read error: %s", tostring(currentState)))
+            task.wait(1)
+        elseif currentState ~= "Night" then
+            -- DAYTIME: วาร์ปกลับ + รอ Night ถัดไป (loop tick ใหม่)
+            if wasNight then
+                print("[AlienScientist] Daytime arrived, warping back + waiting for next night")
+                disableFloating()
+                warpBackToStronghold()
+                wasNight = false
+            end
+            if lastLoggedState ~= currentState then
+                print(string.format("[AlienScientist] Waiting for night (State: %s)", tostring(currentState)))
+                lastLoggedState = currentState
+            end
+            task.wait(5)
+        else
+            -- ===== NIGHT: pre-checks + main work =====
+            wasNight = true
+            if lastLoggedState ~= "Night" then
+                print("[AlienScientist] State=Night")
+                lastLoggedState = "Night"
+            end
+
+            -- Pre-check 1: Quest done? → return (exit)
+            local questOk, questResult = pcall(isAlienScientistAllQuestDone)
+            if not questOk then
+                warn(string.format("[AlienScientist] isAlienScientistAllQuestDone() error: %s", tostring(questResult)))
+            elseif questResult then
+                local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+                local reqs = CLASS_QUESTS["Alien Scientist"] and CLASS_QUESTS["Alien Scientist"][lvl + 1]
+                local goal = (reqs and reqs.Dissolves) or 0
+                local have = classStatCache["Alien Scientist"]
+                    and classStatCache["Alien Scientist"]["Dissolves"] or 0
+                print(string.format("[AlienScientist] Quest done: Dissolves %d/%d", have, goal))
+                disableFloating()
+                warpBackToStronghold()
+                return
+            end
+
+            -- Pre-check 2: Cultist spawned? → return (main flow handle)
+            local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+            if not cultistOk then
+                warn(string.format("[AlienScientist] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+            elseif cultistResult then
+                print("[AlienScientist] Stronghold opened, pausing NightLoop")
+                disableFloating()
+                return
+            end
+        end
+        -- ===== end state check =====
+
+        -- ถ้าไม่ใช่ Night → ข้าม main work (กลับไปเช็ค state ใหม่)
+        if currentState ~= "Night" then
+            continue
+        end
+
+        -- ===== Main work: หา Monster =====
+
+        -- หา Monster
+        local monsters
+        local findOk, findResult = pcall(findNightMonsters)
+        if not findOk then
+            warn(string.format("[AlienScientist] findNightMonsters() error: %s", tostring(findResult)))
+            task.wait(1)
+            continue
+        end
+        monsters = findResult
+        if #monsters == 0 then
+            warn("[AlienScientist] No hittable monsters found - waiting 1s")
+            task.wait(1)
+            continue
+        end
+
+        -- ตีทีละตัว: equip Dissolve Ray + warp เหนือ + hit 1 ครั้ง
+
+        -- Equip Dissolve Ray แค่รอบแรก (ก่อน for loop) — ใช้ pattern ToolHandle/OriginalItem เหมือนส่วนอื่น ๆ ของ script
+        local function isDissolveRayEquipped()
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            local currentTool = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
+            return currentTool and currentTool.Name == "Dissolve Ray"
+        end
+        if dissolveRay and not isDissolveRayEquipped() then
+            pcall(function()
+                Client.InventoryHandler.RequestEquipItem(dissolveRay)
+            end)
+            local tStart = os.clock()
+            local equipped = false
+            while (os.clock() - tStart) < 3 do
+                if isDissolveRayEquipped() then
+                    equipped = true
+                    break
+                end
+                task.wait(0.1)
+            end
+            if not equipped then
+                warn("[AlienScientist] Tool equip timeout (3s) - continuing anyway")
+            end
+        elseif not dissolveRay then
+            warn("[AlienScientist] dissolveRay is nil - cannot equip")
+        end
+
+        for monsterIdx, monster in ipairs(monsters) do
+            -- State check ใน for loop — early break ถ้า Day มาแล้ว
+            if workspace:GetAttribute("State") ~= "Night" then
+                disableFloating()
+                warpBackToStronghold()
+                return
+            end
+
+            -- Skip Bunny / Bee / Cultist* (ไม่ dissolve — ไม่ใช่เป้าหมาย)
+            local skipDissolve = (monster.Name == "Bunny")
+                or (monster.Name == "Bee")
+                or string.find(monster.Name, "Cultist", 1, true)
+            if skipDissolve then
+                continue
+            end
+
+            if not (monster and monster.Parent) then
+                continue
+            end
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                warn("[AlienScientist] No HumanoidRootPart - cannot warp, breaking")
+                break
+            end
+
+            -- ลอยตัวค้างเหนือมอน (AlignPosition+AlignOrientation) ป้องกันตกพื้นระหว่างยิง
+            ensureFloating()
+
+            -- Verify Dissolve Ray ยังถืออยู่ (ถ้าไม่ใช่ → re-equip)
+            if not isDissolveRayEquipped() then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(dissolveRay)
+                end)
+                local tStart2 = os.clock()
+                while (os.clock() - tStart2) < 2 do
+                    if isDissolveRayEquipped() then break end
+                    task.wait(0.1)
+                end
+            end
+
+            local root = monster:FindFirstChild("HumanoidRootPart")
+                or monster.PrimaryPart
+            if not root then
+                continue
+            end
+
+            -- วาร์ปเหนือมอน 20 studs (airHeight)
+            hrp.CFrame = CFrame.new(root.Position + Vector3.new(0, airHeight, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            -- Update floating target ทันที (กัน Player เด้งกลับจุดเดิมระหว่าง follow thread update)
+            if floatAP then
+                floatAP.Position = hrp.Position
+            end
+            if floatAO then
+                floatAO.CFrame = hrp.CFrame
+            end
+            task.wait(0.2)
+
+            -- Quest check ก่อน hit (early exit ถ้า quest done)
+            local midOk, midDone = pcall(isAlienScientistAllQuestDone)
+            if midOk and midDone then
+                disableFloating()
+                warpBackToStronghold()
+                return
+            end
+
+            -- รอ 1 วิก่อนเริ่ม dissolve (ให้ Player settle หลัง warp)
+            task.wait(1)
+
+            -- Dissolve loop: zero HP + fire ทุก 0.2s จนกว่า server ตอบ Success=true หรือเกิน 3 วินาที
+            local tStart = os.clock()
+            while (os.clock() - tStart) < DISSOLVE_TIMEOUT do
+                if not (monster and monster.Parent) then
+                    break
+                end
+                pcall(zeroEnemyHealth, monster)
+
+                if dissolveRemote then
+                    local fireOk, fireResult = pcall(function()
+                        return dissolveRemote:InvokeServer(monster)
+                    end)
+                    if fireOk then
+                        -- เช็คจาก server response: Success=true → dissolve สำเร็จ
+                        if type(fireResult) == "table" and fireResult.Success == true then
+                            break
+                        end
+                    else
+                        warn(string.format("[AlienScientist] InvokeServer error: %s", tostring(fireResult)))
+                    end
+                else
+                    warn("[AlienScientist] No dissolveRemote - skipping hit")
+                    break
+                end
+
+                task.wait(HIT_INTERVAL)
+            end
+        end
+        task.wait(1)
+    end
+
+    disableFloating()  -- safety: cleanup ก่อนจบ function
+end
+
+-- ============================================
+-- VAMPIRE HP WATCHER: ลด HP ตัวเองเหลือ 1 ตลอดเวลา
+-- ตราบเท่าที่ Quest LifestealHealing ยังไม่เสร็จ
+-- เมื่อครบแล้ว → เซ็ต HP กลับ 100 (ครั้งเดียว)
+-- ============================================
+if isVampire then
+    task.spawn(function()
+        local hpRestored = false
+        while isVampire do
+            if isVampireAllQuestDone() then
+                if not hpRestored then
+                    restoreHP()
+                    hpRestored = true
+                    -- (quiet - ไม่ print "All quests done")
+                end
+            else
+                hpRestored = false
+                keepHPOne()
+            end
+            task.wait(0.5)
+        end
+    end)
+end
+
+-- ============================================
+-- BIG GAME HUNTER LOOP
+-- ทำ Quest ConsumePelt + WolfKills ตีได้ทั้ง Day และ Night
+-- ลำดับความสำคัญ: Wolf > Scorpion > Alpha Wolf > Mammoth > Bear > Polar Bear > Boar > Arctic Fox > Blue Frog > Bunny
+-- WolfKills ยังไม่ครบ → ตีเฉพาะ Wolf ธรรมดา
+-- Hit pattern: zero -> wait 1s -> axe hit (เหมือน Cultist fight loop)
+-- ลอยค้างเหนือเป้า 10 studs ด้วย AlignPosition + AlignOrientation (เหมือน Vampire/Alien)
+-- หยุดเมื่อ: Quest done / Cultist spawned (Stronghold เริ่ม)
+-- ============================================
+local function bigGameHunterNightLoop()
+    if not BGH.isBigGameHunter then return end
+    print("[BigGameHunter] Loop started")
+
+    local PELT_SEARCH_RADIUS = 50
+    local HOVER_HEIGHT = 20
+
+    -- Floating helpers (เหมือน Vampire/Alien pattern) — แยก scope ด้วย do block
+    -- เพื่อลด local register count ของ outer function (กัน Luau 200-register limit)
+    local floatAP, floatAO, followThread
+
+    local function ensureFloating()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not (char and hrp) then return end
+
+        if not hrp:FindFirstChild("FloatAttachment") then
+            local att = Instance.new("Attachment")
+            att.Name = "FloatAttachment"
+            att.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignPosition") then
+            floatAP = Instance.new("AlignPosition")
+            floatAP.Name = "FloatAlignPosition"
+            floatAP.Mode = Enum.PositionAlignmentMode.OneAttachment
+            floatAP.Attachment0 = hrp.FloatAttachment
+            floatAP.MaxForce = 5000
+            floatAP.Responsiveness = 50
+            floatAP.Position = hrp.Position
+            floatAP.Parent = hrp
+        end
+
+        if not hrp:FindFirstChild("FloatAlignOrientation") then
+            floatAO = Instance.new("AlignOrientation")
+            floatAO.Name = "FloatAlignOrientation"
+            floatAO.Mode = Enum.OrientationAlignmentMode.OneAttachment
+            floatAO.Attachment0 = hrp.FloatAttachment
+            floatAO.MaxTorque = 5000
+            floatAO.Responsiveness = 50
+            floatAO.CFrame = hrp.CFrame
+            floatAO.Parent = hrp
+        end
+
+        if not followThread then
+            followThread = task.spawn(function()
+                while floatAP and floatAP.Parent do
+                    local c = LocalPlayer.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if h then
+                        floatAP.Position = h.Position
+                        if floatAO then
+                            floatAO.CFrame = h.CFrame
+                        end
+                    end
+                    task.wait(0.5)
+                end
+                followThread = nil
+            end)
+        end
+    end
+
+    local function disableFloating()
+        if followThread then
+            pcall(function() task.cancel(followThread) end)
+            followThread = nil
+        end
+        pcall(function() if floatAP then floatAP:Destroy() end end)
+        pcall(function() if floatAO then floatAO:Destroy() end end)
+        floatAP = nil
+        floatAO = nil
+    end
+
+    -- หา Stronghold Floor position เพื่อ warp กลับตอนจบ loop / กลางวัน
+    local function warpBackToStronghold()
+        local hrp = LocalPlayer.Character
+            and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local returnPos = finalGateBasePos or hrp.Position
+        for _ = 1, 3 do
+            hrp.CFrame = CFrame.new(returnPos + Vector3.new(0, 10, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+            task.wait(0.8)
+        end
+    end
+
+    -- Helper: BGH loop จบ — disable floating + warp + cleanup map/chars
+    -- เรียกเมื่อ Quest done / PeltList done (BGH ทำงานเสร็จแล้ว)
+    -- reason: "quest" หรือ "peltlist" — ใช้ print ที่เหมาะสม
+    local function bghExitAndCleanup(reason)
+        if reason == "quest" then
+            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+            local reqs = CLASS_QUESTS["Big Game Hunter"] and CLASS_QUESTS["Big Game Hunter"][lvl + 1]
+            local goal_consume = (reqs and reqs.ConsumePelt) or 0
+            local goal_wolves = (reqs and reqs.WolfKills) or 0
+            local have_consume = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["ConsumePelt"] or 0
+            local have_wolves = classStatCache["Big Game Hunter"]
+                and classStatCache["Big Game Hunter"]["WolfKills"] or 0
+            print(string.format("[BigGameHunter] Quests done: ConsumePelt %d/%d, WolfKills %d/%d",
+                have_consume, goal_consume, have_wolves, goal_wolves))
+        elseif reason == "peltlist" then
+            print("[BigGameHunter] All PeltList types Complete - exiting")
+        end
+        disableFloating()
+        warpBackToStronghold()
+        pcall(function()
+            local map = workspace:FindFirstChild("Map")
+            if map then
+                local mapFolderNames = {
+                    "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
+                    "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+                    "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
+                }
+                for _, folderName in ipairs(mapFolderNames) do
+                    local folder = map:FindFirstChild(folderName)
+                    if folder then
+                        for _, child in ipairs(folder:GetChildren()) do
+                            if not (folderName == "Landmarks" and child.Name == "Stronghold") then
+                                pcall(function() child:Destroy() end)
+                            end
+                        end
+                    end
+                end
+            end
+            local chars = workspace:FindFirstChild("Characters")
+            if chars then
+                for _, child in ipairs(chars:GetChildren()) do
+                    pcall(function() child:Destroy() end)
+                end
+            end
+        end)
+    end
+
+    -- Helper: BGH loop จบเพื่อเข้า Stronghold fight — แค่ disable floating + warp กลับ
+    -- ไม่ cleanup เพราะ Cultist + map folders ต้องใช้ใน Stronghold fight
+    local function bghExitForStronghold()
+        disableFloating()
+        warpBackToStronghold()
+    end
+
+    -- counter สำหรับนับจำนวนครั้งที่ "ไม่เจอ monster" (กัน infinite loop ถ้า server delay replicate)
+    local noMonsterCount = 0
+    local NO_MONSTER_LIMIT = 3  -- ถ้า 3 รอบติดกันไม่เจอ → exit (BGH ทำไม่ได้แล้ว)
+
+    -- แยก main loop body ออกเป็น inner function เพื่อลด local register count
+    -- (Luau จำกัด 200 registers ต่อ function — outer function มี locals เยอะเกินไป)
+    local function runBGHIteration()
+        -- Pre-check 1: Quest done? → cleanup เต็มรูปแบบ + return (exit) — เช็คก่อน Pre-check 0
+        if BGH.isBigGameHunterAllQuestDone() then
+            bghExitAndCleanup("quest")
+            return false  -- signal: stop loop
+        end
+
+        -- Pre-check 0: PeltList ครบทุก type แล้ว? → cleanup + warp + exit
+        local activePeltTypes = BGH.getActivePeltTypes()
+        if #activePeltTypes == 0 then
+            bghExitAndCleanup("peltlist")
+            return false  -- signal: stop loop
+        end
+
+        -- Pre-check 2: Cultist spawned? → return (Stronghold flow takes over)
+        local cultistOk, cultistResult = pcall(checkAnyCultistSpawned)
+        if not cultistOk then
+            warn(string.format("[BigGameHunter] checkAnyCultistSpawned() error: %s", tostring(cultistResult)))
+        elseif cultistResult then
+            print("[BigGameHunter] Stronghold opened, pausing NightLoop")
+            bghExitForStronghold()
+            return false
+        end
+
+        -- หา monster ตาม priority
+        local monsters
+        local findOk, findResult = pcall(BGH.findMonsters)
+        if not findOk then
+            warn(string.format("[BigGameHunter] findBGHMonsters() error: %s", tostring(findResult)))
+            task.wait(1)
+            return true  -- continue
+        end
+
+        monsters = findResult
+        if #monsters == 0 then
+            -- ไม่เจอมอนที่ตีได้ → บินวน 1 รอบ radius 500 จนกว่าจะเจอ
+            -- ใช้ finalGateBasePos เป็น center (กลาง Stronghold) เพราะอยู่ใน Stronghold
+            print("[BigGameHunter] No hittable monsters - flying to find more")
+            updateStatus("Scanning for monsters...")
+            local foundDuringScan = false
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local center = finalGateBasePos or hrp.Position
+                local scanRadius = 500
+                local scanSteps = 60
+                local circumference = 2 * math.pi * scanRadius
+                local speed = 800
+                local duration = circumference / speed
+                for i = 0, scanSteps do
+                    -- Re-check ระหว่าง fly
+                    if BGH.isBigGameHunterAllQuestDone() then
+                        bghExitAndCleanup("quest")
+                        return false
+                    end
+                    if checkAnyCultistSpawned() then
+                        bghExitForStronghold()
+                        return false
+                    end
+                    local angle = (i / scanSteps) * math.pi * 2
+                    local scanPos = center + Vector3.new(
+                        math.cos(angle) * scanRadius,
+                        airHeight,
+                        math.sin(angle) * scanRadius
+                    )
+                    hrp.CFrame = CFrame.new(scanPos)
+                    if floatAP then floatAP.Position = hrp.Position end
+                    if floatAO then floatAO.CFrame = hrp.CFrame end
+                    task.wait(duration / scanSteps)
+                    -- เช็คทุก 10 steps เผื่อเจอมอน
+                    if i % 10 == 5 then
+                        local ok2, recheck = pcall(BGH.findMonsters)
+                        if ok2 and recheck and #recheck > 0 then
+                            foundDuringScan = true
                             break
                         end
                     end
                 end
-            else
-                -- string เดียว
-                hasTargetTrait = (currentTrait == targetTrait)
+            end
+            -- ถ้าเจอระหว่าง fly → ไม่ต้องเข้า "รอ" mode (เด้งไป for loop เลย)
+            if not foundDuringScan then
+                -- นับครั้งที่ไม่เจอ monster (กัน infinite loop)
+                noMonsterCount = noMonsterCount + 1
+                if noMonsterCount >= NO_MONSTER_LIMIT then
+                    -- Double-check PeltList Complete (กัน false positive จาก server delay replicate)
+                    task.wait(2)  -- รอให้ server replicate
+                    local recheck = BGH.getActivePeltTypes()
+                    if #recheck == 0 then
+                        -- ยืนยัน: PeltList ครบจริง → exit
+                        print("[BigGameHunter] No monsters found " .. NO_MONSTER_LIMIT
+                            .. " times in a row + PeltList confirmed complete - exiting")
+                        bghExitAndCleanup("peltlist")
+                        return false
+                    else
+                        -- PeltList ยังมี type active → server replicate แล้ว → monster spawn ใหม่ → วน loop ใหม่
+                        print("[BigGameHunter] PeltList still has " .. #recheck .. " active types - resetting counter")
+                        noMonsterCount = 0
+                    end
+                end
+                -- หลัง fly scan 1 รอบ: ถ้า WolfKills ยังไม่ครบ + Wolf Pelt Complete + ไม่เจอ Wolf
+                -- → เปลี่ยนไปทำ Pelt อื่นแทน (ถ้ามี) — รอ Wolf spawn ใหม่
+                if not BGH.isWolfKillsQuestDone() then
+                    local active = BGH.getActivePeltTypes()
+                    if not table.find(active, "Wolf") then
+                        -- Wolf Pelt Complete แต่ WolfKills ยังไม่ครบ + ไม่เจอ Wolf
+                        -- → เปลี่ยนโหมด: ตี Pelt อื่นแทน (กิน ConsumePelt เพิ่ม ระหว่างรอ Wolf)
+                        -- override wolfOnlyMode ชั่วคราวใน loop นี้
+                        local otherMonsters = {}
+                        pcall(function()
+                            local chars = workspace:FindFirstChild("Characters")
+                            if not chars then return end
+                            for _, model in ipairs(chars:GetChildren()) do
+                                if not shouldSkipName(model.Name) then
+                                    if model:GetAttribute("StrongholdEnemy") ~= true then
+                                        local hum = model:FindFirstChildOfClass("Humanoid")
+                                            or model:FindFirstChildWhichIsA("Humanoid", true)
+                                        if hum and hum.Parent and hum.Health > 0 then
+                                            if BGH.PRIORITY_INDEX[model.Name] then
+                                                if model.Name ~= "Wolf" then
+                                                    if table.find(active, model.Name) then
+                                                        table.insert(otherMonsters, model)
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        if #otherMonsters > 0 then
+                            -- มี Pelt อื่นให้ตี → ตีเลย
+                            table.sort(otherMonsters, function(a, b)
+                                return (BGH.PRIORITY_INDEX[a.Name] or 999) < (BGH.PRIORITY_INDEX[b.Name] or 999)
+                            end)
+                            for _, otherMonster in ipairs(otherMonsters) do
+                                if not (otherMonster and otherMonster.Parent) then continue end
+                                local otherRoot = otherMonster:FindFirstChild("HumanoidRootPart")
+                                    or otherMonster.PrimaryPart
+                                if not otherRoot then continue end
+                                if axe then
+                                    pcall(function() Client.InventoryHandler.RequestEquipItem(axe) end)
+                                    task.wait(0.2)
+                                end
+                                ensureFloating()
+                                local hrp2 = LocalPlayer.Character
+                                    and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                                if not hrp2 then break end
+                                hrp2.CFrame = CFrame.new(otherRoot.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                                    * CFrame.Angles(math.rad(-90), 0, 0)
+                                if floatAP then floatAP.Position = hrp2.Position end
+                                if floatAO then floatAO.CFrame = hrp2.CFrame end
+                                task.wait(0.2)
+                                pcall(zeroEnemyHealth, otherMonster)
+                                task.wait(1)
+                                pcall(function()
+                                    Event:InvokeServer(otherMonster, axe, ownerId, hrp2.CFrame, false)
+                                end)
+                                while otherMonster and otherMonster.Parent do
+                                    if BGH.isBigGameHunterAllQuestDone() then
+                                        bghExitAndCleanup("quest")
+                                        return false
+                                    end
+                                    if checkAnyCultistSpawned() then
+                                        bghExitForStronghold()
+                                        return false
+                                    end
+                                    pcall(zeroEnemyHealth, otherMonster)
+                                    task.wait(0.5)
+                                    pcall(function()
+                                        Event:InvokeServer(otherMonster, axe, ownerId, hrp2.CFrame, false)
+                                    end)
+                                    task.wait(0.2)
+                                end
+                                if not (otherMonster and otherMonster.Parent) then
+                                    BGH.consumePeltsNear(otherRoot.Position, PELT_SEARCH_RADIUS)
+                                end
+                                task.wait(0.3)
+                            end
+                        else
+                            -- ไม่มี Pelt อื่นให้ตี + ไม่มี Wolf → รอ (ไม่ exit — แค่ continue)
+                            -- เพราะอาจมี Cultist spawn ระหว่างนี้
+                            print("[BigGameHunter] No Wolf + no other pelts - waiting for spawn")
+                        end
+                    end
+                end
+            end
+            return true  -- continue (วน loop ใหม่)
+        end
+
+        for monsterIdx, monster in ipairs(monsters) do
+            -- Re-check ใน for loop
+            if BGH.isBigGameHunterAllQuestDone() then
+                bghExitAndCleanup("quest")
+                return false
+            end
+            if checkAnyCultistSpawned() then
+                bghExitForStronghold()
+                return false
             end
 
-            if hasTargetTrait then
-                -- มี Trait ที่ต้องการแล้ว → ข้ามการสุ่ม
-                print(string.format("✅ %s already has target Trait: %s", targetUnitName, currentTrait))
-
-                -- ส่ง Horst Description + DONE
-                if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                    local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-
-                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, currentTrait))
-
-                    task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
-
-                    -- ส่ง DONE เสมอเมื่อมี Trait ที่ต้องการแล้ว (ไม่ว่า Config จะเป็นอะไร)
-                    if GEM_TARGET then
-                        if currentGems >= GEM_TARGET then
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ GEM_TARGET reached - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
-                    else
-                        local ok = pcall(_G.Horst_AccountChangeDone)
-                        if ok then
-                            _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                            print("✅ Trait Reroll completed - Script will stop...")
-
-                            -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                            while true do
-                                pcall(function()
-                                    local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                    local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                    local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, currentTrait))
-                                end)
-                                task.wait(5)
-                            end
-                        end
-                    end
+            -- Re-check active types (กรณี PeltList Complete เปลี่ยนระหว่าง for loop)
+            -- ยกเว้น Wolf gate (ถ้า WolfKills ยังไม่ครบ ต้องตี Wolf ต่อแม้ Wolf Pelt จะ Complete)
+            local wolfOnlyMode = not BGH.isWolfKillsQuestDone()
+            if not (wolfOnlyMode and monster.Name == "Wolf") then
+                local activeNow = BGH.getActivePeltTypes()
+                if not table.find(activeNow, monster.Name) then
+                    continue
                 end
-            else
-                -- ยังไม่มี Trait ที่ต้องการ → เริ่มสุ่ม
-                printStep(string.format("Rerolling Trait for %s...", targetUnitName))
+            end
 
-                -- เช็ค Trait Reroll จำนวน
-                local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                local traitRerolls = 0
-                if replica and replica.Data and replica.Data.ItemData and replica.Data.ItemData.TraitReroll then
-                    traitRerolls = replica.Data.ItemData.TraitReroll.Amount or 0
-                end
+            if not (monster and monster.Parent) then continue end
+            local hrp = LocalPlayer.Character
+                and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then
+                warn("[BigGameHunter] No HumanoidRootPart - cannot warp, breaking")
+                break
+            end
 
-                if traitRerolls <= 0 then
-                    warn("❌ No Trait Reroll items available")
+            local root = monster:FindFirstChild("HumanoidRootPart")
+                or monster.PrimaryPart
+            if not root then
+                warn(string.format("[BigGameHunter] [%d/%d] %s has no root, skipping",
+                    monsterIdx, #monsters, monster.Name))
+                continue
+            end
 
-                    -- ส่ง Horst Description + DONE (Out of RR)
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                        local currentGems = replica and replica.Data.ItemData.Gem.Amount or 0
-                        local currentRR = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
+            -- Equip axe ก่อนตี (กันของหลุด/ถูก unequip ระหว่างรอ — pattern เดียวกับ fight loop)
+            if axe then
+                pcall(function()
+                    Client.InventoryHandler.RequestEquipItem(axe)
+                end)
+                task.wait(0.2)
+            end
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, currentTrait))
+            -- ลอยค้างเหนือเป้า (ใช้ followThread แบบ real-time — ติดตาม monster ทุก frame)
+            ensureFloating()
 
-                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
-
-                        -- ส่ง DONE เสมอเมื่อหมด Trait Reroll (ไม่ว่า Config จะเป็นอะไร)
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                local ok = pcall(_G.Horst_AccountChangeDone)
-                                if ok then
-                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                    print("✅ GEM_TARGET reached - Script will stop...")
-
-                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                    while true do
-                                        pcall(function()
-                                            local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                            local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                            local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                        end)
-                                        task.wait(5)
-                                    end
-                                end
-                            end
-                        else
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ Out of RR - Script will stop...")
-
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replica and replica.Data.ItemData.Gem.Amount or 0
-                                        local rr = replica and replica.Data.ItemData.TraitReroll and replica.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, currentTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
-                        end
+            -- Spawn task ติดตาม monster position (อัปเดต HRP ทุก 0.1s — ตาม monster ขยับ)
+            local trackThread = task.spawn(function()
+                while monster and monster.Parent and hrp and hrp.Parent do
+                    local currentRoot = monster:FindFirstChild("HumanoidRootPart")
+                        or monster.PrimaryPart
+                    if currentRoot then
+                        local targetPos = currentRoot.Position + Vector3.new(0, HOVER_HEIGHT, 0)
+                        hrp.CFrame = CFrame.new(targetPos) * CFrame.Angles(math.rad(-90), 0, 0)
+                        if floatAP then floatAP.Position = hrp.Position end
+                        if floatAO then floatAO.CFrame = hrp.CFrame end
                     end
-                else
-                -- ฟังก์ชันเช็ค Trait ปัจจุบันพร้อม retry
-                local function getCurrentTrait(fullKey, maxRetries)
-                    maxRetries = maxRetries or 10
-
-                    for i = 1, maxRetries do
-                        local success, result = pcall(function()
-                            local newUnitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-                            if newUnitData and newUnitData[fullKey] then
-                                return newUnitData[fullKey].Trait or "None"
-                            end
-                            return nil
-                        end)
-
-                        if success and result then
-                            return result
-                        end
-
-                        if i < maxRetries then
-                            task.wait(0.1)
-                        end
-                    end
-
-                    return nil
-                end
-
-                -- เริ่มสุ่ม Trait
-                local attempts = 0
-                local success = false
-                local finalTrait = currentTrait
-
-                while attempts < traitRerolls do
-                    -- เช็ค RR ปัจจุบันก่อนสุ่มแต่ละรอบ
-                    local currentReplica = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                    local currentRR = 0
-                    if currentReplica and currentReplica.Data and currentReplica.Data.ItemData and currentReplica.Data.ItemData.TraitReroll then
-                        currentRR = currentReplica.Data.ItemData.TraitReroll.Amount or 0
-                    end
-
-                    if currentRR <= 0 then
-                        print(string.format("⚠️ Out of RR during reroll (attempt %d/%d)", attempts, traitRerolls))
-                        break
-                    end
-
-                    -- กำหนด Trait ที่จะส่งไป
-                    local traitToRoll = nil
-                    if type(targetTrait) == "string" then
-                        traitToRoll = targetTrait
-                    end
-
-                    -- สุ่ม Trait
-                    local rollSuccess, rollError = pcall(function()
-                        Nodes.ROLL_UNIT_TRAIT:FireServer(unitInfo.fullKey, traitToRoll)
-                    end)
-
-                    if not rollSuccess then
-                        task.wait(0.1)
-                        continue
-                    end
-
-                    -- นับ attempts เฉพาะเมื่อ FireServer สำเร็จ
-                    attempts = attempts + 1
-
-                    task.wait(0.5)
-
-                    -- เช็ค Trait ใหม่
-                    local newTrait = getCurrentTrait(unitInfo.fullKey, 10)
-
-                    if not newTrait then
-                        task.wait(0.1)
-                        continue
-                    end
-
-                    finalTrait = newTrait
-
-                    -- ตรวจสอบว่าได้ Trait ที่ต้องการหรือไม่
-                    local gotTargetTrait = false
-
-                    if not targetTrait then
-                        if newTrait ~= "None" then
-                            gotTargetTrait = true
-                        end
-                    elseif type(targetTrait) == "table" then
-                        for _, trait in ipairs(targetTrait) do
-                            if newTrait == trait then
-                                gotTargetTrait = true
-                                break
-                            end
-                        end
-                    else
-                        if newTrait == targetTrait then
-                            gotTargetTrait = true
-                        end
-                    end
-
-                    if gotTargetTrait then
-                        success = true
-                        break
-                    end
-
                     task.wait(0.1)
                 end
+            end)
 
-                -- แสดงผลลัพธ์
-                if success then
-                    print(string.format("✅ %s | Trait: %s | Used: %d | Left: %d",
-                        targetUnitName, finalTrait, attempts, traitRerolls - attempts))
+            task.wait(0.2)
 
-                    -- สำเร็จ
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                        local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                        local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+            -- Quest check ก่อนตี (early exit)
+            if BGH.isBigGameHunterAllQuestDone() then
+                pcall(function() task.cancel(trackThread) end)
+                bghExitAndCleanup("quest")
+                return false
+            end
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", currentGems, currentRR, targetUnitName, finalTrait))
+            -- Hit pattern: zero -> wait 1s -> axe (เหมือน Cultist)
+            pcall(zeroEnemyHealth, monster)
+            task.wait(1)
+            pcall(function()
+                Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
+            end)
+            task.wait(0.3)
 
-                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
+            -- ตีซ้ำจนกว่าจะตาย (ไม่มี cap — recheck ทุก hit)
+            -- Protection: ถ้าตี 5 ครั้งติด HP ไม่ลด → เปลี่ยนตัว (กันตีค้าง)
+            local noDamageStreak = 0
+            while monster and monster.Parent do
+                if BGH.isBigGameHunterAllQuestDone() then
+                    pcall(function() task.cancel(trackThread) end)
+                    bghExitAndCleanup("quest")
+                    return false
+                end
+                if checkAnyCultistSpawned() then
+                    pcall(function() task.cancel(trackThread) end)
+                    bghExitForStronghold()
+                    return false
+                end
 
-                        -- ส่ง DONE เสมอ (ไม่ว่า Config จะเป็นอะไร)
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                local ok = pcall(_G.Horst_AccountChangeDone)
-                                if ok then
-                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                    print("✅ GEM_TARGET reached - Script will stop...")
+                -- เช็ค HP ก่อนตี
+                local humBefore = monster:FindFirstChildOfClass("Humanoid")
+                    or monster:FindFirstChildWhichIsA("Humanoid", true)
+                local hpBefore = humBefore and humBefore.Health or 0
 
-                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                    while true do
-                                        pcall(function()
-                                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                            local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                            local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
-                                        end)
-                                        task.wait(5)
-                                    end
-                                end
-                            end
-                        else
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ Trait Reroll succeeded - Script will stop...")
+                pcall(zeroEnemyHealth, monster)
+                task.wait(0.5)
+                pcall(function()
+                    Event:InvokeServer(monster, axe, ownerId, hrp.CFrame, false)
+                end)
+                task.wait(0.2)
 
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ✅ %s", gems, rr, targetUnitName, finalTrait))
-                                    end)
-                                    task.wait(5)
-                                end
-                            end
+                -- เช็ค HP หลังตี
+                if monster and monster.Parent and humBefore then
+                    local humAfter = monster:FindFirstChildOfClass("Humanoid")
+                        or monster:FindFirstChildWhichIsA("Humanoid", true)
+                    local hpAfter = humAfter and humAfter.Health or 0
+                    if hpAfter >= hpBefore then
+                        noDamageStreak = noDamageStreak + 1
+                        if noDamageStreak >= 5 then
+                            -- ตี 5 ครั้ง HP ไม่ลด → เปลี่ยนตัว
+                            warn(string.format("[BigGameHunter] %s not taking damage after 5 hits - skipping",
+                                monster.Name))
+                            break
+                        end
+                    else
+                        noDamageStreak = 0  -- reset (มี damage แล้ว)
+                    end
+                end
+            end
+
+            -- ยกเลิก track thread เมื่อจบ (monster ตายหรือเปลี่ยนตัว)
+            pcall(function() task.cancel(trackThread) end)
+
+            -- หลังตีเสร็จรอบสุดท้าย → ถ้าตายแล้ว หา pelt ใกล้จุดตาย
+            if not (monster and monster.Parent) then
+                local dropPos = root.Position
+                BGH.consumePeltsNear(dropPos, PELT_SEARCH_RADIUS)
+                noMonsterCount = 0  -- reset (kill monster สำเร็จ = โค้ดยังทำงานได้)
+            end
+        end
+        task.wait(0.5)
+        return true  -- continue
+    end
+
+    while BGH.isBigGameHunter do
+        if not runBGHIteration() then break end
+    end
+
+    disableFloating()  -- safety cleanup
+end
+
+-- ============================================
+-- VAMPIRE: เริ่ม NightLoop ทันทีหลังวาร์ปมา Stronghold Floor (ไม่รอ Stronghold เปิด)
+-- ALIEN SCIENTIST: เช่นเดียวกัน - ฟาร์ม Dissolves จนกว่า Cultist จะ spawn
+-- BIG GAME HUNTER: เช่นเดียวกัน - ตี Wolf/Pelt mobs จนกว่า Cultist จะ spawn
+-- ============================================
+if isVampire and not isVampireAllQuestDone() then
+    task.spawn(vampireNightLoop)
+elseif isAlienScientist and not isAlienScientistAllQuestDone() then
+    task.spawn(alienScientistNightLoop)
+elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
+    task.spawn(bigGameHunterNightLoop)
+end
+
+print("\n[Step 4] Waiting for Stronghold to open...")
+updateStatus("Waiting for Stronghold...")
+
+while true do
+    local remaining = getStrongholdTimeRemaining()
+
+    if not remaining then
+        updateStatus("Stronghold Timer Not Found...")
+        task.wait(1)
+    elseif remaining <= 0 then
+        print("✅ Stronghold is OPEN!")
+        updateStatus("✅ Stronghold Open!")
+        break
+    else
+        local minutes = math.floor(remaining / 60)
+        local seconds = math.floor(remaining % 60)
+        updateStatus(string.format("Stronghold: %02d:%02d", minutes, seconds))
+        task.wait(1)
+    end
+end
+
+-- ============================================
+-- STEP 5: Warp to Wave1 TriggerZone
+-- ============================================
+
+print("\n[Step 5] Warping to Wave1 TriggerZone...")
+updateStatus("Warping to TriggerZone...")
+
+-- (โล่ Stronghold แบบเดิมถูกยกเลิก - ใช้ GLOBAL SHIELD แบบ weld ติดตัว
+--  ที่สร้างไว้ตอนต้นสคริปต์แทน ซึ่งเปิดตลอดและตามตัวทันทีทุก FPS)
+
+-- ล็อคตัวไม่ให้ตกตลอดเวลา (ดึง character สดทุก tick กัน respawn)
+local function getLiveParts()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then return nil, nil end
+    return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
+end
+
+local triggerZone = retryUntil("find Wave1 TriggerZone", function()
+    local functional = getStrongholdFunctional()
+    local tz = functional
+        and functional:FindFirstChild("EnemyWaves12")
+        and functional.EnemyWaves12:FindFirstChild("Wave1")
+        and functional.EnemyWaves12.Wave1:FindFirstChild("TriggerZone")
+    if tz and tz:IsA("BasePart") then return tz end
+    return nil
+end, 0.5)
+
+local tzPos = triggerZone.Position - Vector3.new(0, 3, 0)
+strongholdFloorPos = tzPos
+
+if platform and platform.Parent then
+    platform.Size = Vector3.new(16, 1, 16)
+    platform.Position = tzPos - Vector3.new(0, 4, 0)
+end
+
+local tzWaitPos = tzPos + Vector3.new(0, 3, 0) -- วาร์ปสูงกว่า TriggerZone 3 studs ตอนรอมอนเกิด ให้ตกลงมาโดน TriggerZone จริงๆ
+
+local function warpToTriggerZone()
+    local hrp = getLiveParts()
+    if hrp then
+        hrp.CFrame = CFrame.new(tzWaitPos)
+    end
+end
+
+warpToTriggerZone()
+task.wait(0.3)
+print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
+
+-- Equip Old Sack เพื่อ trigger TriggerZone แล้วกลับไปใช้ axe เดิม
+do
+    local inv = LocalPlayer:FindFirstChild("Inventory")
+    local oldSack = inv and inv:FindFirstChild("Old Sack")
+    if oldSack then
+        Client.InventoryHandler.RequestEquipItem(oldSack)
+        task.wait(0.5)
+    end
+    Client.InventoryHandler.RequestEquipItem(bestAxeCombat)
+end
+
+
+-- รอมอนเกิด: ถ้าไม่เกิดภายในเวลาที่กำหนด ให้วาร์ปไป Floor แล้ววาร์ปกลับ TriggerZone ใหม่ วนจนกว่ามอนจะเกิด
+do
+    local floorCenter = getFloorInfo()
+    local floorPos = floorCenter and (floorCenter + Vector3.new(0, 10, 0))
+
+    local function anyCultistSpawned()
+        local chars = workspace:FindFirstChild("Characters")
+        if not chars then return false end
+        for _, c in ipairs(chars:GetChildren()) do
+            -- เช็คจาก attribute StrongholdEnemy บนโมเดล (ไม่ใช้ชื่อ/ตำแหน่งแล้ว)
+            if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+                return true
+            end
+        end
+        return false
+    end
+
+    local waited = 0
+    local WAIT_STEP = 0.2
+    local SPAWN_TIMEOUT = 8 -- วิ ที่รอมอนเกิดก่อนจะวาร์ปไป Floor แล้ววาร์ปกลับ
+
+    while not anyCultistSpawned() do
+        task.wait(WAIT_STEP)
+        waited += WAIT_STEP
+
+        if waited >= SPAWN_TIMEOUT then
+            print("[Step 5] Cultist not spawned - warping to Floor then back to TriggerZone")
+            updateStatus("Re-warp waiting for spawn...")
+
+            if floorPos then
+                local hrp = getLiveParts()
+                if hrp then
+                    hrp.CFrame = CFrame.new(floorPos)
+                end
+                task.wait(0.3)
+            end
+
+            warpToTriggerZone()
+            waited = 0
+        end
+    end
+
+    print("✅ Cultist spawned!")
+end
+
+
+-- ============================================
+-- STEP 6: Fight loop - วาร์ปเข้าไปหา Cultist "ทุกตัว" ทีละตัว ปรับเลือดแล้วตีตัวนั้นจากจุดใกล้
+-- ทำครบรอบแล้วตัวไหนยังไม่ตาย = วนทำใหม่อีกรอบ ครบ 2 รอบเต็มยังไม่ตาย
+-- = โหมดเก็บตาย: วาร์ป + ปรับเลือดเร็วก่อน "ทุกตี" (ไม่ต้องรอ) ตีซ้ำจนตาย
+-- ============================================
+
+print("\n[Step 6] Fighting Cultists in Stronghold...")
+updateStatus("Fighting Cultists...")
+
+-- Re-equip axe ก่อนเริ่ม fight เผื่อถูก unequip ระหว่างรอ
+do
+    Client.InventoryHandler.RequestEquipItem(bestAxeCombat)
+    local waited = 0
+    while waited < 3 do
+        local char = LocalPlayer.Character
+        local th = char and char:FindFirstChild("ToolHandle")
+        if th and th:FindFirstChild("OriginalItem") then
+            axe = th.OriginalItem.Value
+            break
+        end
+        task.wait(0.1)
+        waited += 0.1
+    end
+end
+
+local combatCenter = strongholdFloorPos or humanoidRootPart.Position
+local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ป "ด้านบน" ของมอน 10 studs (หันหน้าลง)
+local ATTACK_INTERVAL = 0.18
+
+-- นับว่า Cultist ตัวไหน "รอด" จาก [วาร์ปเข้าใกล้ + ปรับเลือด + รอ + ตี] ไปแล้วกี่รอบ (weak key กัน memory leak)
+-- ครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย = เข้าโหมดเก็บตาย: วาร์ป + ปรับเลือดเร็ว (ไม่รอ) + ตี ซ้ำจนตาย
+local surviveCounts = setmetatable({}, {__mode = "k"})
+local FINISH_MODE_AFTER = 2
+
+-- เช็คมอนที่จะตี: ดูจาก attribute "StrongholdEnemy" บนโมเดลใน workspace.Characters โดยตรง
+-- (ยกเลิกการเช็คชื่อ/ระยะ/Floor เดิมทั้งหมด - เชื่อ flag ที่เกม stamp ไว้บนตัวโมเดลเอง)
+local function findCultists()
+    local list = {}
+    local chars = workspace:FindFirstChild("Characters")
+    if not chars then return list end
+    for _, c in ipairs(chars:GetChildren()) do
+        if c.Name == "Deer" then continue end -- Deer ไม่ตี/ไม่ลดเลือด (จัดการโดย Deer Watcher)
+        if isStrongholdEnemy(c) then
+            local root = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart or c:FindFirstChildWhichIsA("BasePart")
+            local hum = c:FindFirstChildOfClass("Humanoid")
+                or c:FindFirstChildWhichIsA("Humanoid", true)
+            -- ไม่กรอง Health > 0: เลือด 0 = ตายปลอม ต้องตีต่ออีก 1 รอบถึงตายจริง
+            if root and hum then
+                table.insert(list, c)
+            end
+        end
+    end
+    return list
+end
+
+-- ลอยแบบ IY Fly (ไม่ hard-lock): ติด BodyVelocity บน HRP คนเดียวพอ
+-- ตัวละครยังเป็น "ปกติ" - มี animation ฟิสิกส์ทำงาน แค่ลอยนิ่งไม่ตก
+-- (เดิมใช้ PlatformStand + เคลียร์ velocity ทุกเฟรม = แข็งค้างเป็นหุ่น)
+local flyBodyVelocity
+
+local function ensureFlyBody(hrp)
+    if not hrp then return end
+    -- HRP เปลี่ยนไหม (ตายเกิดใหม่) ถ้าเปลี่ยนสร้างติดใหม่อัตโนมัติ
+    if not flyBodyVelocity or not flyBodyVelocity.Parent then
+        flyBodyVelocity = Instance.new("BodyVelocity")
+        flyBodyVelocity.Name = "SugarHubHover"
+        flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        flyBodyVelocity.Velocity = Vector3.zero -- ลอยนิ่ง - แรงนี้สู้แรงโน้มถ่วงเอง
+        flyBodyVelocity.Parent = hrp
+    end
+end
+
+local function destroyFlyBody()
+    if flyBodyVelocity then
+        flyBodyVelocity:Destroy()
+        flyBodyVelocity = nil
+    end
+end
+
+local lockConn
+lockConn = RunService.Heartbeat:Connect(function()
+    local hrp = getLiveParts()
+    ensureFlyBody(hrp)
+end)
+
+-- Stronghold เคลียร์แล้ว = ตำแหน่ง FinalGate เปลี่ยนจากที่จับไว้ตอนแรก
+local GATE_MOVE_THRESHOLD = 1     -- ขยับเกิน 1 stud ถือว่าเปลี่ยนจริง
+local CLEAR_CONFIRM_COUNT = 3     -- อ่านติดกัน 3 ครั้ง กันค่ากระพริบ
+local FIGHT_MIN_SECONDS = 10      -- 10 วิแรกไม่ตรวจ กันประตูขยับตอนเปิดด่าน
+
+local function getFinalGatePart()
+    local gate = workspace:FindFirstChild("FinalGate", true)
+    if not gate then return nil end
+    if gate:IsA("BasePart") then return gate end
+    if gate:IsA("Model") then
+        return gate.PrimaryPart or gate:FindFirstChildWhichIsA("BasePart", true)
+    end
+    return nil
+end
+
+local fightStart = os.clock()
+local clearHits = 0
+local gateOrigin = nil
+
+do
+    local part = getFinalGatePart()
+    if part then gateOrigin = part.Position end
+end
+
+local function isStrongholdCleared()
+    if os.clock() - fightStart < FIGHT_MIN_SECONDS then
+        return false
+    end
+
+    local part = getFinalGatePart()
+    if not part then
+        clearHits = 0
+        return false
+    end
+
+    -- ถ้าจับตำแหน่งแรกไม่ทัน (ประตู stream มาช้า) จับตอนนี้แล้วเริ่มนับใหม่
+    if not gateOrigin then
+        gateOrigin = part.Position
+        clearHits = 0
+        return false
+    end
+
+    if (part.Position - gateOrigin).Magnitude > GATE_MOVE_THRESHOLD then
+        clearHits = clearHits + 1
+    else
+        clearHits = 0
+    end
+
+    return clearHits >= CLEAR_CONFIRM_COUNT
+end
+
+local TOTAL_ROUNDS = 3
+local completedRounds = 0
+
+local function doOneRound()
+    fightStart = os.clock()
+    clearHits = 0
+    -- ใช้ตำแหน่ง gate ตอน Stronghold ยังปิด (จับไว้แล้วตอน Step 3.6)
+    gateOrigin = finalGateBasePos
+
+    -- รอ Cultist เกิด
+    do
+        local floorCenter2 = getFloorInfo()
+        local floorPos2 = floorCenter2 and (floorCenter2 + Vector3.new(0, 10, 0))
+
+        local function anyCultistSpawned()
+            local chars = workspace:FindFirstChild("Characters")
+            if not chars then return false end
+            for _, c in ipairs(chars:GetChildren()) do
+                -- เช็คจาก attribute StrongholdEnemy บนโมเดล (ไม่ใช้ชื่อ/ตำแหน่งแล้ว)
+                if isStrongholdEnemy(c) and c:FindFirstChildOfClass("Humanoid") then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local waited = 0
+        local WAIT_STEP = 0.2
+        local SPAWN_TIMEOUT = 8
+        while not anyCultistSpawned() do
+            task.wait(WAIT_STEP)
+            waited += WAIT_STEP
+            -- อัปเดต countdown ทุก 0.2s (เมื่อ Stronghold ยังไม่เปิด) — ไม่ re-warp
+            local remaining = getStrongholdTimeRemaining()
+            if remaining and remaining > 0 then
+                local mins = math.floor(remaining / 60)
+                local secs = math.floor(remaining % 60)
+                updateStatus(string.format("Stronghold opens in %02d:%02d", mins, secs))
+                waited = 0
+            elseif waited >= SPAWN_TIMEOUT then
+                -- Stronghold เปิดแล้ว แต่ Cultist ยังไม่ spawn → re-warp เพื่อกระตุ้น
+                print("[Round " .. completedRounds+1 .. "] Cultist not spawned - warping to Floor then back to TriggerZone")
+                updateStatus("Re-warp waiting for spawn...")
+                if floorPos2 then
+                    local hrp = getLiveParts()
+                    if hrp then hrp.CFrame = CFrame.new(floorPos2) end
+                    task.wait(0.3)
+                end
+                warpToTriggerZone()
+                waited = 0
+            end
+        end
+        print("✅ Cultist spawned! (round " .. completedRounds+1 .. ")")
+    end
+
+    -- Fight loop
+    while true do
+        if isStrongholdCleared() then
+            print("[OK] FinalGate moved -> round " .. completedRounds+1 .. " cleared")
+            updateStatus("✅ Round " .. completedRounds+1 .. "/" .. TOTAL_ROUNDS .. " Cleared!")
+            break
+        end
+
+        local cultists = findCultists()
+
+        if #cultists == 0 then
+            local hrp = getLiveParts()
+            if hrp then hrp.CFrame = CFrame.new(combatCenter) end
+            updateStatus("Waiting for Cultists... (round " .. completedRounds+1 .. ")")
+            task.wait(1)
+        else
+            local hrp = getLiveParts()
+            if not hrp then task.wait(0.2) continue end
+
+            -- re-equip axe ก่อนตีทุก tick (เฉพาะตอนไม่ใช้ cannon)
+            if not useCannon then
+                local char = LocalPlayer.Character
+                local th = char and char:FindFirstChild("ToolHandle")
+                if not (th and th:FindFirstChild("OriginalItem")) then
+                    Client.InventoryHandler.RequestEquipItem(bestAxeCombat)
+                    task.wait(0.1)
+                    char = LocalPlayer.Character
+                    th = char and char:FindFirstChild("ToolHandle")
+                    if th and th:FindFirstChild("OriginalItem") then
+                        axe = th.OriginalItem.Value
+                    end
+                end
+            end
+
+            -- Phase 1: คำนวณ centroid ของทุก cultist + ความสูงสูงสุด -> วาร์ปจุดเดียว
+            -- แล้วลดเลือดทุกตัวพร้อมกัน -> รอ 1 วิ -> ตีทุกตัวพร้อมกัน
+            -- (ลดเวลาจาก N iteration เหลือ 1 batch - เร็วขึ้นมาก)
+            local validCultists = {}
+            local centroid = Vector3.zero
+            local maxY = -math.huge
+            for _, cultist in ipairs(cultists) do
+                if not cultist or not cultist.Parent then continue end
+                local root = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
+                if not root then continue end
+                table.insert(validCultists, cultist)
+                centroid = centroid + root.Position
+                if root.Position.Y > maxY then maxY = root.Position.Y end
+            end
+
+            if #validCultists > 0 then
+                centroid = centroid / #validCultists
+                -- วาร์ปไปเหนือ centroid ให้สูงกว่าตัวที่สูงที่สุด HOVER_HEIGHT studs
+                local warpPos = Vector3.new(centroid.X, maxY + HOVER_HEIGHT, centroid.Z)
+                hrp.CFrame = CFrame.new(warpPos) * CFrame.Angles(math.rad(-90), 0, 0)
+
+                updateStatus("Fighting " .. #validCultists .. " Cultists... (round " .. completedRounds+1 .. ")")
+
+                -- รอ 0.2 วิ ก่อนลดเลือด (ให้เซิร์ฟทันเห็น CFrame ใหม่ก่อน)
+                task.wait(0.2)
+
+                -- ลดเลือดทุกตัวพร้อมกัน (1 ครั้งต่อตัว) - เร็วกว่าทีละตัวมาก
+                -- ทำเสมอ (ทั้ง cannon class และ axe class) - ให้ Cultist ตายเร็ว
+                for _, cultist in ipairs(validCultists) do
+                    pcall(function() zeroEnemyHealth(cultist) end)
+                end
+
+                -- รอ 1 วิ ก่อนโจมตี (ให้เซิร์ฟทันเห็น CFrame ใหม่ + Health=0 replicate)
+                task.wait(1)
+
+                -- ตีทุกตัวพร้อมกันจากจุด centroid เดียวกัน
+                -- (ถ้า useCannon → skip - background loop ยิงให้แล้ว)
+                -- (Vampire: ใช้ Scythe แทน axe + keepHPOne ถ้า Lifesteal ยังไม่เสร็จ)
+                if not useCannon then
+                    -- เลือก weapon: Scythe ถ้า Vampire (ถือ Scythe จริง), axe ถ้า class อื่น
+                    local weapon
+                    if isVampire and vampireScythe then
+                        weapon = vampireScythe
+                        -- equip Scythe จริง (Client.InventoryHandler) — ให้ Player ถือ Scythe
+                        pcall(function()
+                            Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                        end)
+                    else
+                        weapon = axe
+                    end
+                    -- keepHPOne ก่อนตี (เฉพาะ Vampire + Quest ทั้ง 2 stat ยังไม่เสร็จ)
+                    if isVampire and weapon and not isVampireAllQuestDone() then
+                        keepHPOne()
+                    end
+                    for _, cultist in ipairs(validCultists) do
+                        if cultist and cultist.Parent then
+                            pcall(function()
+                                Event:InvokeServer(cultist, weapon, ownerId, hrp.CFrame, false)
+                            end)
                         end
                     end
-                else
-                    -- ใช้หมด
-                    print(string.format("⚠️ %s | Final Trait: %s | Used: %d (all rerolls)", targetUnitName, finalTrait, traitRerolls))
+                end
 
-                    if HORST_ENABLED and _G.Horst_SetDescription and _G.Horst_AccountChangeDone then
-                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                        local currentGems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                        local currentRR = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
+                -- นับรอบที่ตัวนี้ยังไม่ตาย: ปรับเลือดติด = +1, ปรับเลือดไม่ติด = +2 (ไม่ทำงาน = นับหนัก)
+                for _, cultist in ipairs(validCultists) do
+                    local attrZero = cultist:GetAttribute("Health") == 0
+                    local hum = cultist:FindFirstChildOfClass("Humanoid")
+                        or cultist:FindFirstChildWhichIsA("Humanoid", true)
+                    local humZero = hum and hum.Parent ~= nil and hum.Health == 0
+                    local zeroed = attrZero or humZero
+                    surviveCounts[cultist] = (surviveCounts[cultist] or 0) + (zeroed and 1 or 2)
+                end
+            end
 
-                        _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", currentGems, currentRR, targetUnitName, finalTrait))
+            -- Phase 2: ตัวไหนทำครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย
+            -- = โหมดเก็บตาย: วาร์ปตามตัวมัน + ปรับเลือดเร็วก่อน "ทุกตี" (ไม่ต้องรอ) ตีซ้ำจนตาย
+            for _, cultist in ipairs(cultists) do
+                if cultist and cultist.Parent and (surviveCounts[cultist] or 0) >= FINISH_MODE_AFTER then
+                    print("[Fight] Cultist survived " .. FINISH_MODE_AFTER
+                        .. " full rounds - finish mode: quick zero + hit until dead")
+                    while cultist.Parent and not isStrongholdCleared() do
+                        local hrp2 = getLiveParts()
+                        if not hrp2 then task.wait(0.2) continue end
+                        local root2 = cultist:FindFirstChild("HumanoidRootPart") or cultist.PrimaryPart
+                        if not root2 then break end
 
-                        task.wait(15)  -- รอ 15 วิก่อนส่ง DONE
+                        -- วาร์ปไปเหนือตัวมัน 10 studs (หันหน้าลง) - มันเดินหนีก็ตามไปตี
+                        hrp2.CFrame = CFrame.new(root2.Position + Vector3.new(0, HOVER_HEIGHT, 0))
+                            * CFrame.Angles(math.rad(-90), 0, 0)
+                        task.wait()
 
-                        -- ส่ง DONE เสมอ (ไม่ว่า Config จะเป็นอะไร)
-                        if GEM_TARGET then
-                            if currentGems >= GEM_TARGET then
-                                local ok = pcall(_G.Horst_AccountChangeDone)
-                                if ok then
-                                    _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                    print("✅ GEM_TARGET reached - Script will stop...")
-
-                                    -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                    while true do
-                                        pcall(function()
-                                            local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                            local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                            local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                            _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
-                                        end)
-                                        task.wait(5)
-                                    end
-                                end
+                        -- re-equip axe ถ้าหลุดระหว่างตี
+                        local char2 = LocalPlayer.Character
+                        local th2 = char2 and char2:FindFirstChild("ToolHandle")
+                        if not (th2 and th2:FindFirstChild("OriginalItem")) then
+                            Client.InventoryHandler.RequestEquipItem(bestAxeCombat)
+                            task.wait(0.1)
+                            char2 = LocalPlayer.Character
+                            th2 = char2 and char2:FindFirstChild("ToolHandle")
+                            if th2 and th2:FindFirstChild("OriginalItem") then
+                                axe = th2.OriginalItem.Value
                             end
-                        else
-                            local ok = pcall(_G.Horst_AccountChangeDone)
-                            if ok then
-                                _G.ScriptShouldStop = true  -- ตั้งค่า flag หลังส่ง DONE สำเร็จ
-                                print("✅ All rerolls used - Script will stop...")
+                        end
 
-                                -- Loop ส่ง Description ทุก 5 วิหลัง DONE
-                                while true do
-                                    pcall(function()
-                                        local replicaAfter = Nodes.GET_PLAYER_REPLICA:InvokeSelf()
-                                        local gems = replicaAfter and replicaAfter.Data.ItemData.Gem.Amount or 0
-                                        local rr = replicaAfter and replicaAfter.Data.ItemData.TraitReroll and replicaAfter.Data.ItemData.TraitReroll.Amount or 0
-                                    _G.Horst_SetDescription(string.format("💎 Gems: %d • RR: %d • %s • Trait: ❌ %s (Out of RR)", gems, rr, targetUnitName, finalTrait))
-                                end)
-                                task.wait(5)
-                                end
+                        -- ปรับเลือดก่อนทุกตี (แบบเร็ว ไม่รอ settle) แล้วค่อยตีทันที
+                        pcall(function() zeroEnemyHealth(cultist) end)
+                        -- เลือก weapon: Scythe ถ้า Vampire (equip จริง), axe ถ้า class อื่น
+                        local weapon2
+                        if isVampire and vampireScythe then
+                            weapon2 = vampireScythe
+                            -- equip Scythe จริง (Client.InventoryHandler)
+                            pcall(function()
+                                Client.InventoryHandler.RequestEquipItem(vampireScythe)
+                            end)
+                        else
+                            weapon2 = axe
+                        end
+                        -- keepHPOne ก่อนตี (Vampire + Quest ทั้ง 2 stat ยังไม่เสร็จ)
+                        if isVampire and weapon2 and not isVampireAllQuestDone() then
+                            keepHPOne()
+                        end
+                        pcall(function()
+                            Event:InvokeServer(cultist, weapon2, ownerId, hrp2.CFrame, false)
+                        end)
+                        task.wait(ATTACK_INTERVAL)
+                    end
+                    surviveCounts[cultist] = nil -- ตายแล้ว (หรือรอบเคลียร์) - เคลียร์ตัวนับ
+                end
+            end
+
+            -- กลับไปลอยจุดเดิม (เหนือจุดกลาง 10 studs) รอ tick ถัดไป
+            hrp.CFrame = CFrame.new(combatCenter + Vector3.new(0, HOVER_HEIGHT, 0))
+                * CFrame.Angles(math.rad(-90), 0, 0)
+
+            task.wait(ATTACK_INTERVAL)
+        end
+    end
+end
+
+-- ============================================
+-- STEP 6-7: วน 3 รอบ fight + เปิด chest + เก็บเพชร
+-- ============================================
+
+-- Flag: ติดเมื่อ quest ของ main class เสร็จแล้ว รอให้ round ปัจจุบันจบ + เก็บเพชรก่อน teleport
+local questReadyToLeave = false
+
+-- Quest progress watcher: แสดง % ทุกครั้งที่ quest stat อัปเดต (ทุกที่ - Lobby/Stronghold/ฟาร์ม)
+if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
+    local mainClass = Config.UpgradeClass[1]
+    local cp = LocalPlayer:FindFirstChild("ClassProgress")
+    local folder = cp and cp:FindFirstChild(mainClass)
+    if folder then
+        local lastReport = 0
+        local function reportQuestProgress()
+            -- cooldown 1 วิ กัน spam
+            if os.clock() - lastReport < 1 then return end
+            lastReport = os.clock()
+            local lvl = folder:GetAttribute("Level") or 1
+            if lvl >= 3 then return end
+            local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
+            if not reqs then return end
+            local totalPct, count = 0, 0
+            for statKey, goal in pairs(reqs) do
+                local have = folder:GetAttribute(statKey) or 0
+                if type(have) == "number" and goal > 0 then
+                    totalPct = totalPct + math.min(have / goal, 1) * 100
+                    count = count + 1
+                end
+            end
+            if count > 0 then
+                local avgPct = math.floor(totalPct / count)
+                print(string.format("[Quest] %s -> Lv.%d: %d%%", mainClass, lvl + 1, avgPct))
+            end
+        end
+        for statKey, _ in pairs(CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][2] or {}) do
+            folder:GetAttributeChangedSignal(statKey):Connect(reportQuestProgress)
+        end
+        for statKey, _ in pairs(CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][3] or {}) do
+            folder:GetAttributeChangedSignal(statKey):Connect(reportQuestProgress)
+        end
+        reportQuestProgress()  -- แสดงค่าเริ่มต้น
+    end
+end
+
+local diamondsReadyToTeleport = false  -- flag: รอให้จบรอบ แล้ว Teleport
+
+while completedRounds < TOTAL_ROUNDS do
+    print(string.format("\n[Step 6] Round %d/%d", completedRounds+1, TOTAL_ROUNDS))
+    updateStatus(string.format("Round %d/%d - Fighting...", completedRounds+1, TOTAL_ROUNDS))
+
+    -- Re-equip ทุกรอบ: ถ้า useCannon → Laser Cannon, ไม่งั้น axe
+    if useCannon and cannonTool then
+        pcall(function() Client.InventoryHandler.RequestEquipItem(cannonTool) end)
+    else
+        Client.InventoryHandler.RequestEquipItem(bestAxeCombat)
+    end
+    do
+        local waited = 0
+        while waited < 3 do
+            local char = LocalPlayer.Character
+            local th = char and char:FindFirstChild("ToolHandle")
+            if th and th:FindFirstChild("OriginalItem") then
+                local currentTool = th.OriginalItem.Value
+                if useCannon and cannonTool and currentTool.Name == "Laser Cannon" then
+                    axe = currentTool  -- ใช้ตัวแปร axe ร่วม (เพื่อ compat กับ doOneRound)
+                    break
+                elseif not useCannon and currentTool == bestAxeCombat then
+                    axe = currentTool
+                    break
+                end
+            end
+            task.wait(0.1)
+            waited += 0.1
+        end
+    end
+
+    doOneRound()
+    completedRounds += 1
+
+    -- เช็ค quest ของ class ที่ equip อยู่ ถ้าครบตาม level → ตั้ง flag (รอจบ loop + เก็บเพชรก่อน)
+    if Config.UpgradeClass and #Config.UpgradeClass > 0 and not questReadyToLeave then
+        local equippedClass = LocalPlayer:GetAttribute("Class")
+        -- ตรวจเฉพาะ class ที่ equip อยู่ และอยู่ใน UpgradeClass list
+        local mainClass = nil
+        if equippedClass and table.find(Config.UpgradeClass, equippedClass) then
+            mainClass = equippedClass
+        else
+            mainClass = Config.UpgradeClass[1]
+        end
+        local isLobby = game.PlaceId == 79546208627805
+
+        -- ใน Lobby: ใช้ ClassProgress folder (อ่านจาก attribute ของ folder - แม่นยำ)
+        -- ในแมพฟาร์ม: ใช้ LocalPlayer attribute (folder อาจหาย)
+        local level = 1
+        local statSource = nil  -- table ที่ใช้อ่าน stat
+        if isLobby then
+            local cp = LocalPlayer:FindFirstChild("ClassProgress")
+            local folder = cp and cp:FindFirstChild(mainClass)
+            if folder then
+                level = folder:GetAttribute("Level") or 1
+                statSource = folder
+            end
+        else
+            level = LocalPlayer:GetAttribute("ClassLevel") or 1
+            statSource = classStatCache[mainClass]  -- ดักจาก ClassStatUpdated event
+        end
+
+        if statSource then
+            local goalLevel = level + 1
+            if goalLevel <= 3 then
+                local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][goalLevel]
+                if reqs then
+                    local allMet = true
+                    local statProgress = {}
+                    for statKey, goal in pairs(reqs) do
+                        local have = statSource[statKey] or 0
+                        table.insert(statProgress, string.format("%s %d/%d", statKey, have, goal))
+                        if type(have) ~= "number" or have < goal then
+                            allMet = false
+                        end
+                    end
+                    if allMet then
+                        questReadyToLeave = true
+                        print(string.format("[Quest] %s ready -> Lv.%d, leaving after this round (%s)",
+                            mainClass, goalLevel, table.concat(statProgress, ", ")))
+                        updateStatus("Quest done - finishing round")
+                    end
+                end
+            end
+        end
+    end
+
+    -- เปิด chest
+    print(string.format("\n[Step 7] Opening Diamond Chest (round %d)...", completedRounds))
+    updateStatus("Opening Diamond Chest...")
+
+    local chest = retryUntil("find Diamond Chest", function()
+        local items = workspace:FindFirstChild("Items")
+        return (items and items:FindFirstChild("Stronghold Diamond Chest"))
+            or workspace:FindFirstChild("Stronghold Diamond Chest", true)
+    end)
+
+    -- chest อาจเป็นชนิดอื่นตอน stream ไม่เสร็จ (ไม่ใช่ Model/BasePart) - index .Position ตรงๆ พัง = สคริปต์หยุดกลาง Step 7
+    local chestPos
+    for _ = 1, 10 do
+        if chest:IsA("Model") then
+            chestPos = chest:GetPivot().Position
+        elseif chest:IsA("BasePart") then
+            chestPos = chest.Position
+        else
+            local part = chest:FindFirstChildWhichIsA("BasePart", true)
+            chestPos = part and part.Position
+        end
+        if chestPos then break end
+        task.wait(0.5)
+    end
+    if not chestPos then
+        -- สรุปตำแหน่งไม่ได้จริง = ใช้จุดกองไฟแทน (รอบนี้หาเพชรไม่เจอ แต่ flow เดินต่อได้ ไม่ error ตาย)
+        warn("[Step 7] Cannot resolve Diamond Chest position - falling back to fire position")
+        chestPos = firePos
+    end
+    if platform and platform.Parent then
+        platform.Size = Vector3.new(10, 1, 10)
+        platform.Position = chestPos - Vector3.new(0, 3, 0)
+    end
+    for _ = 1, 15 do
+        local hrp = getLiveParts()
+        if hrp then hrp.CFrame = CFrame.new(chestPos + Vector3.new(0, 3, 0)) end
+        task.wait(0.1)
+    end
+
+    local prompt = retryUntil("find chest ProximityPrompt", function()
+        local main = chest:FindFirstChild("Main")
+        local attachment = main and main:FindFirstChild("ProximityAttachment")
+        local p = attachment and attachment:FindFirstChild("ProximityInteraction")
+        if p and p:IsA("ProximityPrompt") then return p end
+        return chest:FindFirstChildWhichIsA("ProximityPrompt", true)
+    end, 0.3)
+
+    local fires = 0
+    retryUntil("fire prompt to open chest", function()
+        if not prompt.Parent then return true end
+        if not prompt.Enabled then
+            if fires > 0 then return true end
+            return nil
+        end
+        if typeof(fireproximityprompt) == "function" then
+            fireproximityprompt(prompt, 0, true)
+        else
+            pcall(function() prompt.HoldDuration = 0 end)
+            prompt:InputHoldBegin() task.wait(0.1) prompt:InputHoldEnd()
+        end
+        fires += 1
+        return true
+    end, 0.3)
+    for _ = 1, 7 do
+        if not (prompt.Parent and prompt.Enabled) then break end
+        if typeof(fireproximityprompt) == "function" then
+            if pcall(function() fireproximityprompt(prompt, 0, true) end) then fires += 1 end
+        else
+            pcall(function() prompt.HoldDuration = 0 end)
+            prompt:InputHoldBegin() task.wait(0.1) prompt:InputHoldEnd()
+            fires += 1
+        end
+        task.wait(0.25)
+    end
+    print(("✅ Opened chest (%d interactions)"):format(fires))
+    updateStatus("✅ Chest Opened!")
+
+    -- เก็บเพชร
+    print(string.format("\n[Step 7.5] Collecting diamonds (round %d)...", completedRounds))
+    updateStatus("Collecting Diamonds...")
+    local COLLECT_RADIUS = 150
+    local COLLECT_EMPTY_STOP = 4
+    local DIAMOND_ITEM_NAME = "Diamond"
+    local TakeDiamondsEvent = ReplicatedStorage.RemoteEvents.RequestTakeDiamonds
+
+    local function getItemPart(item)
+        local ok, part = pcall(function()
+            if item:IsA("BasePart") then return item end
+            if item:IsA("Model") then
+                return item.PrimaryPart or item:FindFirstChild("Main") or item:FindFirstChildWhichIsA("BasePart", true)
+            end
+        end)
+        if ok then return part end
+    end
+
+    local function findDiamonds(origin)
+        local found = {}
+        pcall(function()
+            local items = workspace:FindFirstChild("Items")
+            if not items then return end
+            for _, item in ipairs(items:GetChildren()) do
+                if item.Name == DIAMOND_ITEM_NAME then
+                    local owner = item:GetAttribute("Owner")
+                    if owner == nil or owner == LocalPlayer.UserId then
+                        local part = getItemPart(item)
+                        if part then
+                            local ok2, dist = pcall(function() return (part.Position - origin).Magnitude end)
+                            if ok2 and dist <= COLLECT_RADIUS then
+                                table.insert(found, {model = item, part = part})
                             end
                         end
                     end
                 end
-                end  -- ปิด else ของ if traitRerolls <= 0
-            end  -- ปิด if hasTargetTrait
+            end
+        end)
+        return found
+    end
+
+    local origin = chestPos
+    local collected = 0
+    local emptyStreak = 0
+    local collectRound = 0
+    while emptyStreak < COLLECT_EMPTY_STOP do
+        collectRound += 1
+        local diamonds = findDiamonds(origin)
+        if #diamonds == 0 then
+            emptyStreak += 1
+            print(("  round %d: no items (%d/%d)"):format(collectRound, emptyStreak, COLLECT_EMPTY_STOP))
         else
-            warn(string.format("⚠️ Unit '%s' not found in inventory - skipping Trait Reroll", targetUnitName))
-        end  -- ปิด if #unitsWithTrait > 0
-    else
-        warn("⚠️ No target unit specified - skipping Trait Reroll")
-    end  -- ปิด if targetUnitName then
+            emptyStreak = 0
+            for _, d in ipairs(diamonds) do
+                if d.model and d.model.Parent then
+                    local startDiamonds = LocalPlayer:GetAttribute("Diamonds")
+                    local tries = 0
+                    local gotIt = false
+                    -- เดิม while not gotIt ไม่มีเพดาน: โมเดลถูกลบ/เซิร์ฟปัด = ยิง FireServer ใส่ instance ศพไม่รู้จบ
+                    while not gotIt and tries < 25 do
+                        if not (d.model and d.model.Parent) then break end
+                        tries += 1
+                        local hrp = getLiveParts()
+                        if hrp and d.part and d.part.Parent then
+                            pcall(function()
+                                for _ = 1, 5 do hrp.CFrame = CFrame.new(d.part.Position + Vector3.new(0,2,0)) task.wait(0.05) end
+                            end)
+                        end
+                        pcall(function() TakeDiamondsEvent:FireServer(d.model) end)
+                        task.wait(0.2)
+                        if LocalPlayer:GetAttribute("Diamonds") ~= startDiamonds then gotIt = true end
+                        if not gotIt and tries % 20 == 0 then
+                            updateStatus(("Collecting Diamond... (%d)"):format(tries))
+                        end
+                    end
+                    if gotIt then
+                        collected += 1
+                        task.wait(0.15)
+                    elseif d.model and d.model.Parent then
+                        warn("Diamond not collected after 25 tries - skipping")
+                    end
+                end
+            end
+        end
+        updateStatus(("Collecting Diamonds... (%d)"):format(collected))
+        task.wait(0.2)
+    end
+    print(("[OK] Collected %d diamonds (round %d)"):format(collected, completedRounds))
+    updateStatus(("✅ Collected %d Diamonds"):format(collected))
 
-    task.wait(1)
-end  -- ปิด if shouldDoTraitReroll and traitRerollTargetUnit
+    -- เช็คเงื่อนไข Teleport Lobby (Diamonds + Class Lv.3 ต้องครบทั้งคู่)
+    -- ถ้าตั้ง Diamonds > 0 + BuyClass + UpgradeClass → ต้องครบทั้ง Diamonds ถึง AND Class Lv.3
+    local currentDiamonds = LocalPlayer:GetAttribute("Diamonds") or 0
+    local currentLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local hasBuy = Config.BuyClass and #Config.BuyClass > 0
+    local hasUpgrade = Config.UpgradeClass and #Config.UpgradeClass > 0
+    local hasDiamonds = Config.Diamonds and Config.Diamonds > 0
 
--- ========================================
--- 7. QuickEquip (Epic/Legendary)
--- ========================================
--- เข้าเกมเสมอ แต่ equip Epic/Legendary เฉพาะตอนที่มี
-printStep("Quick Equip...")
+    if hasBuy and hasUpgrade and hasDiamonds then
+        -- ต้องครบทั้ง Diamonds ถึง AND Class Lv.3
+        if currentDiamonds >= Config.Diamonds and currentLvl >= 3 then
+            print(string.format("[Teleport] Diamonds %d/%d + Class Lv.%d - teleport to Lobby",
+                currentDiamonds, Config.Diamonds, currentLvl))
+            diamondsReadyToTeleport = true
+        end
+    elseif hasBuy and hasUpgrade and not hasDiamonds then
+        -- ไม่ตั้ง Diamonds → แค่ Class Lv.3 ก็พอ
+        if currentLvl >= 3 then
+            print(string.format("[Teleport] Class Lv.%d - teleport to Lobby", currentLvl))
+            diamondsReadyToTeleport = true
+        end
+    elseif hasDiamonds and not hasBuy and not hasUpgrade then
+        -- แค่ Diamonds
+        if currentDiamonds >= Config.Diamonds then
+            print(string.format("[Teleport] Diamonds %d/%d - teleport to Lobby",
+                currentDiamonds, Config.Diamonds))
+            diamondsReadyToTeleport = true
+        end
+    end
 
--- Get UnitData และ UnitInfo โดยตรง (ไม่ต้องปิด Inventory)
-local unitData = Nodes.GET_DATA_VALUE:InvokeSelf("UnitData")
-local UnitInfo = require(ReplicatedStorage.Shared.Information.Units)
+    -- ถ้า quest พร้อมอัปแล้ว → ออกจาก Stronghold กลับ lobby (หลังเก็บเพชรเสร็จ)
+    if questReadyToLeave then
+        local mainClass = Config.UpgradeClass and Config.UpgradeClass[1] or "?"
+        print(string.format("[Quest] %s quest complete - leaving for lobby", mainClass))
+        updateStatus("Teleporting to lobby...")
+        task.wait(2)
+        local LOBBY_PLACE_ID = 79546208627805
+        pcall(function()
+            local TS = game:GetService("TeleportService")
+            TS:Teleport(LOBBY_PLACE_ID, LocalPlayer)
+        end)
+        task.wait(5)
+        useCannon = false
+        return
+    end
 
--- สร้าง displayNameMap (เลือก Shiny ก่อน)
-local displayNameMap = {}
-for fullKey, data in pairs(unitData) do
-    local internalName = fullKey:match("^(.+)#") or fullKey
-    local displayName = UnitInfo[internalName] and UnitInfo[internalName].DisplayName or internalName
-    local lowerName = displayName:lower()
-    local isShiny = data.Shiny or false
+    -- ถ้า Diamonds/Lv.3 ถึง → Teleport Lobby หลังจบรอบ
+    if diamondsReadyToTeleport then
+        forceTeleportLobby()
+        return
+    end
 
-    -- เลือก Shiny ก่อน หรือถ้ายังไม่มีก็เอาตัวปกติ
-    if not displayNameMap[lowerName] or isShiny then
-        displayNameMap[lowerName] = fullKey
+    -- ถ้ายังไม่ครบ 3 รอบ รอ Stronghold เปิดใหม่แล้ววาร์ปกลับ
+    if completedRounds < TOTAL_ROUNDS then
+        -- VAMPIRE: ถ้า Quest Lifesteal ยังไม่เสร็จ → เริ่ม NightLoop ทำเรื่อยๆ จนกว่า Cultist จะ spawn
+        -- ALIEN SCIENTIST: เช่นเดียวกัน - ฟาร์ม Dissolves จนกว่า Cultist จะ spawn
+        -- NightLoop จะหยุดเองเมื่อ checkAnyCultistSpawned() = true
+        if isVampire and not isVampireAllQuestDone() then
+            print("[Vampire] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            -- เริ่ม NightLoop — มันจะรอจนกว่า Cultist จะ spawn แล้ว return
+            vampireNightLoop()
+        elseif isAlienScientist and not isAlienScientistAllQuestDone() then
+            print("[AlienScientist] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            alienScientistNightLoop()
+        elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
+            -- BGH: ถ้า PeltList ทุก type Complete แต่ Quest ยังไม่ done → ออก Lobby ทันที
+            -- (BGH ทำไม่ได้แล้ว — limit per type = 3, total < Quest goal 50)
+            local activeAfterRound = BGH.getActivePeltTypes()
+            if #activeAfterRound == 0 then
+                print("[BigGameHunter] PeltList all Complete but Quest not done - leaving for Lobby")
+                forceTeleportLobby()
+                return
+            end
+            print("[BigGameHunter] Resuming NightLoop until Stronghold opens")
+            warpToStrongholdFloor(1)
+            bigGameHunterNightLoop()
+        else
+            -- ไม่ใช่ Vampire/AlienScientist/BigGameHunter หรือ Quest ครบแล้ว → ใช้ logic เดิม
+            print(string.format("[Round %d done] Waiting 20min for Stronghold to reopen...", completedRounds))
+            warpToStrongholdFloor(1)
+            local WAIT_SECONDS = 20 * 60
+            for i = WAIT_SECONDS, 1, -1 do
+                local mins = math.floor(i / 60)
+                local secs = i % 60
+                updateStatus(string.format("Round %d done - Next: %02d:%02d", completedRounds, mins, secs))
+                task.wait(1)
+            end
+            while true do
+                local remaining = getStrongholdTimeRemaining()
+                if not remaining or remaining <= 0 then
+                    print("✅ Stronghold reopened!")
+                    break
+                end
+                local mins = math.floor(remaining / 60)
+                local secs = math.floor(remaining % 60)
+                updateStatus(string.format("Waiting... %02d:%02d", mins, secs))
+                task.wait(1)
+            end
+        end
+        warpToTriggerZone()
+        task.wait(1)
     end
 end
 
--- Epic Units Priority List
-local EPIC_UNITS = {
-    "Ice Mage",           -- Priority 1
-    "Bounty Hunter",      -- Priority 2
-    "Nen Hunter",         -- Priority 3
-    "Corps Captain",      -- Priority 4
-    "Demon Cyborg"        -- Priority 5
-}
+if lockConn then lockConn:Disconnect() end
+destroyShield()
+destroyFlyBody() -- ถอน BodyVelocity คืนการควบคุมตัวละครปกติ (ไม่มี PlatformStand ให้ปลดแล้ว)
 
--- Legendary Units Priority List
-local LEGENDARY_UNITS = {
-    "Ice Queen",           -- Priority 1 (วางได้ 4 ตัว)
-    "Forbidden Teacher",   -- Priority 2 (วางได้ 4 ตัว)
-    "The Hero",           -- Priority 3 (วางได้ 4 ตัว)
-    "Greed",              -- Priority 4 (วางได้ 3 ตัว)
-    "Scissor",            -- Priority 5 (วางได้ 3 ตัว)
-    "Water Princess"      -- Priority 6 (วางได้ 3 ตัว)
-}
+print("\n=== Sugar Hub Complete ===")
+print("✅ Stronghold sequence finished! (3 rounds)")
+sendHorstDescription()
+checkDiamondsGoalAndSendDone()
 
-local foundEpicUnit = nil
-local foundLegendaryUnit = nil
-
--- เช็ค Epic ก่อน
-for _, targetUnit in ipairs(EPIC_UNITS) do
-    if displayNameMap[targetUnit:lower()] then
-        foundEpicUnit = targetUnit
-        break
-    end
+-- รอจนครบ 100 วัน ก่อนรีเซ็ต
+-- อ่านวันจาก workspace.StoryDayCounter (แบบเดียวกับ NextDayUI ที่ decompile ได้)
+local function getCurrentDay()
+    local storyDay = workspace:GetAttribute("StoryDayCounter")
+    if storyDay then return storyDay end
+    -- สำรอง: ถ้าแมพไม่มี StoryDayCounter ค่อยใช้ attribute ของผู้เล่น
+    return LocalPlayer:GetAttribute("Day") or 0
 end
 
--- เช็ค Legendary
-for _, targetUnit in ipairs(LEGENDARY_UNITS) do
-    if displayNameMap[targetUnit:lower()] then
-        foundLegendaryUnit = targetUnit
-        break
-    end
+local MIN_DAY = 100
+updateStatus(string.format("Waiting Day %d+ (now: %d)...", MIN_DAY, getCurrentDay()))
+while getCurrentDay() < MIN_DAY do
+    updateStatus(string.format("Day %d/%d - waiting...", getCurrentDay(), MIN_DAY))
+    task.wait(5)
 end
 
--- Unequip All ก่อน
-Nodes.UNIT_UNEQUIP_ALL:FireServer("Unit")
-task.wait(0.5)
-
--- หา Epic ตัวที่ 2 สำหรับช่อง 1 (ไม่ใช่ตัวเดียวกับช่อง 3)
-local foundEpicUnit2 = nil
-for _, targetUnit in ipairs(EPIC_UNITS) do
-    if displayNameMap[targetUnit:lower()] and targetUnit ~= foundEpicUnit then
-        foundEpicUnit2 = targetUnit
-        break
-    end
-end
-
--- Equip ช่อง 1: Epic ตัวที่ 2 (ถ้ามี)
-if foundEpicUnit2 then
-    local epicFullKey2 = displayNameMap[foundEpicUnit2:lower()]
-    if epicFullKey2 then
-        Nodes.UNIT_EQUIP:FireServer(epicFullKey2, "1")
-        task.wait(0.3)
-        print(string.format("✅ Equipped %s (Epic) in slot 1", foundEpicUnit2))
-    end
-else
-    warn("⚠️ No second Epic unit found for slot 1 - slot 1 will be empty (use Starter Unit as fallback)")
-end
-
--- Equip Legendary ช่อง 2 (ถ้ามี)
-if foundLegendaryUnit then
-    local legendaryFullKey = displayNameMap[foundLegendaryUnit:lower()]
-    if legendaryFullKey then
-        Nodes.UNIT_EQUIP:FireServer(legendaryFullKey, "2")
-        task.wait(0.3)
-        print(string.format("✅ Equipped %s (Legendary) in slot 2", foundLegendaryUnit))
-    end
-else
-    print("ℹ️ No Legendary unit found in slot 2")
-end
-
--- Equip Epic ช่อง 3 (ถ้ามี)
-if foundEpicUnit then
-    local epicFullKey = displayNameMap[foundEpicUnit:lower()]
-    if epicFullKey then
-        Nodes.UNIT_EQUIP:FireServer(epicFullKey, "3")
-        task.wait(0.3)
-        print(string.format("✅ Equipped %s (Epic) in slot 3", foundEpicUnit))
-    end
-else
-    print("ℹ️ No Epic unit found in slot 3")
-end
-
-task.wait(1)
-
--- ========================================
--- 8. auto_start_game.lua
--- ========================================
-printStep("Starting Game...")
-
-local CONFIG = {
-    MapName = "SchoolGrounds",
-    ActName = "Act 1",
-    Difficulty = "Hard",
-    Gamemode = "Story"
-}
-
-local FusionPackage = ReplicatedStorage:WaitForChild("FusionPackage")
-local Actions = require(FusionPackage.Actions)
-Actions.PartyStartGame(CONFIG)
+print(string.format("✅ Day %d reached - resetting!", getCurrentDay()))
+updateStatus("✅ Done! Resetting...")
+task.wait(0.3)
+pcall(function()
+    -- ฆ่าตัวเองจบรอบ - ปล่อยให้ Death Watcher จับแล้วกดเล่นใหม่ต่อได้เลย (จบรอบ = เริ่มรอบใหม่)
+    LocalPlayer.Character:BreakJoints()
+end)
