@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 10.20")
+print("Version - 1.2.9 / 10.53")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3064,6 +3064,21 @@ while currentLevel < maxLevel do
                     humanoidRootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if not humanoidRootPart then break end
 
+                    -- WASD-style random walk รอบ ๆ ต้นไม้ (floatAP ล็อคไม่ให้ตก)
+                    local treePos2 = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+                    local dir = math.random(1, 4)  -- 1=W, 2=A, 3=S, 4=D
+                    local offset
+                    if dir == 1 then offset = Vector3.new(-3, 0, 0)  -- W
+                    elseif dir == 2 then offset = Vector3.new(0, 0, -3)  -- A
+                    elseif dir == 3 then offset = Vector3.new(3, 0, 0)   -- S
+                    else offset = Vector3.new(0, 0, 3)                    -- D
+                    end
+                    local walkPos = treePos2 + Vector3.new(0, 30, 0) + offset
+                    if floatAP and floatAP.Parent then
+                        floatAP.Position = walkPos
+                    end
+                    humanoidRootPart.CFrame = CFrame.new(walkPos)
+
                     local success, err = pcall(function()
                         Event:InvokeServer(tree, currentAxe, ownerId, humanoidRootPart.CFrame, false)
                     end)
@@ -3196,6 +3211,21 @@ if getTotalWood() < NEED_WOOD then
 
             hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if not hrp then break end
+
+            -- WASD-style random walk รอบ ๆ ต้นไม้ (floatAP ล็อคไม่ให้ตก)
+            local treePos3 = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
+            local dir3 = math.random(1, 4)  -- 1=W, 2=A, 3=S, 4=D
+            local offset3
+            if dir3 == 1 then offset3 = Vector3.new(-3, 0, 0)
+            elseif dir3 == 2 then offset3 = Vector3.new(0, 0, -3)
+            elseif dir3 == 3 then offset3 = Vector3.new(3, 0, 0)
+            else offset3 = Vector3.new(0, 0, 3)
+            end
+            local walkPos3 = treePos3 + Vector3.new(0, 30, 0) + offset3
+            if floatAP and floatAP.Parent then
+                floatAP.Position = walkPos3
+            end
+            hrp.CFrame = CFrame.new(walkPos3)
 
             local success = pcall(function()
                 Event:InvokeServer(tree, currentAxe, ownerId, hrp.CFrame, false)
