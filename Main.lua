@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 8.06")
+print("Version - 1.2.9 / 8.18")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1938,30 +1938,52 @@ local Client = require(player.PlayerScripts.Client)
 local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
 local ownerId = tostring(player.UserId) .. "_" .. player.UserId
 
+-- Combat constants (shared กับ Vampire/Alien/BGH modules)
+local HOVER_HEIGHT = 10
+local ATTACK_INTERVAL = 0.18
+
 -- Expose functions ให้ Module (local functions ไม่อยู่ใน _G โดย default)
 _G.zeroEnemyHealth = zeroEnemyHealth
 _G.findNightMonsters = findNightMonsters
 _G.checkAnyCultistSpawned = checkAnyCultistSpawned
 _G.ensureFloating = ensureFloating
 _G.floatAP = floatAP
+_G.HOVER_HEIGHT = HOVER_HEIGHT
+_G.ATTACK_INTERVAL = ATTACK_INTERVAL
 _G.floatAO = floatAO
 
--- Load Woodsman module จาก GitHub (จะ obfuscator ทีหลัง)
-local Woodsman
-do
-    local success, mod = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/SugarCreamPremium/99/main/Module_Woodsman.lua"))()
-    end)
-    if success and mod then
-        -- ตั้ง globals ที่ module ต้องการ
-        mod.isWoodsman = (LocalPlayer:GetAttribute("Class") or "Unknown") == "Woodsman"
-        Woodsman = mod
-        print("[Woodsman] Module loaded")
-    else
-        warn("[Woodsman] Woodsman module unavailable")
-        Woodsman = { isWoodsman = false }  -- fallback ป้องกัน crash
+-- Load class modules จาก GitHub (จะ obfuscator ทีหลัง)
+local function loadClassModule(name, flagName)
+    local mod
+    do
+        local success, result = pcall(function()
+            return loadstring(game:HttpGet("https://raw.githubusercontent.com/SugarCreamPremium/99/refs/heads/main/" .. name))()
+        end)
+        if success and result then
+            result[flagName] = (LocalPlayer:GetAttribute("Class") or "Unknown") == name:match("Module_(.+)%.lua") or false
+            mod = result
+            print("[" .. name:match("Module_(.+)%.lua") .. "] Module loaded")
+        else
+            warn("[" .. name:match("Module_(.+)%.lua") .. "] Module unavailable")
+            mod = { [flagName] = false }
+        end
     end
+    return mod
 end
+
+-- Set class flag ก่อน load module (เพราะ module อ่านจาก outer scope)
+local __currentClass = LocalPlayer:GetAttribute("Class") or "Unknown"
+_G.__WSM_currentClass = __currentClass
+
+local Woodsman = loadClassModule("Module_Woodsman.lua", "isWoodsman")
+_G.__WSM_currentClass = nil  -- cleanup
+
+-- Set flag สำหรับ Vampire/Alien/BGH
+_G.__WSM_currentClass = __currentClass
+local Vampire = loadClassModule("Module_Vampire.lua", "isVampire")
+local Alien = loadClassModule("Module_Alien.lua", "isAlienScientist")
+local BGH_Module = loadClassModule("Module_BGH.lua", "isBigGameHunter")
+_G.__WSM_currentClass = nil  -- cleanup
 
 local toolHandle = retryUntil("equip axe", function()
     Client.InventoryHandler.RequestEquipItem(bestAxeChop)
@@ -1977,61 +1999,10 @@ end, 0.5)
 -- ค่าเริ่มต้นของ axe (combat = bestAxeCombat; chop loop จะ re-equip axeChop ก่อนตัดเอง)
 local axe = bestAxeCombat
 
--- ============================================
--- VAMPIRE CLASS HELPERS
--- ============================================
-local vampireScythe = LocalPlayer.Inventory
-    and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe")
 local currentClass = LocalPlayer:GetAttribute("Class")
-local isVampire = currentClass == "Vampire"
 local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
-
--- (Woodsman helpers โหลดจาก module — ดู MainScript.lua ด้านล่าง)
 print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
-
--- ลด HP ตัวเองเหลือ 1 (เรียกก่อนตี ถ้า Quest Lifesteal ยังไม่เสร็จ)
-local function keepHPOne()
-    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 1 then
-        pcall(function() hum.Health = 1 end)
-    end
-end
-
--- เซ็ต HP กลับ 100 (เรียกเมื่อ Lifesteal Quest เสร็จ)
-local function restoreHP()
-    local hum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health < 100 then
-        pcall(function() hum.Health = 100 end)
-    end
-end
-
--- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
--- เช็ค Quest LifestealHealing ครบไหม (เฉพาะ stat เดียว - ใช้สำหรับ NightLoop)
--- ใช้ classStatCache (อัปเดตจาก ClassStatUpdated event) เพราะ ClassProgress มีแค่ใน Lobby
-local function isVampireLifestealDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
-    if not reqs or not reqs.LifestealHealing then return true end
-    local have = classStatCache["Vampire"]
-        and classStatCache["Vampire"]["LifestealHealing"] or 0
-    return have >= reqs.LifestealHealing
-end
-
--- เช็ค Quest DealDamage ครบไหม
-local function isVampireDealDamageDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Vampire"] and CLASS_QUESTS["Vampire"][lvl + 1]
-    if not reqs or not reqs.DealDamage then return true end
-    local have = classStatCache["Vampire"]
-        and classStatCache["Vampire"]["DealDamage"] or 0
-    return have >= reqs.DealDamage
-end
-
--- เช็คทั้ง 2 stat ครบไหม (ใช้สำหรับ HP Watcher / keepMap / Stronghold flow)
-local function isVampireAllQuestDone()
-    return isVampireLifestealDone() and isVampireDealDamageDone()
-end
 
 -- ============================================
 -- ALIEN SCIENTIST CLASS HELPERS
