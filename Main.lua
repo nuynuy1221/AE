@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 8.18")
+print("Version - 1.2.9 / 9.02")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1947,10 +1947,18 @@ _G.zeroEnemyHealth = zeroEnemyHealth
 _G.findNightMonsters = findNightMonsters
 _G.checkAnyCultistSpawned = checkAnyCultistSpawned
 _G.ensureFloating = ensureFloating
+_G.shouldSkipName = shouldSkipName
 _G.floatAP = floatAP
+_G.floatAO = floatAO
 _G.HOVER_HEIGHT = HOVER_HEIGHT
 _G.ATTACK_INTERVAL = ATTACK_INTERVAL
-_G.floatAO = floatAO
+_G.bestAxeCombat = bestAxeCombat
+
+-- Expose Dissolve remote (ใช้ใน Module_Alien)
+local dissolveRemote_outer = game:GetService("ReplicatedStorage")
+    :FindFirstChild("RemoteEvents")
+    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
+_G.dissolveRemote = dissolveRemote_outer
 
 -- Load class modules จาก GitHub (จะ obfuscator ทีหลัง)
 local function loadClassModule(name, flagName)
@@ -2005,74 +2013,15 @@ print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), curr
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
 -- ============================================
--- ALIEN SCIENTIST CLASS HELPERS
+-- ALIEN SCIENTIST CLASS HELPERS  (โหลดจาก Module_Alien.lua)
 -- ============================================
--- Pre-load Dissolve Ray tool from Inventory
-local dissolveRay = LocalPlayer.Inventory
-    and LocalPlayer.Inventory:FindFirstChild("Dissolve Ray")
-local isAlienScientist = currentClass == "Alien Scientist"
-
--- Resolve Dissolve remote once (signature: :InvokeServer(monsterModel) per DissolveRay decompile)
--- Remote อยู่ที่ ReplicatedStorage.RemoteEvents.RequestDissolveEnemy (ตามตัวอย่างจาก Cobalt)
-local dissolveRemote = game:GetService("ReplicatedStorage")
-    :FindFirstChild("RemoteEvents")
-    and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
-
--- เช็ค Quest Dissolves ครบไหม (stat เดียว - ใช้สำหรับ NightLoop / keepMap / Stronghold flow)
-local function isAlienScientistAllQuestDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Alien Scientist"]
-        and CLASS_QUESTS["Alien Scientist"][lvl + 1]
-    if not reqs or not reqs.Dissolves then return true end
-    local have = classStatCache["Alien Scientist"]
-        and classStatCache["Alien Scientist"]["Dissolves"] or 0
-    return have >= reqs.Dissolves
-end
-
--- หา Monster ที่ตีได้ (ใช้สำหรับ NightLoop)
--- ข้าม: Deer, Owl, ชื่อที่มีคำว่า "Cultist", NPC HP > 100, Friendly tag, Pet tag, StrongholdEnemy
-local SKIP_EXACT = {
-    ["Deer"] = true,
-    ["Owl"] = true,
-}
-local SKIP_KEYWORDS = {
-    "Cultist",  -- ข้ามทุกชื่อที่มีคำว่า Cultist (Cultist, Ice Cultist, Cultist Brute, etc.)
-}
-local function shouldSkipName(name)
-    if SKIP_EXACT[name] then return true end
-    for _, keyword in ipairs(SKIP_KEYWORDS) do
-        if string.find(name, keyword, 1, true) then  -- 1, true = plain text (case-sensitive)
-            return true
-        end
-    end
-    return false
-end
 
 -- ============================================
--- BIG GAME HUNTER CLASS HELPERS
+-- BIG GAME HUNTER CLASS HELPERS (ใช้ globals แทน — locals เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers)
 -- ============================================
--- (อ้างอิงจาก decompile ของ BigGameHunterClass module)
--- ใช้ axe ตีมอนที่ดรอปของ BGH กินได้ (Wolf, Alpha Wolf, Bear, Polar Bear, Boar,
---  Arctic Fox, Mammoth, Scorpion, Blue Frog, Bunny) — skip Cultist ทั้งหมด
--- ถ้า WolfKills ยังไม่ครบ → ตีเฉพาะ "Wolf" ธรรมดาก่อน
---
--- *** ประกาศหลัง shouldSkipName เพื่อให้ upvalue resolve ถูกต้อง
---     (locals เก็บใน _G.BGH เพื่อไม่ให้นับเป็น outer-chunk registers) ***
 _G.BGH = _G.BGH or {}
 local BGH = _G.BGH
-
 BGH.isBigGameHunter = currentClass == "Big Game Hunter"
-
--- ลำดับความสำคัญ (Scorpion ขึ้นมาอันดับ 2 ตามคำสั่ง user)
--- ไม่รวม Mammoth (user ไม่ต้องการตี/เก็บ Mammoth Tusk)
-BGH.MONSTER_PRIORITY = {
-    "Wolf", "Scorpion", "Alpha Wolf", "Bear",
-    "Polar Bear", "Boar", "Arctic Fox", "Blue Frog", "Bunny",
-}
-BGH.PRIORITY_INDEX = {}
-for i, n in ipairs(BGH.MONSTER_PRIORITY) do
-    BGH.PRIORITY_INDEX[n] = i
-end
 
 -- Pelt types ตามลำดับความสำคัญ (ใช้เช็ค Complete ใน PeltList)
 BGH.PELT_ORDER = {
