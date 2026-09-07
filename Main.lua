@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 9.02")
+print("Version - 1.2.9 / 10.20")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -797,7 +797,8 @@ local function lobbyAutoLevelUp()
                     Client.Events.UpdateEquipped:FireServer(mainClass)
                     local t = 0
                     while folder:GetAttribute("Equipped") ~= true and t < 3 do
-                        task.wait(0.1); t += 0.1
+                        task.wait(0.1)
+                        t = t + 0.1
                     end
                     if folder:GetAttribute("Equipped") ~= true then
                         warn("[ClassUpgrade] equip " .. mainClass .. " timed out (server may not have responded)")
