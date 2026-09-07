@@ -8,7 +8,7 @@ do  -- BLOCK 1: Setup + GUI + Axe chop (locals ~60)
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 5.11")
+print("Version - 1.2.9 / 5.16")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1913,19 +1913,12 @@ do
     end
 end
 
+-- WSM table ต้อง declare ใน Block 1 เพื่อให้ Block 2 และ Block 3 เห็น (ลด register pressure)
+local WSM = {}  -- เก็บ Woodsman helpers ทั้งหมดใน table เดียว (1 outer var แทน 4)
+
 end  -- end of BLOCK 1
 
 do  -- BLOCK 2: Class helpers + NightLoops (locals ~99)
-
-----------------------------------------------------------------
--- WOODSMAN CLASS HELPERS (เก็บ locals ใน do-block + 1 table ที่ outer เพื่อไม่ให้ register เกิน 200)
--- (WoodsmanAxeKills quest → ลอยตีมอนด้วย Woodsman's Axe, zero HP + InvokeServer)
--- (CutTree quest → ลอยตัดต้นไม้ด้วย Woodsman's Axe, ไม่ดึง log)
--- ลำดับ: WoodsmanAxeKills > CutTree (ทำได้ทั้งวัน ไม่จำกัด night)
---
--- *** Declare WSM = {} ก่อน — assign isWoodsman/funs ทีหลังหลัง currentClass พร้อม ***
-----------------------------------------------------------------
-local WSM = {}  -- เก็บ Woodsman helpers ทั้งหมดใน table เดียว (1 outer var แทน 4)
 
 updateStatus("Equipping Axe...")
 
@@ -5391,6 +5384,10 @@ end
 -- - ถ้าทำไม่สำเร็จ (ต้นหมด map / มอนหมด) → return "impossible"
 -- ============================================
 
+end  -- end of BLOCK 2 (locals ~98)
+
+do  -- BLOCK 3: Main execution + Stronghold + Woodsman functions (locals ~50)
+
 -- Equip Woodsman's Axe (return ref ถ้าสำเร็จ, nil ถ้า fail)
 local function equipWoodsmanAxe()
     local axe = WSM.getAxe()
@@ -6106,10 +6103,6 @@ end
 
 -- Flag: ติดเมื่อ quest ของ main class เสร็จแล้ว รอให้ round ปัจจุบันจบ + เก็บเพชรก่อน teleport
 local questReadyToLeave = false
-
-end  -- end of BLOCK 2 (locals ~98)
-
-do  -- BLOCK 3: Main execution + Stronghold (locals ~50)
 
 -- Quest progress watcher: แสดง % ทุกครั้งที่ quest stat อัปเดต (ทุกที่ - Lobby/Stronghold/ฟาร์ม)
 if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
