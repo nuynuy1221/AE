@@ -4,10 +4,11 @@ if game.PlaceId ~= 79546208627805 and game.PlaceId ~= 126509999114328 then
     return
 end
 
+do  -- BLOCK 1: Setup + GUI + Axe chop (locals ~60)
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 3.56")
+print("Version - 1.2.9 / 5.11")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1912,47 +1913,19 @@ do
     end
 end
 
+end  -- end of BLOCK 1
+
+do  -- BLOCK 2: Class helpers + NightLoops (locals ~99)
+
 ----------------------------------------------------------------
--- WOODSMAN CLASS HELPERS
+-- WOODSMAN CLASS HELPERS (เก็บ locals ใน do-block + 1 table ที่ outer เพื่อไม่ให้ register เกิน 200)
 -- (WoodsmanAxeKills quest → ลอยตีมอนด้วย Woodsman's Axe, zero HP + InvokeServer)
 -- (CutTree quest → ลอยตัดต้นไม้ด้วย Woodsman's Axe, ไม่ดึง log)
 -- ลำดับ: WoodsmanAxeKills > CutTree (ทำได้ทั้งวัน ไม่จำกัด night)
+--
+-- *** Declare WSM = {} ก่อน — assign isWoodsman/funs ทีหลังหลัง currentClass พร้อม ***
 ----------------------------------------------------------------
-local isWoodsman = currentClass == "Woodsman"
-
-local function isWoodsmanAxeKillsDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Woodsman"] and CLASS_QUESTS["Woodsman"][lvl + 1]
-    if not reqs or not reqs.WoodsmanAxeKills then return true end
-    local have = classStatCache["Woodsman"]
-        and classStatCache["Woodsman"]["WoodsmanAxeKills"] or 0
-    return have >= reqs.WoodsmanAxeKills
-end
-
-local function isWoodsmanCutTreeDone()
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-    local reqs = CLASS_QUESTS["Woodsman"] and CLASS_QUESTS["Woodsman"][lvl + 1]
-    if not reqs or not reqs.CutTree then return true end
-    local have = classStatCache["Woodsman"]
-        and classStatCache["Woodsman"]["CutTree"] or 0
-    return have >= reqs.CutTree
-end
-
-local function isWoodsmanAllQuestDone()
-    return isWoodsmanAxeKillsDone() and isWoodsmanCutTreeDone()
-end
-
--- หา Woodsman's Axe จาก Inventory
-local function getWoodsmanAxe()
-    local inv = LocalPlayer:FindFirstChild("Inventory")
-    if not inv then return nil end
-    for _, tool in ipairs(inv:GetChildren()) do
-        if tool.Name == "Woodsman's Axe" then
-            return tool
-        end
-    end
-    return nil
-end
+local WSM = {}  -- เก็บ Woodsman helpers ทั้งหมดใน table เดียว (1 outer var แทน 4)
 
 updateStatus("Equipping Axe...")
 
@@ -1983,6 +1956,44 @@ local vampireScythe = LocalPlayer.Inventory
 local currentClass = LocalPlayer:GetAttribute("Class")
 local isVampire = currentClass == "Vampire"
 local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
+
+-- (ตอนนี้ currentClass พร้อมแล้ว — assign Woodsman helpers ใน do-block เพื่อไม่เพิ่ม register ที่ outer)
+do
+    WSM.isWoodsman = currentClass == "Woodsman"
+
+    function WSM.isAxeKillsDone()
+        local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+        local reqs = CLASS_QUESTS["Woodsman"] and CLASS_QUESTS["Woodsman"][lvl + 1]
+        if not reqs or not reqs.WoodsmanAxeKills then return true end
+        local have = classStatCache["Woodsman"]
+            and classStatCache["Woodsman"]["WoodsmanAxeKills"] or 0
+        return have >= reqs.WoodsmanAxeKills
+    end
+
+    function WSM.isCutTreeDone()
+        local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+        local reqs = CLASS_QUESTS["Woodsman"] and CLASS_QUESTS["Woodsman"][lvl + 1]
+        if not reqs or not reqs.CutTree then return true end
+        local have = classStatCache["Woodsman"]
+            and classStatCache["Woodsman"]["CutTree"] or 0
+        return have >= reqs.CutTree
+    end
+
+    function WSM.isAllQuestDone()
+        return WSM.isAxeKillsDone() and WSM.isCutTreeDone()
+    end
+
+    function WSM.getAxe()
+        local inv = LocalPlayer:FindFirstChild("Inventory")
+        if not inv then return nil end
+        for _, tool in ipairs(inv:GetChildren()) do
+            if tool.Name == "Woodsman's Axe" then
+                return tool
+            end
+        end
+        return nil
+    end
+end
 print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
@@ -5337,13 +5348,13 @@ elseif isAlienScientist and not isAlienScientistAllQuestDone() then
     task.spawn(alienScientistNightLoop)
 elseif BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone() then
     task.spawn(bigGameHunterNightLoop)
-elseif isWoodsman and not isWoodsmanAllQuestDone() then
+elseif WSM.isWoodsman and not WSM.isAllQuestDone() then
     -- Woodsman: ลำดับ WoodsmanAxeKills > CutTree (ทำได้ทั้งวัน ไม่รอกลางคืน)
     task.spawn(function()
-        if not isWoodsmanAxeKillsDone() then
+        if not WSM.isAxeKillsDone() then
             woodsmanAxeKillsLoop()
         end
-        if not isWoodsmanCutTreeDone() then
+        if not WSM.isCutTreeDone() then
             woodsmanCutTreeLoop()
         end
     end)
@@ -5382,7 +5393,7 @@ end
 
 -- Equip Woodsman's Axe (return ref ถ้าสำเร็จ, nil ถ้า fail)
 local function equipWoodsmanAxe()
-    local axe = getWoodsmanAxe()
+    local axe = WSM.getAxe()
     if not axe then
         warn("[Woodsman] Woodsman's Axe not in Inventory")
         return nil
@@ -5428,8 +5439,8 @@ local function waitForMonsters(maxWait)
 end
 
 local function woodsmanAxeKillsLoop()
-    if not isWoodsman then return "skip" end
-    if isWoodsmanAxeKillsDone() then return "done" end
+    if not WSM.isWoodsman then return "skip" end
+    if WSM.isAxeKillsDone() then return "done" end
 
     print("[Woodsman] Loop started")
 
@@ -5439,7 +5450,7 @@ local function woodsmanAxeKillsLoop()
         return "impossible"
     end
 
-    while isWoodsman and not isWoodsmanAxeKillsDone() do
+    while WSM.isWoodsman and not WSM.isAxeKillsDone() do
         -- ถ้ามี Cultist เกิด = Stronghold เปิด → ออก loop ไปทำ Stronghold
         if checkAnyCultistSpawned() then
             print("[Woodsman] Stronghold opened, pausing NightLoop")
@@ -5466,7 +5477,7 @@ local function woodsmanAxeKillsLoop()
 
         -- ลอย + ตีทีละตัว
         for _, monster in ipairs(monsters) do
-            if isWoodsmanAxeKillsDone() then break end
+            if WSM.isAxeKillsDone() then break end
             if checkAnyCultistSpawned() then return "stronghold" end
             if not (monster and monster.Parent) then continue end
 
@@ -5508,12 +5519,12 @@ local function woodsmanAxeKillsLoop()
     end
 
     print("[Woodsman] Loop ended")
-    return isWoodsmanAxeKillsDone() and "done" or "impossible"
+    return WSM.isAxeKillsDone() and "done" or "impossible"
 end
 
 local function woodsmanCutTreeLoop()
-    if not isWoodsman then return "skip" end
-    if isWoodsmanCutTreeDone() then return "done" end
+    if not WSM.isWoodsman then return "skip" end
+    if WSM.isCutTreeDone() then return "done" end
 
     print("[Woodsman] Loop started")
 
@@ -5526,7 +5537,7 @@ local function woodsmanCutTreeLoop()
     local NO_TREE_LIMIT = 3  -- บินหา 3 รอบถ้าไม่เจอต้นใหม่
     local noTreeRounds = 0
 
-    while isWoodsman and not isWoodsmanCutTreeDone() do
+    while WSM.isWoodsman and not WSM.isCutTreeDone() do
         if checkAnyCultistSpawned() then
             print("[Woodsman] Stronghold opened, pausing NightLoop")
             return "stronghold"
@@ -5556,7 +5567,7 @@ local function woodsmanCutTreeLoop()
         noTreeRounds = 0
 
         for _, tree in ipairs(trees) do
-            if isWoodsmanCutTreeDone() then break end
+            if WSM.isCutTreeDone() then break end
             if checkAnyCultistSpawned() then return "stronghold" end
 
             -- เช็ค Foliage (ต้นโค่นไปแล้ว)
@@ -5594,7 +5605,7 @@ local function woodsmanCutTreeLoop()
             local hitCount = 0
             while tree.Parent and tree:IsDescendantOf(workspace.Map.Foliage)
                 and hitCount < 300 do
-                if isWoodsmanCutTreeDone() then break end
+                if WSM.isCutTreeDone() then break end
                 if checkAnyCultistSpawned() then return "stronghold" end
 
                 hrp = LocalPlayer.Character
@@ -5616,7 +5627,7 @@ local function woodsmanCutTreeLoop()
     end
 
     print("[Woodsman] Loop ended")
-    return isWoodsmanCutTreeDone() and "done" or "impossible"
+    return WSM.isCutTreeDone() and "done" or "impossible"
 end
 
 -- ============================================
@@ -6096,6 +6107,10 @@ end
 -- Flag: ติดเมื่อ quest ของ main class เสร็จแล้ว รอให้ round ปัจจุบันจบ + เก็บเพชรก่อน teleport
 local questReadyToLeave = false
 
+end  -- end of BLOCK 2 (locals ~98)
+
+do  -- BLOCK 3: Main execution + Stronghold (locals ~50)
+
 -- Quest progress watcher: แสดง % ทุกครั้งที่ quest stat อัปเดต (ทุกที่ - Lobby/Stronghold/ฟาร์ม)
 if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "string" then
     local mainClass = Config.UpgradeClass[1]
@@ -6467,15 +6482,15 @@ while completedRounds < TOTAL_ROUNDS do
             print("[BigGameHunter] Resuming NightLoop until Stronghold opens")
             warpToStrongholdFloor(1)
             bigGameHunterNightLoop()
-        elseif isWoodsman and not isWoodsmanAllQuestDone() then
+        elseif WSM.isWoodsman and not WSM.isAllQuestDone() then
             -- Woodsman: ทำ Quest ต่อ (เริ่ม AxeKills ก่อน, แล้ว CutTree)
             -- ถ้า impossible → ไม่ teleport, รอ Round ใหม่ (เหมือน Vampire/AlienScientist/BGH)
             warpToStrongholdFloor(1)
 
-            if not isWoodsmanAxeKillsDone() then
+            if not WSM.isAxeKillsDone() then
                 woodsmanAxeKillsLoop()
             end
-            if not isWoodsmanCutTreeDone() then
+            if not WSM.isCutTreeDone() then
                 woodsmanCutTreeLoop()
             end
         else
@@ -6538,3 +6553,5 @@ pcall(function()
     -- ฆ่าตัวเองจบรอบ - ปล่อยให้ Death Watcher จับแล้วกดเล่นใหม่ต่อได้เลย (จบรอบ = เริ่มรอบใหม่)
     LocalPlayer.Character:BreakJoints()
 end)
+
+end  -- end of BLOCK 3
