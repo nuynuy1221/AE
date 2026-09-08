@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 10.53")
+print("Version - 1.2.9 / 2.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1955,6 +1955,11 @@ _G.HOVER_HEIGHT = HOVER_HEIGHT
 _G.ATTACK_INTERVAL = ATTACK_INTERVAL
 _G.bestAxeCombat = bestAxeCombat
 
+-- Expose globals ที่ Module ใช้
+_G.LocalPlayer = LocalPlayer
+_G.CLASS_QUESTS = CLASS_QUESTS
+_G.classStatCache = classStatCache
+
 -- Expose Dissolve remote (ใช้ใน Module_Alien)
 local dissolveRemote_outer = game:GetService("ReplicatedStorage")
     :FindFirstChild("RemoteEvents")
@@ -2442,11 +2447,6 @@ local function dragItemToTarget(item, targetPos)
         StopDrag:FireServer(item)
     end)
     warpedItems[item] = true
-end
-
--- ดึง item ไปยัง CraftingBench (เรียก dragItemToTarget แบบ sequential)
-local function dragItemToCraftingBench(item, craftPos)
-    dragItemToTarget(item, craftPos + Vector3.new(0, 2, 0))
 end
 
 local function warpItemToFire(item)
