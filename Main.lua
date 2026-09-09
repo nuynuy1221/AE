@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 3.49")
+print("Version - 1.2.9 / 3.55")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2335,6 +2335,7 @@ local function findNightMonsters()
     end
     return list
 end
+_G.findNightMonsters = findNightMonsters  -- ponytail: expose after definition
 
 -- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
 local function checkAnyCultistSpawned()
