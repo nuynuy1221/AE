@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 4.31")
+print("Version - 1.2.9 / 7.47")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3175,6 +3175,9 @@ if getTotalWood() < NEED_WOOD then
         local tree = trees[tIdx]
         if not tree or not tree.Parent or not tree:IsDescendantOf(workspace.Map.Foliage) then
             tIdx += 1
+            -- ต้นหมด (ตาย/Play Again แล้วแมพ rebuild) = break ทันที
+            -- ไม่งั้นลูปนี้วนไม่รู้จบแบบไม่ yield → thread หลักค้าง → เกมฟรีจต้อง End Task
+            if tIdx > #trees then break end
             continue
         end
         local treePos = tree:IsA("Model") and tree:GetPivot().Position or tree.Position
