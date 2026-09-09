@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 3.11")
+print("Version - 1.2.9 / 3.49")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2347,6 +2347,7 @@ local function checkAnyCultistSpawned()
     end
     return false
 end
+_G.checkAnyCultistSpawned = checkAnyCultistSpawned  -- ponytail: expose after definition; module uses _G
 
 local fireFrame = retryUntil("find MainFire BillboardGui", function()
     local center = mainFire:FindFirstChild("Center")
