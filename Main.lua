@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 7.47")
+print("Version - 1.2.9 / 10.19")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2905,9 +2905,11 @@ local function ensureFloating(targetPos)
             while floatAP and floatAP.Parent do
                 local c = LocalPlayer.Character
                 local h = c and c:FindFirstChild("HumanoidRootPart")
-                if h and floatAP then
-                    floatAP.Position = h.Position
+                local hum = c and c:FindFirstChildOfClass("Humanoid")
+                if not h or not hum or hum.Health <= 0 then
+                    break
                 end
+                floatAP.Position = h.Position
                 task.wait(0.1)
             end
             followThread = nil
@@ -2926,6 +2928,20 @@ local function disableFloating()
     floatAP = nil
     floatAO = nil
 end
+
+-- Stop physics constraints before character teardown can invalidate their attachments.
+local function bindFloatingDeathCleanup(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.Died:Connect(disableFloating)
+    end
+end
+
+if LocalPlayer.Character then
+    bindFloatingDeathCleanup(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(bindFloatingDeathCleanup)
+LocalPlayer.CharacterRemoving:Connect(disableFloating)
 
 local currentLevel = getCurrentLevel()
 task.wait(0.3)
