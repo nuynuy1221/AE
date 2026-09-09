@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 3.55")
+print("Version - 1.2.9 / 4.09")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4025,6 +4025,7 @@ do
     local keepMap = (isVampire and not isVampireAllQuestDone())
         or (isAlienScientist and not isAlienScientistAllQuestDone())
         or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
+        or (Woodsman.isWoodsman and not Woodsman.isAllQuestDone())
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -6186,7 +6187,7 @@ while completedRounds < TOTAL_ROUNDS do
         end
     end
 
-    -- ถ้า quest พร้อมอัปแล้ว → ออกจาก Stronghold กลับ lobby (หลังเก็บเพชรเสร็จ)
+    -- ถ้า quest พร้อมอัปแล้ว → ออกจาก Stronghold กลับ lobby (หลังเก็บเพchรเสร็จ)
     if questReadyToLeave then
         local mainClass = Config.UpgradeClass and Config.UpgradeClass[1] or "?"
         print(string.format("[Quest] %s quest complete - leaving for lobby", mainClass))
