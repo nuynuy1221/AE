@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 4.09")
+print("Version - 1.2.9 / 4.15")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2165,7 +2165,7 @@ BGH.findMonsters = function()
     local activeMonsters = BGH.getActivePeltTypes()
 
     for _, model in ipairs(chars:GetChildren()) do
-        if not shouldSkipName(model.Name) then
+        if (_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true) then
             if model:GetAttribute("StrongholdEnemy") ~= true then
                 local hum = model:FindFirstChildOfClass("Humanoid")
                     or model:FindFirstChildWhichIsA("Humanoid", true)
@@ -2312,7 +2312,7 @@ local function findNightMonsters()
 
     for _, model in ipairs(chars:GetChildren()) do
         -- ข้ามชื่อที่ห้ามตี (exact + keywords)
-        if not shouldSkipName(model.Name) then
+        if (_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true) then
             -- ข้าม Cultist (StrongholdEnemy)
             if model:GetAttribute("StrongholdEnemy") ~= true then
                 -- ข้าม Friendly/Pet tag
@@ -5061,7 +5061,7 @@ local function bigGameHunterNightLoop()
                             local chars = workspace:FindFirstChild("Characters")
                             if not chars then return end
                             for _, model in ipairs(chars:GetChildren()) do
-                                if not shouldSkipName(model.Name) then
+                                if (_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true) then
                                     if model:GetAttribute("StrongholdEnemy") ~= true then
                                         local hum = model:FindFirstChildOfClass("Humanoid")
                                             or model:FindFirstChildWhichIsA("Humanoid", true)
