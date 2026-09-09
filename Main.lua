@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 4.20")
+print("Version - 1.2.9 / 4.31")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1938,6 +1938,8 @@ local Client = require(player.PlayerScripts.Client)
 -- Globals ที่ Woodsman module ต้องการ
 local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
 local ownerId = tostring(player.UserId) .. "_" .. player.UserId
+_G.Event = Event  -- ponytail: expose for remote Woodsman InvokeServer; upgrade to scoped if audit needed
+_G.ownerId = ownerId
 
 -- Combat constants (shared กับ Vampire/Alien/BGH modules)
 local HOVER_HEIGHT = 10
@@ -1945,15 +1947,18 @@ local ATTACK_INTERVAL = 0.18
 
 -- Expose functions ให้ Module (local functions ไม่อยู่ใน _G โดย default)
 _G.zeroEnemyHealth = zeroEnemyHealth
-_G.findNightMonsters = findNightMonsters
-_G.checkAnyCultistSpawned = checkAnyCultistSpawned
-_G.ensureFloating = ensureFloating
 _G.shouldSkipName = shouldSkipName
+-- ponytail: basic skip names (Cultist + Deer) if real def missed; upgrade when full skip list available
+if type(shouldSkipName) ~= "function" then
+    shouldSkipName = function(n) return n == "Cultist" or n == "Deer" or n:find("Cultist") ~= nil or n:find("Deer") ~= nil or false end
+    _G.shouldSkipName = shouldSkipName
+end
 _G.floatAP = floatAP
 _G.floatAO = floatAO
 _G.HOVER_HEIGHT = HOVER_HEIGHT
 _G.ATTACK_INTERVAL = ATTACK_INTERVAL
 _G.bestAxeCombat = bestAxeCombat
+_G.bestAxeChop = bestAxeChop  -- ponytail: expose chop axe too; add if module needs tree-cut ref
 _G.Client = Client -- ponytail: expose Client for remote Woodsman module equip; upgrade to scoped require if audit needed
 
 -- Expose globals ที่ Module ใช้
