@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 10.19")
+print("Version - 1.2.9 / 10.54")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3065,10 +3065,11 @@ while currentLevel < maxLevel do
                 platform.Position = cutPos - Vector3.new(0, 33, 0)  -- platform ห้อยต่ำกว่า player 30+3
                 task.wait(0.1)
 
-                -- ตีต้นไม้จนกว่าจะตาย (backstop 500 ตี)
+                -- ตีต้นไม้จนกว่า Parent ของต้นไม้จะเปลี่ยน
+                local treeParent = tree.Parent
                 local hitCount = 0
                 local failStreak = 0
-                while tree.Parent and hitCount < 500 do
+                while tree.Parent == treeParent do
                     if getCurrentLevel() >= maxLevel then break end
 
                     -- อัพเดท axe ทุกครั้งก่อนตี
@@ -3223,7 +3224,8 @@ if getTotalWood() < NEED_WOOD then
         task.wait(0.1)
 
         local treeDestroyed = false
-        while tree.Parent do
+        local treeParent = tree.Parent
+        while tree.Parent == treeParent do
             local char = LocalPlayer.Character
             local th = char and char:FindFirstChild("ToolHandle")
             local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
