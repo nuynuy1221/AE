@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 3.03")
+print("Version - 1.2.9 / 3.11")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1954,7 +1954,7 @@ _G.floatAO = floatAO
 _G.HOVER_HEIGHT = HOVER_HEIGHT
 _G.ATTACK_INTERVAL = ATTACK_INTERVAL
 _G.bestAxeCombat = bestAxeCombat
-_G.Client = Client  -- expose for module request equip
+_G.Client = Client -- ponytail: expose Client for remote Woodsman module equip; upgrade to scoped require if audit needed
 
 -- Expose globals ที่ Module ใช้
 _G.LocalPlayer = LocalPlayer
