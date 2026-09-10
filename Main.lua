@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 10.10")
+print("Version - 1.2.9 / 10.38")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3794,10 +3794,12 @@ do
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
     -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
     -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เก็บ Campground + Ground + Landmarks (MainFire/CraftingBench/Items)
+    local keepWoodsmanResources = Woodsman.isWoodsman
+        and not Woodsman.isAllQuestDone()
     local keepMap = (isVampire and not isVampireAllQuestDone())
         or (isAlienScientist and not isAlienScientistAllQuestDone())
         or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
-        or (Woodsman.isWoodsman and not Woodsman.isAllQuestDone())
+        or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
         local mapFolderNames = {
@@ -3810,6 +3812,9 @@ do
             -- ข้าม "Campground" + "Ground" + "Landmarks" ถ้า Big Game Hunter ยังทำ Quest (ต้องใช้ MainFire/CraftingBench/Items)
             if keepMap then
                 if folderName == "Ground" or folderName == "Landmarks" then
+                    continue
+                end
+                if keepWoodsmanResources and folderName == "Foliage" then
                     continue
                 end
                 if BGH.isBigGameHunter
@@ -3832,8 +3837,8 @@ do
         end
     end
 
-    -- ลบทุกอย่างใต้ workspace.Characters (ยกเว้นถ้า Vampire ยังทำ Quest อยู่)
-    if not keepMap then
+    -- ลบทุกอย่างใต้ workspace.Characters (เก็บไว้สำหรับ Class ที่ยังทำ Quest)
+    if not keepMap and not keepWoodsmanResources then
         local chars = workspace:FindFirstChild("Characters")
         if chars then
             pcall(function()
