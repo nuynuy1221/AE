@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 10.38")
+print("Version - 1.2.9 / 9.04")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1947,7 +1947,7 @@ local function getToolCooldown(tool)
     local cooldown = tool and tool:GetAttribute("ToolCooldown")
     return type(cooldown) == "number" and cooldown > 0 and cooldown or 0.5
 end
-local ATTACK_INTERVAL = 0.5
+local ATTACK_INTERVAL = 0.1
 
 -- Expose functions ให้ Module (local functions ไม่อยู่ใน _G โดย default)
 _G.zeroEnemyHealth = zeroEnemyHealth
@@ -2867,7 +2867,7 @@ while currentLevel < maxLevel do
                         end
                     end
 
-                    task.wait(getToolCooldown(currentAxe))
+                    task.wait(0.1)
                     hitCount = hitCount + 1
                 end
 
@@ -4062,7 +4062,7 @@ end
 
 local combatCenter = strongholdFloorPos or humanoidRootPart.Position
 local HOVER_HEIGHT = 10       -- ระยะมาตรฐาน: ลอย/วาร์ป "ด้านบน" ของมอน 10 studs (หันหน้าลง)
-local ATTACK_INTERVAL = 0.18
+local ATTACK_INTERVAL = 0.1
 
 -- นับว่า Cultist ตัวไหน "รอด" จาก [วาร์ปเข้าใกล้ + ปรับเลือด + รอ + ตี] ไปแล้วกี่รอบ (weak key กัน memory leak)
 -- ครบ FINISH_MODE_AFTER รอบแล้วยังไม่ตาย = เข้าโหมดเก็บตาย: วาร์ป + ปรับเลือดเร็ว (ไม่รอ) + ตี ซ้ำจนตาย
