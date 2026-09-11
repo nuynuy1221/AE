@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 9.04")
+print("Version - 1.2.9 / 10.21")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1729,8 +1729,15 @@ print("✅ Death Watcher Running")
 local function isStrongholdEnemy(model)
     if typeof(model) ~= "Instance" or not model.Parent then return false end
     if model:GetAttribute("StrongholdEnemy") ~= true then return false end
+    if model:GetAttribute("NotAttackable") == true then return false end
     if Players:GetPlayerFromCharacter(model) then return false end
     return true
+end
+
+local function isAttackableModel(model)
+    return typeof(model) == "Instance"
+        and model.Parent
+        and model:GetAttribute("NotAttackable") ~= true
 end
 
 -- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
@@ -2062,9 +2069,11 @@ local function findNightMonsters()
 
     for _, model in ipairs(chars:GetChildren()) do
         -- ข้ามชื่อที่ห้ามตี (exact + keywords)
-        if (_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true) then
+        if isAttackableModel(model)
+            and ((_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true)) then
             -- ข้าม Cultist (StrongholdEnemy)
-            if model:GetAttribute("StrongholdEnemy") ~= true then
+            if model:GetAttribute("StrongholdEnemy") ~= true
+                and model:GetAttribute("NotAttackable") ~= true then
                 -- ข้าม Friendly/Pet tag
                 local hasFactionTag = model:HasTag("Friendly")
                     or model:HasTag("Pet")
