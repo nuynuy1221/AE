@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.9 / 9.39")
+print("Version - 1.2.10")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -15,6 +15,36 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 print("=== Sugar Hub Started ===")
+
+-- ============================================
+-- GOD MODE: กันดาเมจพื้นฐาน (เปิดตลอดตั้งแต่เริ่มเกม พร้อมกับ Watchers)
+-- กลบ remote รายงานความเสียหายจาก client -> server (แบบเดียวกับ Player.lua ใน UI Toggle)
+-- กันได้: กระสุน NPC, melee (wolf/bear/cultist), กับดัก, ฟ้าผ่า, ค้างคาว, นกเค้าแมว, ลูกธนู
+-- หมายเหตุ: ดาเมจที่ server หักเอง (เช่น Frog) กลบไม่ได้จาก client
+-- ============================================
+local blockedDamage = {
+    NPCProjectileDamagePlayer = true, -- กระสุนระยะไกล
+    NPCProjectileDamagePet    = true, -- กระสุนโดนเพ็ท
+    ClientTriggerNPCAttack    = true, -- melee ระยะใกล้ (wolf/bear/cultist ฯลฯ)
+    JungleSpikeTrapDamage     = true, -- กับดักหนาม
+    RamChargePlayer           = true, -- ถูกพุ่งชน (Ram/สัตว์ชน)
+    CheckLightningDamage      = true, -- ไฟฟ้าฝน — WeatherEffectModule
+    HitByBatScream            = true, -- ค้างคาวกรีด — BatClient
+    OwlChasePlayer            = true, -- นกเค้าแมวโฉบ — OwlModuleClient
+    TriggerArrowTrap          = true, -- กับดักลูกศรป่าดงดิบ — ArrowTrapClient
+}
+
+local oldNamecall
+local godModeEnabled = true -- God Mode เปิดตลอดตั้งแต่เริ่มเกม
+
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    if godModeEnabled and getnamecallmethod() == "FireServer"
+        and self.ClassName == "RemoteEvent" and blockedDamage[self.Name] then
+        return nil
+    end
+    return oldNamecall(self, ...)
+end))
+
 
 -- ============================================
 -- Config (can be set externally via _G.Config before running this script)
@@ -1632,6 +1662,7 @@ task.spawn(function()
     end
 end)
 
+print("✅ God Mode Running")
 print("✅ Auto-Eat Running")
 
 -- ============================================
