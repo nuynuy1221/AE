@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.10")
+print("Version - 1.2.11")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -17,7 +17,7 @@ local LocalPlayer = Players.LocalPlayer
 print("=== Sugar Hub Started ===")
 
 -- ============================================
--- GOD MODE: กันดาเมจพื้นฐาน (เปิดตลอดตั้งแต่เริ่มเกม พร้อมกับ Watchers)
+-- GOD MODE: กันดาเมจพื้นฐาน (เปิดเฉพาะ Farm Map ตั้งแต่เริ่มเกม พร้อมกับ Watchers)
 -- กลบ remote รายงานความเสียหายจาก client -> server (แบบเดียวกับ Player.lua ใน UI Toggle)
 -- กันได้: กระสุน NPC, melee (wolf/bear/cultist), กับดัก, ฟ้าผ่า, ค้างคาว, นกเค้าแมว, ลูกธนู
 -- หมายเหตุ: ดาเมจที่ server หักเอง (เช่น Frog) กลบไม่ได้จาก client
@@ -38,7 +38,8 @@ local oldNamecall
 local godModeEnabled = true -- God Mode เปิดตลอดตั้งแต่เริ่มเกม
 
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    if godModeEnabled and getnamecallmethod() == "FireServer"
+    if godModeEnabled and game.PlaceId ~= 79546208627805 -- เปิดเฉพาะ Farm Map (Lobby = ปล่อยโจมตีปกติ)
+        and getnamecallmethod() == "FireServer"
         and self.ClassName == "RemoteEvent" and blockedDamage[self.Name] then
         return nil
     end
@@ -1039,6 +1040,41 @@ if isLobby() then
     claimAllBadges()
 
     print("Daily Quests & Badges done")
+
+    -- ============================================
+    -- Redeem Codes (Config.Code = {"CODE1", "CODE2", ...} - ตั้งจากภายนอกได้หลายอัน)
+    -- ส่งผ่าน remote RequestInputCode เหมือน UI EnterCode ในเกม (merch = false = โค้ดปกติ)
+    -- ============================================
+    do
+        local redeemCodes = Config.Code or {}
+        if type(redeemCodes) == "table" and #redeemCodes > 0 then
+            local RequestInputCode = Client.Events.RequestInputCode
+            if not RequestInputCode then
+                warn("[CodeRedeem] RequestInputCode not found")
+            else
+                local redeemed = 0
+                for _, code in ipairs(redeemCodes) do
+                    if type(code) ~= "string" or code == "" then continue end
+                    local ok, result, status = pcall(function()
+                        return RequestInputCode:InvokeServer(code, false)
+                    end)
+                    if ok then
+                        local msg = tostring(result == nil and "Something went wrong" or result)
+                        local kind = tostring(status or "Error")
+                        print(string.format("[CodeRedeem] %s -> %s (%s)", code, msg, kind))
+                        updateStatus("Redeem: " .. msg)
+                        if kind == "Success" then redeemed += 1 end
+                    else
+                        warn("[CodeRedeem] " .. tostring(code) .. " failed: " .. tostring(result))
+                    end
+                    task.wait(0.5)
+                end
+                if redeemed > 0 then
+                    print("[CodeRedeem] Successfully redeemed " .. redeemed .. " code(s)")
+                end
+            end
+        end
+    end
 
     -- ============================================
     -- Auto-Upgrade + Equip Class (Lobby only - ก่อน Auto-Buy)
