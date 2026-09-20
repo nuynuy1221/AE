@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.11")
+print("Version - 1.2.11 / 7.39")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1067,7 +1067,7 @@ if isLobby() then
                     else
                         warn("[CodeRedeem] " .. tostring(code) .. " failed: " .. tostring(result))
                     end
-                    task.wait(0.5)
+                    task.wait(2) -- cooldown ระหว่างโค้ด เท่ากับ UI EnterCode ในเกม (DiamondsClient: wait(2) ก่อนปลดล็อกกรอกใหม่)
                 end
                 if redeemed > 0 then
                     print("[CodeRedeem] Successfully redeemed " .. redeemed .. " code(s)")
