@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 6.54")
+print("Version - 1.2.13 / 7.00")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1605,6 +1605,8 @@ PURGE_KEEP["Map"] = {
 	Campground = true,
 	Landmarks  = true,
 	Ground     = true,
+	Foliage    = true,   -- ต้องอยู่ใน keep มิฉะนั้น purgePrune ลบทั้งโฟลเดอร์ทิ้งก่อน
+	                    -- แล้วลูปหลังหา Foliage ได้ nil (เคยเป็นบั๊กนี้มาแล้ว)
 }
 
 -- ต้นไม้ที่ตีได้ = ชื่ออยู่ในรายการ + มี attribute Health
