@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 8.56")
+print("Version - 1.2.13 / 9.13")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3113,11 +3113,14 @@ while currentLevel < maxLevel do
                     warn("Hit cap (500) reached on one tree - skipping")
                 end
 
-                if getCurrentLevel() >= maxLevel then
-                    break
-                end
+                -- รอให้ Log โผล่จริงก่อนแล้วค่อยดึง
+                -- เซิร์ฟเวอร์ spawn Log หลังต้นตาย ไม่ได้ทันทีที่ InvokeServer คืน
+                -- เดิมดึงทันทีหลัง wait(0.1) รอบเดียว = ของที่ช้ากว่านั้นถูกมองข้าม
+                task.wait(0.5)
 
-                -- ดึง Log ไปกองไฟทันทีหลังตัดเสร็จ (กัน Log ตกค้างที่ต้นไม้)
+                -- ดึง Log ไปกองไฟ
+                -- ต้องอยู่ก่อนเช็ค fire เต็ม: เดิม break ที่ 3116 ออกจาก for ไปก่อนถึงบรรทัดนี้
+                -- = ต้นที่ทำให้ fire เต็มพอดีไม่เคยถูกดึงเลย ไม้ค้างที่ต้นทุก level (7 ครั้ง/รอบ)
                 for _, item in ipairs(workspace.Items:GetChildren()) do
                     if item.Name == "Log" and item.Parent == workspace.Items and not warpedItems[item] then
                         warpItemToFire(item)
@@ -3127,6 +3130,10 @@ while currentLevel < maxLevel do
                 end
 
                 treesSinceFlight = treesSinceFlight + 1
+
+                if getCurrentLevel() >= maxLevel then
+                    break
+                end
 
                 -- ตัดครบ 3 ต้น → fly + ออก for loop
                 if treesSinceFlight >= 3 then
