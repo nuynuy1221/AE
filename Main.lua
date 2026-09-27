@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 6.42")
+print("Version - 1.2.13 / 6.54")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1598,17 +1598,14 @@ if not purgeMap then
 	return
 end
 
-local PURGE_CLASS = LocalPlayer:GetAttribute("Class") or "Unknown"
-local purgeKeepGround = PURGE_CLASS == "Woodsman" or PURGE_CLASS == "Vampire"
-	or PURGE_CLASS == "Alien Scientist" or PURGE_CLASS == "Big Game Hunter"
-
+-- เก็บ Ground ไว้เสมอ (1,840 instance = 2.3% ของ Map) ไม่ต้องคิดตามคลาส
+-- เพราะตัวละครต้องยืนพื้นจริง: นอนบนเตียงให้ของเป็น Slept แล้วดึงได้ (~2658)
+-- และไม่ต้อง anchor ตัวละครไว้ที่จุดเกิดตอนสตาร์ทอีก
 PURGE_KEEP["Map"] = {
 	Campground = true,
 	Landmarks  = true,
-	Ground     = purgeKeepGround,              -- ต้องมีพื้นตอนไล่ตีมอนกลางคืน
+	Ground     = true,
 }
-
-local purgeKilled, purgeLostGround = 0, false
 
 -- ต้นไม้ที่ตีได้ = ชื่ออยู่ในรายการ + มี attribute Health
 -- เช็คลงไปใน subtree ด้วย เผื่อเกมซ้อนต้นไม้ไว้ใต้โฟลเดอร์ย่อย (เช่น Map.Foliage.Biome.Small Tree)
@@ -1640,8 +1637,6 @@ local function purgePrune(inst)
 	if not keep then return end
 	for _, child in ipairs(inst:GetChildren()) do
 		if not keep[child.Name] then
-			purgeKilled += 1
-			if child.Name == "Ground" then purgeLostGround = true end
 			pcall(function() child:Destroy() end)
 		end
 	end
@@ -1656,7 +1651,6 @@ local function purgeSweep()
 	if foliage then
 		for _, child in ipairs(foliage:GetChildren()) do
 			if not purgeIsTree(child) then
-				purgeKilled += 1
 				pcall(function() child:Destroy() end)
 			end
 		end
@@ -1672,27 +1666,12 @@ end
 
 purgeSweep()
 
--- พื้นหายไปแล้วถ้าไม่ตรึงจะตกใต้โลก (สคริปต์ย้ายที่ด้วย CFrame อย่างเดียว ไม่มี MoveTo เลย)
-if purgeLostGround then
-	local function purgePin(char)
-		local hrp = char and char:WaitForChild("HumanoidRootPart", 10)
-		if hrp then pcall(function() hrp.Anchored = true end) end
-	end
-	purgePin(LocalPlayer.Character)
-	LocalPlayer.CharacterAdded:Connect(purgePin)
-end
-
 task.spawn(function()   -- แมพสตรีมเข้ามาเรื่อย ๆ ต้องตามลบต่อ
 	while purgeMap.Parent do
 		task.wait(2)
 		purgeSweep()
 	end
 end)
-
--- ไม่เรียก collectgarbage("collect") - Roblox ไม่รองรับ argument นี้ (เตือนทุกครั้ง)
--- Destroy อยู่แล้ว GC เก็บให้เองอยู่แล้ว ใช้ gcinfo() ดูผลแทน
-warn(string.format("[Purge] %d map instances removed (class=%s, groundKept=%s, mem=%dKB)",
-	purgeKilled, PURGE_CLASS, tostring(not purgeLostGround), gcinfo()))
 end
 
 task.spawn(function()
@@ -3991,16 +3970,18 @@ do
         or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
+        -- "Ground" ออกจากรายการแล้ว - เก็บไว้เสมอเหมือน Step 2 (Map Purge)
+        -- ลบตอนนี้ทำให้ตัวละครตกหลังจบ Stronghold แล้วไปเกิดที่จุดเกิดบนแมพที่ล้างแล้ว
         local mapFolderNames = {
             "Biomes", "Blockers", "Boundaries", "Campground", "Caves",
-            "ExplodableModels", "FishingSpots", "Foliage", "Ground",
+            "ExplodableModels", "FishingSpots", "Foliage",
             "Landmarks", "MapLandmarks", "MissingKids", "Snow", "Testing", "Water",
         }
         for _, folderName in ipairs(mapFolderNames) do
-            -- ข้าม "Ground" + "Landmarks" ถ้า Vampire/AlienScientist ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
-            -- ข้าม "Campground" + "Ground" + "Landmarks" ถ้า Big Game Hunter ยังทำ Quest (ต้องใช้ MainFire/CraftingBench/Items)
+            -- ข้าม "Landmarks" ถ้า Vampire/AlienScientist ยังทำ Quest อยู่ (ต้องวาร์ปกลับ Stronghold ตอนเสร็จ)
+            -- ข้าม "Campground" + "Landmarks" ถ้า Big Game Hunter ยังทำ Quest (ต้องใช้ MainFire/CraftingBench/Items)
             if keepMap then
-                if folderName == "Ground" or folderName == "Landmarks" then
+                if folderName == "Landmarks" then
                     continue
                 end
                 if keepWoodsmanResources and folderName == "Foliage" then
