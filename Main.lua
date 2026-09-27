@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 8.22")
+print("Version - 1.2.13 / 8.44")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1559,21 +1559,8 @@ end
 
 -- ============================================
 -- UNANCHOR AFTER DRAG
--- ของที่อยู่นอก StreamingRadius จะถูก client anchor ไว้กันตกออกจากโลก
--- Map Purge ข้างล่างลบ geometry ขนาดใหญ่จน spatial index เพี้ยน ทำให้บริเวณกองไฟ
--- ถูกมองว่าไม่ได้โหลด -> ของที่ลากมาวางที่ firePos + 10 studs ค้างลอย ไม่ตกลงไปเผา
--- ปลดให้เองทุกครั้งที่ลากจบ
+-- (ถูกลบแล้ว - ไม่ช่วย ตอนนี้ไม่มีการปลด Anchored ที่ไหนในสคริปต์)
 -- ============================================
-local function unanchorItem(item)
-	if not item or not item.Parent then return end
-	if item:IsA("BasePart") then
-		item.Anchored = false
-		return
-	end
-	for _, d in ipairs(item:GetDescendants()) do
-		if d:IsA("BasePart") then d.Anchored = false end
-	end
-end
 
 -- ============================================
 -- MAP PURGE: ลบโมเดลใน workspace.Map ที่ไม่ได้ใช้ (ไม่มี Restore)
@@ -1581,12 +1568,17 @@ end
 -- (Step 3.7 ทำอีกรอบตอนจบ Stronghold - ถ้ารอบนี้ล้างไปหมดแล้วจะเป็น no-op)
 -- ============================================
 -- whitelist: เก็บเฉพาะที่สคริปต์/Module อ่านจริง
---   Map.Campground.MainFire        firePos + BillboardGui เลข Level/Timer
---   Map.Campground.CraftingBench   getCraftingTouchZone
---   Map.Campground.alecCircle      วงวางแพลตฟอร์ม + วงวางเตียง
---   Map.Landmarks.Stronghold       Building.Floor + Functional.{FinalGate, Wave1.TriggerZone}
---   Map.Ground                     ตัวละครยืนพื้น (นอนเตียงให้ของเป็น Slept แล้วดึงได้)
---   Map.Foliage                    เฉพาะต้นไม้ที่ตีได้ (Step 3 + 3.5 เอาไม้ไปเผา)
+--   Map.Campground                   ไม่แตะทั้งโฟลเดอร์ (เคยตัดแค่ 3 ชิ้นที่เหลือทิ้ง)
+--   Map.Landmarks.Stronghold         Building.Floor + Functional.{FinalGate, Wave1.TriggerZone}
+--   Map.Ground                       ตัวละครยืนพื้น (นอนเตียงให้ของเป็น Slept แล้วดึงได้)
+--   Map.Foliage                      เฉพาะต้นไม้ที่ตีได้ (Step 3 + 3.5 เอาไม้ไปเผา)
+--
+-- ทำไม Campground ต้องไม่แตะเลย:
+--   1) 803 instance = 1% ของ Map (80,559) ได้ผลลัพธ์แทบไม่มี แต่ความเสี่ยงมีจริง
+--   2) พื้นใต้กองไฟอาจเป็นลูกของ Campground ที่ไม่ได้ชื่อ MainFire/CraftingBench/alecCircle
+--      ลบทิ้ง = กองไฟลอยกลางอากาศ ของที่วาร์ปมาค้างลอย ไม่ตกลงไปเผา (อาการ Anchored)
+--   3) เตียงที่ Step 3.5 ให้เซิร์ฟเวอร์วางอยู่ตรงนี้ ลบแล้วของเป็น Slept ไม่ได้ ดึงไม่ได้
+--   4) MainFire คือ dependency หลักของสคริปต์ (firePos + BillboardGui เลข Level) อยู่ในนี้
 --
 -- ไม่แตะ: ReplicatedStorage, PlayerGui, Lighting, ชั้นบนสุด workspace, StreamingRadius
 -- ============================================
@@ -1604,7 +1596,7 @@ local CHOPPABLE_TREE_NAMES = {
 
 do
 local PURGE_KEEP = {
-	["Map/Campground"] = { MainFire = true, CraftingBench = true, alecCircle = true },
+	-- ไม่มี "Map/Campground" = ไม่แตะโฟลเดอร์นั้นเลย (ดูเหตุผลด้านบน)
 	["Map/Landmarks"] = { Stronghold = true },
 	["Map/Landmarks/Stronghold"] = { Building = true, Functional = true },
 }
@@ -1616,7 +1608,7 @@ if not purgeMap then
 end
 
 PURGE_KEEP["Map"] = {
-	Campground = true,
+	Campground = true,   -- เก็บทั้งโฟลเดอร์ ไม่ตัดลึก (พื้นใต้กองไฟอาจอยู่ตรงนี้)
 	Landmarks  = true,
 	Ground     = true,   -- ตัวละครต้องยืนพื้นจริง ไม่งั้นนอนเตียงไม่ได้
 	Foliage    = true,   -- ต้องอยู่ใน keep มิฉะนั้น purgePrune ลบทั้งโฟลเดอร์ทิ้งก่อน
@@ -1658,10 +1650,7 @@ local function purgePrune(inst)
 	end
 end
 
--- includeCampground = false ตอน resweep: เตียงที่ Step 3.5 ให้เซิร์ฟเวอร์วางอยู่ใต้ Map.Campground
--- ลูป 2 วินาทีจะไปลบทิ้ง = ของเป็น Slept ไม่ได้ ดึงไม่ได้ (เคยเจอมาแล้ว)
--- Campground แค่ 803 instance = 1% ของ Map ไม่คุ้มเสี่ยง
-local function purgeSweep(includeCampground)
+local function purgeSweep()
 	purgePrune(purgeMap)
 	-- Foliage: เก็บเฉพาะต้นไม้ที่ตีได้ ที่เหลือลบ (35k instance -> เฉพาะต้นไม้จริง)
 	-- ต้องเก็บทุกคลาส ไม่ใช่แค่ Woodsman
@@ -1674,9 +1663,7 @@ local function purgeSweep(includeCampground)
 		end
 	end
 
-	if includeCampground then
-		purgePrune(purgeMap:FindFirstChild("Campground"))
-	end
+	-- Campground: ไม่แต้ว (ไม่มีใน PURGE_KEEP = purgePrune จะ return ทันทีถ้าเรียก)
 	local landmarks = purgeMap:FindFirstChild("Landmarks")
 	if landmarks then
 		purgePrune(landmarks)
@@ -1684,12 +1671,15 @@ local function purgeSweep(includeCampground)
 	end
 end
 
-purgeSweep(true)
+purgeSweep()   -- รอบแรกทันทีตอนเข้าแมพ ลบให้จบก่อนฟาร์ม
 
 task.spawn(function()   -- แมพสตรีมเข้ามาเรื่อย ๆ ต้องตามลบต่อ
+	-- ห่าง 30 วิ ไม่ใช่ 2: ลบถี่ = เซิร์ฟส่งของที่ลบกลับมาใหม่ = เกิด
+	-- ลบ→โหลดวนทุก 2 วิตอนบิน กินเฟรมไป 50-65% (destroy + สร้าง physics body ใหม่คือคำสั่งแพงที่สุด)
+	-- ระหว่างบิน StreamingRadius ดันของเก่าออกเองอยู่แล้ว ~0.5 วิ ไม่ต้องลบถี่เพื่อประหยัด RAM
 	while purgeMap.Parent do
-		task.wait(2)
-		purgeSweep(false)
+		task.wait(30)
+		purgeSweep()
 	end
 end)
 end
@@ -1770,7 +1760,6 @@ task.spawn(function()
 
             task.wait(0.1)
             StopDrag:FireServer(item)
-            unanchorItem(item)   -- Map Purge ทำให้ของนอก StreamingRadius ถูก anchor -> ค้างลอย ไม่ตกเข้ากองไฟ
         end)
         return success
     end
@@ -2377,7 +2366,6 @@ local function warpItemToTarget(item, targetPos)
 
             task.wait(0.1)
             StopDrag:FireServer(item)
-            unanchorItem(item)   -- เหมือนกัน ของที่วาร์ปมากองไฟต้องตกได้
         end)
     end)
     warpedItems[item] = true
@@ -2403,7 +2391,6 @@ local function dragItemToTarget(item, targetPos)
         end
         task.wait(0.1)
         StopDrag:FireServer(item)
-        unanchorItem(item)   -- เหมือนกัน ของที่วาร์ปมากองไฟต้องตกได้
     end)
     warpedItems[item] = true
 end
