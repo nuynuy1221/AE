@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 7.36")
+print("Version - 1.2.13 / 8.22")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1557,6 +1557,143 @@ if CFG.plastic and not CFG.skipCharacters then
 end
 end
 
+-- ============================================
+-- UNANCHOR AFTER DRAG
+-- ของที่อยู่นอก StreamingRadius จะถูก client anchor ไว้กันตกออกจากโลก
+-- Map Purge ข้างล่างลบ geometry ขนาดใหญ่จน spatial index เพี้ยน ทำให้บริเวณกองไฟ
+-- ถูกมองว่าไม่ได้โหลด -> ของที่ลากมาวางที่ firePos + 10 studs ค้างลอย ไม่ตกลงไปเผา
+-- ปลดให้เองทุกครั้งที่ลากจบ
+-- ============================================
+local function unanchorItem(item)
+	if not item or not item.Parent then return end
+	if item:IsA("BasePart") then
+		item.Anchored = false
+		return
+	end
+	for _, d in ipairs(item:GetDescendants()) do
+		if d:IsA("BasePart") then d.Anchored = false end
+	end
+end
+
+-- ============================================
+-- MAP PURGE: ลบโมเดลใน workspace.Map ที่ไม่ได้ใช้ (ไม่มี Restore)
+-- รันที่ Step 2 เพื่อดันตั้งแต่ตอนเข้าแมพ ช่วงฟาร์มหนักที่สุด
+-- (Step 3.7 ทำอีกรอบตอนจบ Stronghold - ถ้ารอบนี้ล้างไปหมดแล้วจะเป็น no-op)
+-- ============================================
+-- whitelist: เก็บเฉพาะที่สคริปต์/Module อ่านจริง
+--   Map.Campground.MainFire        firePos + BillboardGui เลข Level/Timer
+--   Map.Campground.CraftingBench   getCraftingTouchZone
+--   Map.Campground.alecCircle      วงวางแพลตฟอร์ม + วงวางเตียง
+--   Map.Landmarks.Stronghold       Building.Floor + Functional.{FinalGate, Wave1.TriggerZone}
+--   Map.Ground                     ตัวละครยืนพื้น (นอนเตียงให้ของเป็น Slept แล้วดึงได้)
+--   Map.Foliage                    เฉพาะต้นไม้ที่ตีได้ (Step 3 + 3.5 เอาไม้ไปเผา)
+--
+-- ไม่แตะ: ReplicatedStorage, PlayerGui, Lighting, ชั้นบนสุด workspace, StreamingRadius
+-- ============================================
+-- ประกาศตรงนี้เพราะ Map Purge ใช้ร่วมกับ retryUntil("find Trees") ที่อยู่ทีหลัง
+-- ถ้าลบต้นไม้ทิ้ง Step 4 จะค้างตรงนั้นตลอด ไม่ใช่แค่ไม้ไม่พอ
+local CHOPPABLE_TREE_NAMES = {
+    "Small Tree",
+    "Fairy Small Tree",
+    "Snowy Small Tree",
+    "Birch Tree",
+    "Dead Tree1",
+    "Dead Tree2",
+    "Dead Tree3",
+}
+
+do
+local PURGE_KEEP = {
+	["Map/Campground"] = { MainFire = true, CraftingBench = true, alecCircle = true },
+	["Map/Landmarks"] = { Stronghold = true },
+	["Map/Landmarks/Stronghold"] = { Building = true, Functional = true },
+}
+
+local purgeMap = workspace:FindFirstChild("Map")
+if not purgeMap then
+	warn("[Purge] no workspace.Map - skipped")
+	return
+end
+
+PURGE_KEEP["Map"] = {
+	Campground = true,
+	Landmarks  = true,
+	Ground     = true,   -- ตัวละครต้องยืนพื้นจริง ไม่งั้นนอนเตียงไม่ได้
+	Foliage    = true,   -- ต้องอยู่ใน keep มิฉะนั้น purgePrune ลบทั้งโฟลเดอร์ทิ้งก่อน
+	                    -- แล้วลูปหลังหา Foliage ได้ nil (เคยเป็นบั๊กนี้มาแล้ว)
+}
+
+-- ต้นไม้ที่ตีได้ = ชื่ออยู่ในรายการ + มี attribute Health
+-- เช็คลงไปใน subtree ด้วย เผื่อเกมซ้อนต้นไม้ไว้ใต้โฟลเดอร์ย่อย (เช่น Map.Foliage.Biome.Small Tree)
+-- ponytail: เก็บทั้ง subtree ที่มีต้นไม้ข้างใน (ข้างในอาจมีหิน/หญ้าเหลือ) - ถ้า FPS ไม่พอ
+-- ค่อยตัดลึกลงไปในโฟลเดอร์ย่อยทีละชั้น
+local function purgeIsTree(inst)
+	if table.find(CHOPPABLE_TREE_NAMES, inst.Name) and inst:GetAttribute("Health") then
+		return true
+	end
+	for _, d in ipairs(inst:GetDescendants()) do
+		if table.find(CHOPPABLE_TREE_NAMES, d.Name) and d:GetAttribute("Health") then
+			return true
+		end
+	end
+	return false
+end
+
+local function purgePathOf(inst)
+	local parts, p = {}, inst
+	while p and p ~= workspace do
+		table.insert(parts, 1, p.Name)
+		p = p.Parent
+	end
+	return table.concat(parts, "/")
+end
+
+local function purgePrune(inst)
+	local keep = PURGE_KEEP[purgePathOf(inst)]
+	if not keep then return end
+	for _, child in ipairs(inst:GetChildren()) do
+		if not keep[child.Name] then
+			pcall(function() child:Destroy() end)
+		end
+	end
+end
+
+-- includeCampground = false ตอน resweep: เตียงที่ Step 3.5 ให้เซิร์ฟเวอร์วางอยู่ใต้ Map.Campground
+-- ลูป 2 วินาทีจะไปลบทิ้ง = ของเป็น Slept ไม่ได้ ดึงไม่ได้ (เคยเจอมาแล้ว)
+-- Campground แค่ 803 instance = 1% ของ Map ไม่คุ้มเสี่ยง
+local function purgeSweep(includeCampground)
+	purgePrune(purgeMap)
+	-- Foliage: เก็บเฉพาะต้นไม้ที่ตีได้ ที่เหลือลบ (35k instance -> เฉพาะต้นไม้จริง)
+	-- ต้องเก็บทุกคลาส ไม่ใช่แค่ Woodsman
+	local foliage = purgeMap:FindFirstChild("Foliage")
+	if foliage then
+		for _, child in ipairs(foliage:GetChildren()) do
+			if not purgeIsTree(child) then
+				pcall(function() child:Destroy() end)
+			end
+		end
+	end
+
+	if includeCampground then
+		purgePrune(purgeMap:FindFirstChild("Campground"))
+	end
+	local landmarks = purgeMap:FindFirstChild("Landmarks")
+	if landmarks then
+		purgePrune(landmarks)
+		purgePrune(landmarks:FindFirstChild("Stronghold"))
+	end
+end
+
+purgeSweep(true)
+
+task.spawn(function()   -- แมพสตรีมเข้ามาเรื่อย ๆ ต้องตามลบต่อ
+	while purgeMap.Parent do
+		task.wait(2)
+		purgeSweep(false)
+	end
+end)
+end
+
 task.spawn(function()
     local Client = require(LocalPlayer.PlayerScripts.Client)
     local MAX_HUNGER = 200
@@ -1633,6 +1770,7 @@ task.spawn(function()
 
             task.wait(0.1)
             StopDrag:FireServer(item)
+            unanchorItem(item)   -- Map Purge ทำให้ของนอก StreamingRadius ถูก anchor -> ค้างลอย ไม่ตกเข้ากองไฟ
         end)
         return success
     end
@@ -2239,6 +2377,7 @@ local function warpItemToTarget(item, targetPos)
 
             task.wait(0.1)
             StopDrag:FireServer(item)
+            unanchorItem(item)   -- เหมือนกัน ของที่วาร์ปมากองไฟต้องตกได้
         end)
     end)
     warpedItems[item] = true
@@ -2264,6 +2403,7 @@ local function dragItemToTarget(item, targetPos)
         end
         task.wait(0.1)
         StopDrag:FireServer(item)
+        unanchorItem(item)   -- เหมือนกัน ของที่วาร์ปมากองไฟต้องตกได้
     end)
     warpedItems[item] = true
 end
@@ -2519,6 +2659,26 @@ platform.CanCollide = true
 platform.Transparency = 1
 platform.Parent = workspace
 
+-- พื้นกันตก: ค้างนิ่ง 50 studs ใต้กองไฟ กว้างยาวพอครอบทั้งแมพ
+-- platform ข้างบนตามตัวแค่ 10x10 ถ้าตัวเร็วกว่ามันก็หลุด = ตกไปใต้โลก
+-- มอนที่ตกจาก Stronghold/ที่สูงจะได้ลงบนพื้นนี้ ไม่ตกไปแบบไม่สิ้นสุด
+-- 6000 = รัศมี 3000 ที่กลางกองไฟ ครอบวงบินที่ไกลสุด (radius 1500) เหลือ 2 เท่า
+-- CanQuery = false: ตั้งใจให้เกม raycast มองไม่เห็น (getFloorInfo/ระบบเล็ง) แต่ตัวละคร/มอนชนได้
+-- CanTouch = false: ไม่ต้องยิง Touched ให้มอนเดินตาม
+local FALL_FLOOR_SIZE = 6000
+local FALL_FLOOR_DROP = 50
+local fallFloor = Instance.new("Part")
+fallFloor.Name = "FallFloor"
+fallFloor.Size = Vector3.new(FALL_FLOOR_SIZE, 1, FALL_FLOOR_SIZE)
+fallFloor.Anchored = true
+fallFloor.CanCollide = true
+fallFloor.CanTouch = false
+fallFloor.CanQuery = false
+fallFloor.Material = Enum.Material.SmoothPlastic
+fallFloor.Transparency = 1
+fallFloor.Position = firePos - Vector3.new(0, FALL_FLOOR_DROP, 0)
+fallFloor.Parent = workspace
+
 -- (กำแพงป้องกันเดิมถูกแทนด้วย GLOBAL SHIELD แบบ weld ติดตัวด้านบนแล้ว)
 local airHeight = 20
 local treeIndex = 1
@@ -2526,15 +2686,33 @@ local treeIndex = 1
 local function flyAndWarpItems()
     updateStatus("Flying & Warping Items...")
 
+    -- ลดงานต่อเฟรม: ลูปนี้ยาว ~2,900 step (radius 20..1000 step 40)
+    --   - Items อ่าน 1 ครั้งต่อ radius แทนทุก step เดิมสร้างตารางใหม่ ~1.5M entries/รอบ -> GC กร่อน -> FPS กระตกเป็นจังหวะ
+    --     (attribute ยังอ่านสดทุก step เพราะเก็บ instance เดิมในตาราง ของใหม่ที่เกิดระหว่างวงไปตัว sweep ท้ายลูปจับได้)
+    --   - collectLostChildren 1 ครั้งต่อ radius: มันวาร์ปเราไปกด prompt หาเด็ก = บินชะงักกลางวง
+    --   - getCurrentLevel/allChildrenCollected ทั้งคู่อ่านข้าม boundary (BillboardGui .Text / attribute) เก็บ 0.2s = 5 ครั้ง/วิ แทน 60
+    local levelCache, levelCacheAt, kidsDoneCache = 0, 0, false
+    local function freshExitCheck()
+        if tick() - levelCacheAt >= 0.2 then
+            levelCache = getCurrentLevel()
+            kidsDoneCache = allChildrenCollected()
+            levelCacheAt = tick()
+        end
+        return levelCache >= maxLevel and kidsDoneCache
+    end
+
     for radius = 20, 1000, 40 do
         local steps = 50 + math.floor(radius / 40) * 5
         local circumference = 2 * math.pi * radius
         local speed = 1000
         local duration = circumference / speed
 
+        local items = workspace.Items:GetChildren()
+        collectLostChildren()
+
         for i = 0, steps do
             -- ถ้า Level ถึง 7 และเก็บเด็กครบแล้ว → หยุดบิน
-            if getCurrentLevel() >= maxLevel and allChildrenCollected() then
+            if freshExitCheck() then
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                 return true
             end
@@ -2549,7 +2727,7 @@ local function flyAndWarpItems()
             humanoidRootPart.CFrame = CFrame.new(circlePos)
             platform.Position = circlePos - Vector3.new(0, 3, 0)
 
-            for _, item in ipairs(workspace.Items:GetChildren()) do
+            for _, item in ipairs(items) do
                 if not warpedItems[item] and item.Name ~= "Sapling" then
                     local name = item.Name
                     -- Whitelist: ดึงเฉพาะที่อนุญาต (กัน Structure parts จาก Cabin/Model/Part)
@@ -2584,8 +2762,6 @@ local function flyAndWarpItems()
                     end
                 end
             end
-
-            collectLostChildren()
 
             task.wait(duration / steps)
         end
@@ -2645,12 +2821,12 @@ local function flyAndWarpItems()
             local circumference = 2 * math.pi * radius
             local speed = 1000
             local duration = circumference / speed
+            collectLostChildren()   -- 1 ครั้งต่อ radius ไม่ใช่ทุก step (มันดึงตัวละครไปหาเด็ก = บินชะงัก)
             for i = 0, steps do
                 local angle = (i / steps) * math.pi * 2
                 local circlePos = firePos + Vector3.new(math.cos(angle) * radius, airHeight, math.sin(angle) * radius)
                 humanoidRootPart.CFrame = CFrame.new(circlePos)
                 platform.Position = circlePos - Vector3.new(0, 3, 0)
-                collectLostChildren()
                 task.wait(duration / steps)
             end
             -- เช็คหลังครบรอบเท่านั้น
