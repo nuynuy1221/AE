@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.12")
+print("Version - 1.2.13")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1319,7 +1319,244 @@ end
 -- STEP 2: Start Auto-Eat Food (Continuous Background)
 -- ============================================
 
-print("\n[Step 2] Starting continuous auto-eat food...")
+print("\n[Step 2] Starting auto-func")
+
+-- ============================================
+-- FLAT FPS BOOSTER (รวมจาก FlatFPS.lua)
+-- ตัด texture/decal/เอฟเฟ็กต์ + จัด lighting ให้แบน เพื่อดัน FPS
+-- ห่อทั้งก้อนด้วย do...end เพราะชื่อ local (CFG/strip/roots/Lighting...) ชนกับ MainScript ได้
+-- ไม่เก็บค่าเดิม = กู้คืนไม่ได้ (by design)
+-- CFG.skipGUI = true -> ไม่แตะ game GUI เลย (กัน SugarHubGUI โดน pg:Clear())
+-- CFG.killUI  = false -> กันเหมือนกัน ถ้าวันหลังเปิด skipGUI
+-- ============================================
+do
+--[==[
+	Flat + Max-FPS Booster   |   Roblox executor, client-side only
+	Removes every texture/decal/material so parts render as flat BaseColor,
+	and strips the heaviest renderers (shadows, post-FX, particles, scripts).
+	Does not touch the server, gameplay state, or other players.
+]==]
+
+local CFG = {
+	flat        = true,  -- textures -> none, parts render as flat BaseColor
+	killFX      = true,  -- Atmosphere / Bloom / DOF / SunRays / ColorCorrection / Clouds
+	killFog     = true,  -- ลบหมอกตลอดเวลา (ฟัง signal ดันซ้ำ เพราะเกมเขียน Fog* กลับเองทุก day/night cycle)
+	killVFX     = true,  -- ParticleEmitter / Smoke / Fire / Sparkles / Beam / Trail
+	killUI      = false, -- wipe PlayerGui (huge win, hides the whole HUD) — ปิดไว้ กัน SugarHubGUI ตาย
+	killScripts = false, -- delete LocalScripts+ModuleScripts under workspace (huge win, may break features)
+	muteAll     = true, -- silence every Sound
+	plastic     = true,  -- force every surface to plastic + drop clothing textures (Step 3.5 blacklist เปลี่ยนไปเช็คชื่อแล้ว)
+	plastifyBy  = 0,  -- blend BaseColor toward white by this much (toy-plastic look, 0 = keep as-is)
+	skipCharacters = true, -- leave every character (ours + friends') completely untouched
+	skipGUI      = true,  -- leave all game GUI completely untouched (no wiping, no image stripping)
+}
+
+local Lighting   = game:GetService("Lighting")
+local LocalPlayer = game:GetService("Players").LocalPlayer
+
+-- ไม่เก็บค่าเดิมไว้ กู้คืนไม่ได้ (by design) — แก้แล้วทับทิ้งเลย
+-- ต้องเขียนใน pcall: TextureID/MaterialVariant มีแค่บางคลาส (MeshPart, WedgePart, TrussPart)
+-- Part ธรรมดาไม่มี -> ถ้าไม่ pcall error ดันออกมาถึง strip() แล้ว scan ทั้งแมพพัง
+local function setProp(obj, prop, value)
+	pcall(function() obj[prop] = value end)
+end
+
+--=== stripper ============================================================
+local function plastifyColor(c)
+	if not c or CFG.plastifyBy <= 0 then return c end
+	return c:Lerp(Color3.new(1, 1, 1), math.clamp(CFG.plastifyBy, 0, 1))
+end
+
+-- ข้ามตัวละครทั้งเราและเพื่อน: ขึ้นไปหา parent ที่เป็น Model ซึ่งมี Humanoid
+local function isCharacter(o)
+	local p = o
+	while p and p ~= workspace do
+		if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return true end
+		p = p.Parent
+	end
+	return false
+end
+
+local function strip(o)
+	if CFG.skipCharacters and isCharacter(o) then return end
+	local cn = o.ClassName
+
+	-- ลบเสื้อผ้า/หมวก ตรงนี้ตั้งใจไม่ทำแล้ว เพราะ Destroy แล้วกู้คืนไม่ได้
+	-- และของในโมเดลที่ถือ/ที่ใส่อยู่จะหายไปเฉยๆ (เกราะในเกมนี้เป็น Part ไม่ใช่ CharacterMesh)
+	if CFG.plastic and cn == "BodyColors" then
+		-- BodyColors ไม่มี property ชื่อ Color3 (ใช้สีตัวเป็นตัวอ้างอิงแทน)
+		local c = plastifyColor(o.TorsoColor3)
+		setProp(o, "HeadColor3", c)
+		setProp(o, "LeftArmColor3", c)
+		setProp(o, "RightArmColor3", c)
+		setProp(o, "LeftLegColor3", c)
+		setProp(o, "RightLegColor3", c)
+		setProp(o, "TorsoColor3", c)
+	end
+
+	if CFG.flat then
+		if cn == "Decal" or cn == "Texture" then
+			-- ซ่อนภาพที่ติดอยู่บนตัว เหลือสีของชิ้นส่วนล้วน
+			setProp(o, "Transparency", 1)
+		elseif cn == "SurfaceAppearance" then
+			-- ตัวเดียวที่ยังต้อง Destroy: SurfaceAppearance ไม่มี Transparency
+			-- ลบแล้ว MeshPart จะวาดด้วย Color/TextureID แทน (MeshPart ยังทำงานปกติ)
+			-- แต่กู้คืนไม่ได้ ถ้าไม่อยากเสียให้ปิด CFG.flat
+			o:Destroy(); return
+		elseif o:IsA("SpecialMesh") then
+			setProp(o, "TextureId", "")
+		elseif o:IsA("BasePart") then
+			setProp(o, "TextureID", "")
+			setProp(o, "MaterialVariant", "")
+			if CFG.plastic then
+				setProp(o, "Material", Enum.Material.Plastic)
+				setProp(o, "Color", plastifyColor(o.Color))
+			end
+		elseif o:IsA("ImageLabel") or o:IsA("ImageButton") or o:IsA("ImageRect") then
+			setProp(o, "Image", "")
+		elseif o:IsA("Sky") then
+			setProp(o, "SkyboxBk", "")
+			setProp(o, "SkyboxDn", "")
+			setProp(o, "SkyboxFt", "")
+			setProp(o, "SkyboxLf", "")
+			setProp(o, "SkyboxRt", "")
+			setProp(o, "SkyboxUp", "")
+			setProp(o, "StarCount", 0)
+		end
+	end
+
+	if CFG.killVFX then
+		-- ParticleEmitter / Smoke / Fire / Sparkles / Beam / Trail มี Enabled
+		-- ปิดแทน Destroy ได้ผลเดียวกันแต่กู้คืนได้
+		if o:IsA("ParticleEmitter") or o:IsA("Smoke") or o:IsA("Fire")
+			or o:IsA("Sparkles") or o:IsA("Beam") or o:IsA("Trail") then
+			setProp(o, "Enabled", false)
+		end
+	end
+
+	if CFG.muteAll and o:IsA("Sound") then
+		setProp(o, "Volume", 0)
+	end
+end
+
+--=== graphics floor =======================================================
+local function isFX(c)
+	return c:IsA("Atmosphere") or c:IsA("BloomEffect") or c:IsA("DepthOfFieldEffect")
+		or c:IsA("SunRaysEffect") or c:IsA("ColorCorrectionEffect")
+		or c:IsA("CloudsTexture")
+end
+
+--=== fog floor ============================================================
+-- เกมมี day/night cycle เขียน Lighting.Fog* กลับเองทุกครั้งที่เปลี่ยนฉาก
+-- เขียนค่าทีเดียวไม่พอ -> ฟัง GetPropertyChangedSignal แล้วดันกลับทันทีที่เกมแตะค่า
+-- (แบบเดียวกับ toggle "ลบหมอก" ใน Modules/Other.lua)
+local fogConns
+
+local function removeFog()
+	-- เขียนค่าเดิมซ้ำ = Roblox ไม่ยิง signal กลับ -> ไม่เกิด recursion
+	-- FogEnd 1e9 (ไม่ใช่ 100000) ให้ไกลกว่าแผนที่ ไม่มีวันหมอกโผล่
+	setProp(Lighting, "FogStart", 0)
+	setProp(Lighting, "FogEnd", 1e9)
+end
+
+local function killFX()
+	if CFG.killFog and not fogConns then
+		removeFog()  -- ครั้งแรก: เขียนค่าเลย
+		fogConns = {
+			Lighting:GetPropertyChangedSignal("FogStart"):Connect(removeFog),
+			Lighting:GetPropertyChangedSignal("FogEnd"):Connect(removeFog),
+		}
+	end
+
+	if CFG.killFX then
+		-- ปิดแทน Destroy: เกมนี้มี UndeadColorCorrection / BunnyChaseCorrection / CampfireEffect
+		-- ซึ่งเป็นสัญญาณบอกเหตุการณ์ ลบทิ้งแล้วเล่นตามไม่ได้
+		for _, e in ipairs(Lighting:GetChildren()) do
+			if isFX(e) then setProp(e, "Enabled", false) end
+		end
+		-- ตัวที่เกมเพิ่งใส่มา (เปลี่ยนฉากตอนกลางคืน) ให้ปิดด้วย แต่ยังกู้คืนได้
+		Lighting.ChildAdded:Connect(function(c)
+			if isFX(c) then setProp(c, "Enabled", false) end
+		end)
+	end
+
+	setProp(Lighting, "GlobalShadows", false)
+	setProp(Lighting, "Brightness", 2)
+	setProp(Lighting, "OutdoorAmbient", Color3.new(1, 1, 1))
+	setProp(Lighting, "Ambient", Color3.new(1, 1, 1))
+	setProp(Lighting, "EnvironmentDiffuseScale", 0)
+	-- ยิ่งสูบไว้ยิ่งไม่เหมือนพลาสติก แต่ 0 ก็แพงสุด (เป็นสีแบนเป๊ะ)
+	setProp(Lighting, "EnvironmentSpecularScale", CFG.plastic and 0.15 or 0)
+	-- ชื่อเดิมคือ Forward แต่ Roblox เปลี่ยนเป็น Future แล้ว (อ้างอิงจากค่าเก่าจะ error)
+	setProp(Lighting, "Technology", CFG.plastic and Enum.Technology.Future or Enum.Technology.ShadowMap)
+
+	pcall(function() workspace.QualityLevel = Enum.QualityLevel.Level1 end)
+	pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level1 end)
+	pcall(function() settings().Rendering.AntiAliasingQuality = 0 end)
+	pcall(function() settings().Game.ShadowQuality        = Enum.ShadowQuality.ShadowQuality0 end)
+	pcall(function() settings().Game.EffectsQuality       = Enum.EffectsQuality.EffectsQuality0 end)
+	pcall(function() settings().Game.TransmissionQuality  = Enum.TransmissionQuality.TransmissionQuality0 end)
+end
+
+--=== sweep ================================================================
+-- เดิมยก ReplicatedStorage + ReplicatedFirst มาด้วย แต่สองที่นั้นคือที่เกมเก็บ
+-- โมเดลต้นแบบของที่คราฟต์/ซื้อ (Crafting Table, ArmourModels, Shops) และ TempStorage
+-- ที่ของทุกชิ้นผ่านตอนหยิบเข้ากระเป๋า -> ต้นแบบเสียถาวรโดยไม่ต้องเสียสิ่งของตัวจริง
+-- ของที่หยิบออกมาจะถูกวางใน workspace.Items อยู่แล้ว สแกนที่นั่นแทน
+local roots = { workspace, Lighting }
+if not CFG.skipGUI then
+	pcall(function() table.insert(roots, game:GetService("StarterGui")) end)
+end
+
+for _, r in ipairs(roots) do
+	for _, o in ipairs(r:GetDescendants()) do strip(o) end
+	r.DescendantAdded:Connect(strip)  -- catches anything that streams in later
+end
+
+if not CFG.skipGUI then
+	pcall(function()
+		local pg = LocalPlayer:WaitForChild("PlayerGui")
+		if CFG.killScripts then
+			for _, o in ipairs(pg:GetDescendants()) do
+				if o.ClassName == "LocalScript" or o.ClassName == "ModuleScript" then o:Destroy() end
+			end
+		end
+		if CFG.killUI then
+			pg:Clear()
+			pg.ChildAdded:Connect(function(c) c:Destroy() end)
+		else
+			for _, o in ipairs(pg:GetDescendants()) do strip(o) end
+			pg.DescendantAdded:Connect(strip)
+		end
+	end)
+end
+
+if CFG.killScripts then
+	for _, o in ipairs(workspace:GetDescendants()) do
+		if o.ClassName == "LocalScript" or o.ClassName == "ModuleScript" then o:Destroy() end
+	end
+	workspace.DescendantAdded:Connect(function(c)
+		if c.ClassName == "LocalScript" or c.ClassName == "ModuleScript" then c:Destroy() end
+	end)
+end
+
+killFX()
+print("✅ FPS Booster applied")
+
+--=== ตัวละครที่ respawn มาใหม่ =============================================
+-- หมายเหตุ: ตอน skipCharacters = true (ค่าเริ่มต้น) ทั้งบล็อกนี้ไม่ทำอะไรเลย
+-- เพราะ isCharacter() คืน true ให้ทุกชิ้นในตัวละคร strip() จึง return ทันที
+-- บล็อกนี้มีผลเฉพาะตอนปิด skipCharacters
+if CFG.plastic and not CFG.skipCharacters then
+	local function dressUp(char)
+		pcall(function() strip(char) end)
+		for _, o in ipairs(char:GetDescendants()) do strip(o) end
+		char.DescendantAdded:Connect(strip)
+	end
+	if LocalPlayer.Character then dressUp(LocalPlayer.Character) end
+	LocalPlayer.CharacterAdded:Connect(dressUp)
+end
+end
 
 task.spawn(function()
     local Client = require(LocalPlayer.PlayerScripts.Client)
@@ -1641,11 +1878,27 @@ end)
 -- เปิดโล่รอบตัวตั้งแต่เริ่มฟาร์ม (weld ติดตัว ตามเราทันทีจนจบเกม)
 buildShield()
 
-local mainFire = retryUntil("find MainFire", function()
+-- รันซ้ำในแมพเดิมหลังจบ Stronghold ไม่ได้: Step 3.7 ลบ Map.Campground ทิ้งหมด (รวม MainFire)
+-- retryUntil เดิมวนไม่รู้จบ (ไม่มี timeout) = ค้าง 40+ นาที ไม่บอกอะไร
+-- แก้: รอ 15 วินาที ถ้ายังไม่มี MainFire = แมพนี้ถูกล้างจากรอบก่อน หรือไม่ใช่แมพฟาร์ม
+--      เดิมเตะกลับ Lobby เอาห้องใหม่ -> เลิกแล้ว รอต่อ
+--      เหตุผลที่รอไม่ได้: MainFire = จุดยึดทั้งสคริปต์ firePos ใช้วางแพลตฟอร์ม วาร์ปของ และวนเก็บทรัพยากร
+local mainFire = nil
+local waitedFire = 0
+while not mainFire do
     local map = workspace:FindFirstChild("Map")
     local camp = map and map:FindFirstChild("Campground")
-    return camp and camp:FindFirstChild("MainFire")
-end)
+    mainFire = camp and camp:FindFirstChild("MainFire")
+
+    if not mainFire then
+        if waitedFire % 10 == 0 then
+            print(("  ...find MainFire not yet (%.0fs)"):format(waitedFire))
+        end
+        updateStatus(("find MainFire... (%.0fs)"):format(waitedFire))
+        task.wait(0.5)
+        waitedFire += 0.5
+    end
+end
 
 local firePart = retryUntil("find Fire part", function()
     return mainFire:FindFirstChildWhichIsA("BasePart", true)
@@ -2884,12 +3137,13 @@ if getTotalScrap() < NEED_SCRAP then
                         local name = item.Name
                         local isStructure = name == "Part" or name == "woodplanks"
                             or name:find("Floor") or name:find("Framework") or name:find("Wedge")
+                            or name:find("[Ww]all") or name:find("[Pp]lank")
                             or name == "Cabin" or name == "Model" or name == "Shelter"
                             or name:find("Note") or name:find("Desk") or name:find("Hardhat")
                             or name:find("Door") or name:find("Window") or name:find("Table")
                             or name:find("Roof") or name:find("Cabinet") or name:find("Box")
-                            -- Part ที่เป็น WoodPlanks (พื้น/ผนัง) = โครงสร้าง
-                            or (item:IsA("BasePart") and item.Material == Enum.Material.WoodPlanks)
+                        -- เคยเช็ค item.Material == WoodPlanks ตรงนี้ แต่ FlatFPS เขียน Material ทับทุก part
+                        -- (CFG.plastic) -> เปลี่ยนมาเช็คชื่อแทน ผลเดิมคือพื้น/ผนังที่ชื่อมีคำว่า Wall/Plank/Floor
                         if isStructure then
                             -- skip
                         else
@@ -3591,18 +3845,10 @@ print("\n[Step 3.7] Boosting FPS (cleaning up map/lighting)...")
 updateStatus("Boosting FPS...")
 
 do
-    -- ลบทุกอย่างใต้ Lighting และ MaterialService ให้เหลือแค่ตัว service เอง
-    local lightingTargets = {
-        game:GetService("Lighting"),
-        game:GetService("MaterialService"),
-    }
-    for _, parent in ipairs(lightingTargets) do
-        pcall(function()
-            for _, child in ipairs(parent:GetChildren()) do
-                pcall(function() child:Destroy() end)
-            end
-        end)
-    end
+    -- Lighting / MaterialService: ไม่ลบแล้ว
+    -- เหตุผล: Lighting มี day/night cycle เขียนค่าอยู่ -> ลบแล้วฉากค้างกลางวัน/กลางคืน
+    --         MaterialService คือสีวัสดุประจำตัวของ UI ทั้งเกม
+    -- ถ้าอยากได้ FPS คืนโดยไม่ทำลายอะไร ใช้ Enabled=false แทนการ Destroy (แบบ FlatFPS.lua)
 
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
