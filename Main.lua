@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 6.39")
+print("Version - 1.2.13 / 6.42")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1689,9 +1689,10 @@ task.spawn(function()   -- แมพสตรีมเข้ามาเรื�
 	end
 end)
 
-collectgarbage("collect")
-warn(string.format("[Purge] %d map instances removed (class=%s, groundKept=%s)",
-	purgeKilled, PURGE_CLASS, tostring(not purgeLostGround)))
+-- ไม่เรียก collectgarbage("collect") - Roblox ไม่รองรับ argument นี้ (เตือนทุกครั้ง)
+-- Destroy อยู่แล้ว GC เก็บให้เองอยู่แล้ว ใช้ gcinfo() ดูผลแทน
+warn(string.format("[Purge] %d map instances removed (class=%s, groundKept=%s, mem=%dKB)",
+	purgeKilled, PURGE_CLASS, tostring(not purgeLostGround), gcinfo()))
 end
 
 task.spawn(function()
