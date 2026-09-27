@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13 / 8.44")
+print("Version - 1.2.13 / 8.56")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2347,8 +2347,17 @@ local function getCraftingTouchZone()
     return bench and bench:FindFirstChild("TouchZone")
 end
 
+-- จำกัดจำนวนที่ลากพร้อมกัน: เดิม task.spawn ทุกชิ้นที่เจอในเฟรมเดียว
+-- มี Log 300 ชิ้น = ยิง RequestStartDraggingItem 300 ครั้งในเฟรมเดียว แล้วอีก 300 ครั้งที่ +0.2 วิ
+-- remote flood แบบนี้ทำให้ FPS กระตกเป็นจังหวะตอนบิน (เจอของเยอะตรงไหนพังตรงนั้น)
+-- ที่ยังไม่ลากครบจะถูกหยิบได้ใน step ถัดไปของลูปบิน เพราะ warpedItems[item] ยังไม่ถูก set
+local WARP_CONCURRENCY = 8
+local warpInFlight = 0
+
 local function warpItemToTarget(item, targetPos)
-    if warpedItems[item] then return end
+    if warpedItems[item] or warpInFlight >= WARP_CONCURRENCY then return end
+    warpInFlight += 1
+    warpedItems[item] = true
 
     task.spawn(function()
         pcall(function()
@@ -2367,8 +2376,8 @@ local function warpItemToTarget(item, targetPos)
             task.wait(0.1)
             StopDrag:FireServer(item)
         end)
+        warpInFlight -= 1   -- นอก pcall: ต้องคืนสล็อตแม้ตัว pcall เองพัง
     end)
-    warpedItems[item] = true
 end
 
 -- ดึง item ทีละชิ้นไปยังตำแหน่งเป้าหมาย (sequential — รอ Drag เสร็จก่อนตัวถัดไป)
