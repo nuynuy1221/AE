@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.13")
+print("Version - 1.2.13 / 6.39")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -168,7 +168,6 @@ local VirtualUser = game:GetService("VirtualUser")
 LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
-    print("[AntiAFK] Idled -> sent virtual input")
 end)
 
 -- ============================================
@@ -1558,6 +1557,143 @@ if CFG.plastic and not CFG.skipCharacters then
 end
 end
 
+-- ประกาศตรงนี้ (Step 2) เพราะ Map Purge ข้างล่างต้องใช้ด้วย - ไม่งั้นต้นไม้ถูกลบหมด
+-- แล้ว Step 4 (บรรทัด ~2016) จะค้างที่ retryUntil("find Trees") ตลอด ไม่ใช่แค่ไม้ไม่พอ
+local CHOPPABLE_TREE_NAMES = {
+    "Small Tree",
+    "Fairy Small Tree",
+    "Snowy Small Tree",
+    "Birch Tree",
+    "Dead Tree1",
+    "Dead Tree2",
+    "Dead Tree3",
+}
+
+-- ============================================
+-- MAP PURGE: ลบโมเดลใน workspace.Map ที่ไม่ได้ใช้ (ไม่มี Restore)
+-- รันที่ Step 2 เพื่อดันตั้งแต่ตอนเข้าแมพ ช่วงฟาร์มหนักที่สุด
+-- (Step 3.7 ทำอีกรอบตอนจบ Stronghold - ถ้ารอบนี้ล้างไปหมดแล้วจะเป็น no-op)
+-- ============================================
+-- whitelist เหมือน FlatFPS ข้างบน: เก็บไว้เฉพาะที่สคริปต์/Module อ่านจริง
+--   Map.Campground.MainFire        firePos + BillboardGui เลข Level/Timer
+--   Map.Campground.CraftingBench   getCraftingTouchZone
+--   Map.Campground.alecCircle      วงวางแพลตฟอร์ม
+--   Map.Landmarks.Stronghold       Building.Floor + Functional.{FinalGate, Wave1.TriggerZone}
+--
+-- Step 2 ยังไม่ได้ load Module (loadClassModule อยู่บรรทัด ~2075) -> ใช้ flag ของ Module ไม่ได้
+-- แต่ Class อ่านได้จาก attribute และตอน Step 2 ยังไม่มี quest ไหนเสร็จ (isAllQuestDone = false)
+-- เงื่อนไขเลยเท่ากับ Step 3.7: Vampire/Alien/BGH ต้อง Ground + Landmarks
+-- ส่วน Woodsman ต้อง Foliage (ต้นไม้มี attribute Health), BGH เพิ่ม Campground
+-- ============================================
+do
+local PURGE_KEEP = {
+	["Map/Campground"] = { MainFire = true, CraftingBench = true, alecCircle = true },
+	["Map/Landmarks"] = { Stronghold = true },
+	["Map/Landmarks/Stronghold"] = { Building = true, Functional = true },
+}
+
+local purgeMap = workspace:FindFirstChild("Map")
+if not purgeMap then
+	warn("[Purge] no workspace.Map - skipped")
+	return
+end
+
+local PURGE_CLASS = LocalPlayer:GetAttribute("Class") or "Unknown"
+local purgeKeepGround = PURGE_CLASS == "Woodsman" or PURGE_CLASS == "Vampire"
+	or PURGE_CLASS == "Alien Scientist" or PURGE_CLASS == "Big Game Hunter"
+
+PURGE_KEEP["Map"] = {
+	Campground = true,
+	Landmarks  = true,
+	Ground     = purgeKeepGround,              -- ต้องมีพื้นตอนไล่ตีมอนกลางคืน
+}
+
+local purgeKilled, purgeLostGround = 0, false
+
+-- ต้นไม้ที่ตีได้ = ชื่ออยู่ในรายการ + มี attribute Health
+-- เช็คลงไปใน subtree ด้วย เผื่อเกมซ้อนต้นไม้ไว้ใต้โฟลเดอร์ย่อย (เช่น Map.Foliage.Biome.Small Tree)
+-- ponytail: เก็บทั้ง subtree ที่มีต้นไม้ข้างใน (ข้างในอาจมีหิน/หญ้าเหลือ) - ถ้า FPS ไม่พอ
+-- ค่อยตัดลึกลงไปในโฟลเดอร์ย่อยทีละชั้น
+local function purgeIsTree(inst)
+	if table.find(CHOPPABLE_TREE_NAMES, inst.Name) and inst:GetAttribute("Health") then
+		return true
+	end
+	for _, d in ipairs(inst:GetDescendants()) do
+		if table.find(CHOPPABLE_TREE_NAMES, d.Name) and d:GetAttribute("Health") then
+			return true
+		end
+	end
+	return false
+end
+
+local function purgePathOf(inst)
+	local parts, p = {}, inst
+	while p and p ~= workspace do
+		table.insert(parts, 1, p.Name)
+		p = p.Parent
+	end
+	return table.concat(parts, "/")
+end
+
+local function purgePrune(inst)
+	local keep = PURGE_KEEP[purgePathOf(inst)]
+	if not keep then return end
+	for _, child in ipairs(inst:GetChildren()) do
+		if not keep[child.Name] then
+			purgeKilled += 1
+			if child.Name == "Ground" then purgeLostGround = true end
+			pcall(function() child:Destroy() end)
+		end
+	end
+end
+
+local function purgeSweep()
+	purgePrune(purgeMap)
+	-- Foliage: เก็บเฉพาะต้นไม้ที่ตีได้ ที่เหลือลบ (35k instance -> เฉพาะต้นไม้จริง)
+	-- ต้องเก็บไว้ทุกคลาส ไม่ใช่แค่ Woodsman: Step 4 (retryUntil "find Trees") ค้างตลอด
+	-- ถ้าไม่มีต้นไม้ และ Step 3.5 เอาไม้ไปเผา/อัปเกรดโต๊ะคราฟต่อไม่ได้
+	local foliage = purgeMap:FindFirstChild("Foliage")
+	if foliage then
+		for _, child in ipairs(foliage:GetChildren()) do
+			if not purgeIsTree(child) then
+				purgeKilled += 1
+				pcall(function() child:Destroy() end)
+			end
+		end
+	end
+
+	purgePrune(purgeMap:FindFirstChild("Campground"))
+	local landmarks = purgeMap:FindFirstChild("Landmarks")
+	if landmarks then
+		purgePrune(landmarks)
+		purgePrune(landmarks:FindFirstChild("Stronghold"))
+	end
+end
+
+purgeSweep()
+
+-- พื้นหายไปแล้วถ้าไม่ตรึงจะตกใต้โลก (สคริปต์ย้ายที่ด้วย CFrame อย่างเดียว ไม่มี MoveTo เลย)
+if purgeLostGround then
+	local function purgePin(char)
+		local hrp = char and char:WaitForChild("HumanoidRootPart", 10)
+		if hrp then pcall(function() hrp.Anchored = true end) end
+	end
+	purgePin(LocalPlayer.Character)
+	LocalPlayer.CharacterAdded:Connect(purgePin)
+end
+
+task.spawn(function()   -- แมพสตรีมเข้ามาเรื่อย ๆ ต้องตามลบต่อ
+	while purgeMap.Parent do
+		task.wait(2)
+		purgeSweep()
+	end
+end)
+
+collectgarbage("collect")
+warn(string.format("[Purge] %d map instances removed (class=%s, groundKept=%s)",
+	purgeKilled, PURGE_CLASS, tostring(not purgeLostGround)))
+end
+
 task.spawn(function()
     local Client = require(LocalPlayer.PlayerScripts.Client)
     local MAX_HUNGER = 200
@@ -1907,15 +2043,7 @@ end)
 local firePos = firePart.Position
 updateStatus("Finding Trees...")
 
-local CHOPPABLE_TREE_NAMES = {
-    "Small Tree",
-    "Fairy Small Tree",
-    "Snowy Small Tree",
-    "Birch Tree",
-    "Dead Tree1",
-    "Dead Tree2",
-    "Dead Tree3",
-}
+-- CHOPPABLE_TREE_NAMES ประกาศไว้ที่ Step 2 แล้ว (Map Purge ใช้ร่วมกัน)
 
 local trees = retryUntil("find Trees", function()
     local found = {}
