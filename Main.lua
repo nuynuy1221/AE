@@ -65,27 +65,30 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 
 -- ============================================
--- หา RemoteFunction ของ SignalFunction
---   ReplicatedStorage.Communication.ServerAndClient.Signals.SignalFunction.Function
---   เมื่อเจอแล้ว ToServer(x, ...) == remote:InvokeServer(x, ...)
+-- หา Remote ของ Signal
+--   SignalFunction : ...Signals.SignalFunction.Function  (RemoteFunction)
+--   SignalEvent    : ...Signals.SignalEvent.Event        (RemoteEvent)
+--   ToServer(x, ...) == remote:InvokeServer(x, ...)  หรือ  remote:FireServer(x, ...)
 -- ============================================
-local function findSignalRemote()
-    local direct = ReplicatedStorage
+local function findSignalRemote(signalName, childName)
+    local signals = ReplicatedStorage
         :FindFirstChild("Communication")
         and ReplicatedStorage.Communication:FindFirstChild("ServerAndClient")
         and ReplicatedStorage.Communication.ServerAndClient:FindFirstChild("Signals")
-        and ReplicatedStorage.Communication.ServerAndClient.Signals:FindFirstChild("SignalFunction")
-    if direct then
-        local r = direct:FindFirstChild("Function")
-        if r then return r end
+    if signals then
+        local mod = signals:FindFirstChild(signalName)
+        if mod then
+            local r = mod:FindFirstChild(childName)
+            if r then return r end
+        end
     end
 
-    -- fallback: ค้นทั้ง ReplicatedStorage แบบ recursive หา ModuleScript ชื่อ SignalFunction
+    -- fallback: ค้นทั้ง ReplicatedStorage แบบ recursive
     local function scan(node, depth)
         if depth > 6 then return nil end
         for _, child in ipairs(node:GetChildren()) do
-            if child:IsA("ModuleScript") and child.Name == "SignalFunction" then
-                local r = child:FindFirstChild("Function")
+            if child:IsA("ModuleScript") and child.Name == signalName then
+                local r = child:FindFirstChild(childName)
                 if r then return r end
             end
         end
@@ -100,10 +103,11 @@ local function findSignalRemote()
     return scan(ReplicatedStorage, 0)
 end
 
-local Remote = nil
+local Remote, EventRemote = nil, nil
 -- รอสักพัก เผื่อ Communication / PackageLink โหลดช้า
 for attempt = 1, 15 do
-    Remote = findSignalRemote()
+    Remote      = findSignalRemote("SignalFunction", "Function")
+    EventRemote = findSignalRemote("SignalEvent", "Event")
     if Remote then break end
     if attempt == 1 then
         print("[Redeem] ยังไม่เจอ remote — กำลังรอโหลด...")
@@ -123,7 +127,15 @@ local function toServer(...)
     return Remote:InvokeServer(...)
 end
 
+-- ต้องยิงหลังสุ่มเสร็จทุกครั้ง ไม่งั้นเซิร์ฟเวอร์จะไม่ยอมให้สุ่มครั้งถัดไป
+local function confirmSpin()
+    if EventRemote then
+        pcall(function() EventRemote:FireServer("ClanSpinComplete") end)
+    end
+end
+
 print("[Redeem] เชื่อมต่อ remote แล้ว:", Remote:GetFullName())
+print("[Redeem] SignalEvent:", EventRemote and EventRemote:GetFullName() or "ไม่เจอ (สุ่มได้ครั้งเดียว)")
 
 -- ============================================
 -- อ่านจำนวน Spin
@@ -211,16 +223,57 @@ end
 
 -- ============================================
 -- Step 1 — Redeem codes
+--   เซิร์ฟเวอร์อาจไม่ได้คืน true เสมอไป จึงยืนยันซ้ำด้วย CodeStatus
 -- ============================================
+local function codeStatus()
+    local ok, status = pcall(toServer, "CodeStatus")
+    if ok and typeof(status) == "table" then return status end
+    return nil
+end
+
+-- โค้ดนี้เคยใช้ไปแล้วหรือยัง (nil = เซิร์ฟเวอร์ไม่ตอบ -> เชื่อค่าที่รีดีมคืนมาแทน)
+local function alreadyRedeemed(status, code)
+    if type(status) ~= "table" then return nil end
+    local entry = status.codes and status.codes[code]
+    if type(entry) == "table" and entry.redeemed ~= nil then
+        return entry.redeemed == true
+    end
+    return nil
+end
+
 for _, code in ipairs(Config.Code) do
     if type(code) == "string" and code ~= "" then
         local clean = code:upper()
+
+        local before = alreadyRedeemed(codeStatus(), clean)
         local ok, result = pcall(toServer, "RedeemCode", clean)
-        if ok and result == true then
+        task.wait(0.6)
+
+        local after = alreadyRedeemed(codeStatus(), clean)
+
+        local success
+        if after ~= nil then
+            success = after
+        elseif ok and result == true then
+            success = true
+        else
+            success = false
+        end
+
+        if success then
             print("[Redeem] ใช้โค้ดสำเร็จ:", clean)
         else
-            print("[Redeem] ใช้โค้ดไม่ได้:", clean)
+            local note
+            if not ok then
+                note = "error: " .. tostring(result)
+            elseif before == true then
+                note = "ใช้ไปแล้วก่อนหน้านี้"
+            else
+                note = "server คืนค่า " .. typeof(result) .. " = " .. tostring(result)
+            end
+            print("[Redeem] ใช้โค้ดไม่ได้:", clean, "(" .. note .. ")")
         end
+
         task.wait(Config.CodeDelay)
     end
 end
@@ -230,25 +283,41 @@ task.wait(1.5)
 
 -- ============================================
 -- Step 2 — Clan reroll
+--   ยิง ClanSpin -> ได้ชื่อ -> ยิง ClanSpinComplete (RemoteEvent) เพื่อปลดล็อกครั้งถัดไป
+--   วนจนกว่าจะได้อันที่ต้องการ หรือ spin หมด
 -- ============================================
 local gotClan  = nil  -- clan ที่สุ่มได้ตรงกับ Config.Clan
 local lastClan = nil  -- clan ตัวล่าสุดที่สุ่มได้
 local rolls    = 0
 
+local MAX_CONSECUTIVE_FAIL = 8  -- กันค้างถ้าเซิร์ฟเวอร์ปฏิเสธซ้ำ ๆ
+local fails = 0
+
 while true do
     if spinsLeft() <= 0 then break end
 
     local ok, result = pcall(toServer, "ClanSpin")
-    if not ok or typeof(result) ~= "string" then
-        break -- เซิร์ฟเวอร์ปฏิเสธ (spin ไม่พอ / ไม่พร้อม) = หยุด
-    end
 
-    rolls = rolls + 1
-    lastClan = (result ~= NOTHING) and result or nil
+    if ok and typeof(result) == "string" then
+        fails = 0
+        rolls = rolls + 1
+        lastClan = (result ~= NOTHING) and result or nil
+        confirmSpin() -- ปลดล็อกให้สุ่มครั้งต่อไปได้
 
-    if isWanted(result) then
-        gotClan = result
-        break -- ได้อันที่ต้องการ -> หยุดทันที
+        if isWanted(result) then
+            gotClan = result
+            break -- ได้อันที่ต้องการ -> หยุดทันที
+        end
+    else
+        -- สุ่มไม่ได้ (spin ไม่พอ / ยังไม่พร้อม) -> ปลดล็อกแล้วลองใหม่ ไม่หยุดทันที
+        fails = fails + 1
+        confirmSpin()
+        if not ok then
+            print("[Redeem] สุ่ม error:", tostring(result))
+        end
+        if fails >= MAX_CONSECUTIVE_FAIL or spinsLeft() <= 0 then break end
+        print(string.format("[Redeem] สุ่มไม่ได้ (ครั้งที่ %d) — ลองใหม่... เหลือ %d Spin",
+            fails, spinsLeft()))
     end
 
     task.wait(Config.RollDelay)
@@ -261,13 +330,13 @@ local remaining = spinsLeft()
 
 if gotClan then
     sendDescription(string.format(
-        "⚔️ Slayer 2 • Clan: %s • Spins: %d",
+        "⚔️ Slayer 2 • Clan: %s ✅ • Spins: %d",
         gotClan, remaining
     ), true)
     print(string.format("[Redeem] ได้ Clan ที่ต้องการ: %s (เหลือ %d Spin)", gotClan, remaining))
 else
     sendDescription(string.format(
-        "⚔️ Slayer 2 • ไม่ได้อันที่ต้องการ • ล่าสุด: %s • Spins: %d",
+        "⚔️ Slayer 2 • Clan: %s • Spins: %d",
         lastClan or "ไม่มี", remaining
     ), true)
     print(string.format("[Redeem] ไม่ได้อันที่ต้องการ — ล่าสุดได้ %s (เหลือ %d Spin, สุ่ม %d ครั้ง)",
