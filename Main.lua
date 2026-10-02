@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.14")
+print("Version - 1.2.14 / 1.53")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -393,23 +393,22 @@ local function horstSend(text, extra)
     _G.Horst_SetDescription(text, horstJson(extra))
 end
 
--- quest -> คีย์แบนสำหรับชีท (<Class>_<Stat> = ค่าที่มี, <Class>_QuestPct = % เฉลี่ย)
+-- quest -> คอลัมน์ชีทชุดเดียวตลอด ไม่ผูกกับชื่อ class (Stat = ค่าที่มี, QuestPct = % เฉลี่ย)
 -- getValue(statKey) คืนค่าปัจจุบันของ stat (attribute หรือ cache แล้วแต่ที่เรียก)
 -- คืน nil = ไม่มี reqs หรือไม่มี stat ไหนมีตัวเลขให้เทียบ
-local function questSheet(className, reqs, getValue)
+local function questSheet(reqs, getValue)
     if not reqs then return nil end
-    local prefix = className .. "_"
     local extra, totalPct, count = {}, 0, 0
     for statKey, goal in pairs(reqs) do
         local have = getValue(statKey)
-        extra[prefix .. statKey] = have
+        extra[statKey] = have
         if type(have) == "number" and goal > 0 then
             totalPct = totalPct + math.min(have / goal, 1) * 100
             count = count + 1
         end
     end
     if count == 0 then return nil end
-    extra[prefix .. "QuestPct"] = math.floor(totalPct / count)
+    extra.QuestPct = math.floor(totalPct / count)
     return extra
 end
 
@@ -417,7 +416,7 @@ local function sendHorstDescription(force)
     if not horstThrottle(force) then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local sheet = {}  -- รวมข้อมูลจากทุก class ที่แสดง (key มี prefix ชื่อ class ไม่ชนกัน)
+    local sheet = {}  -- ข้อมูล quest ของ class ที่กำลังเล่นอันเดียว (คอลัมน์จึงคงที่ข้าม class)
 
     local isLobby = game.PlaceId == 79546208627805
     local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
@@ -427,6 +426,26 @@ local function sendHorstDescription(force)
     if not hasConfig then
         horstSend(string.format("🌲 99 Nights • Diamonds: %d", diamonds), sheet)
         return
+    end
+
+    -- เลือก class ที่จะรายงานลงชีท: equipped ก่อน ถ้ายังไม่ equip = ตัวแรกของลิสต์
+    local questClass
+    if isLobby then
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        local function pick(list)
+            local firstOwned
+            for _, cn in ipairs(list or {}) do
+                local f = cp and cp:FindFirstChild(cn)
+                if f then
+                    if f:GetAttribute("Equipped") == true then return cn end
+                    firstOwned = firstOwned or cn
+                end
+            end
+            return firstOwned
+        end
+        questClass = pick(Config.UpgradeClass) or pick(Config.BuyClass)
+    else
+        questClass = LocalPlayer:GetAttribute("Class")
     end
 
     local classText
@@ -454,13 +473,16 @@ local function sendHorstDescription(force)
                             local targetLevel = lvl + 1
                             local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
                             if reqs then
-                                local statSheet = questSheet(className, reqs, function(statKey)
+                                local statSheet = questSheet(reqs, function(statKey)
                                     return folder:GetAttribute(statKey) or 0
                                 end)
                                 if statSheet then
-                                    local avgPct = statSheet[className .. "_QuestPct"]
+                                    local avgPct = statSheet.QuestPct
                                     classStr = classStr .. " (" .. avgPct .. "%)"
-                                    for k, v in pairs(statSheet) do sheet[k] = v end
+                                    -- ชีทรับได้ class เดียว (คอลัมน์คงที่) — class อื่นแสดงอยู่แค่ในข้อความ
+                                    if className == questClass then
+                                        for k, v in pairs(statSheet) do sheet[k] = v end
+                                    end
                                     -- Dev Logs: แสดงแต่ละ stat แยก
                                     print(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
                                         className, targetLevel, avgPct))
@@ -497,11 +519,11 @@ local function sendHorstDescription(force)
                 local cp = LocalPlayer:FindFirstChild("ClassProgress")
                 local folder = cp and cp:FindFirstChild(equipped)
                 if folder then
-                    local statSheet = questSheet(equipped, reqs, function(statKey)
+                    local statSheet = questSheet(reqs, function(statKey)
                         return folder:GetAttribute(statKey) or 0
                     end)
                     if statSheet then
-                        local avgPct = statSheet[equipped .. "_QuestPct"]
+                        local avgPct = statSheet.QuestPct
                         for k, v in pairs(statSheet) do sheet[k] = v end
                         classTextPart = classTextPart .. " (" .. avgPct .. "%)"
                     end
@@ -568,7 +590,7 @@ pcall(function()
                     if lvl < 3 then
                         local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
                         if reqs then
-                            local statSheet = questSheet(mainClass, reqs, function(sk)
+                            local statSheet = questSheet(reqs, function(sk)
                                 return classStatCache[mainClass][sk]
                                     or (LocalPlayer.ClassProgress
                                         and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
@@ -576,7 +598,7 @@ pcall(function()
                                     or 0
                             end)
                             if statSheet then
-                                local avgPct = statSheet[mainClass .. "_QuestPct"]
+                                local avgPct = statSheet.QuestPct
                                 if os.clock() - lastFarmReport >= 1 then
                                     lastFarmReport = os.clock()
                                     print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
