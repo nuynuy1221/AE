@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.14 / 2.03")
+print("Version - 1.2.14 / 3.39")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -64,6 +64,26 @@ Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"
 -- ถ้าไม่ตั้ง = ฟาร์มปกติ (ตีต้นไม้ด้วยขวาน)
 Config.UpgradeClass = Config.UpgradeClass or {}  -- Table เช่น {"Cyborg"} - ตอนนี้ใช้แค่ตัวแรก
 -- Config.Diamonds: no default (if not set externally = nil = never send DONE)
+
+-- กรอง log ของ Horst: on_loaded.lua พิมพ์สถานะ "ส่งชีทสำเร็จ" ทุกครั้งที่อัปเดต (ทุก 30 วิ ตาม throttle)
+-- เป็นสัญญาณว่าส่งถึงปลายทาง ไม่ต้องเห็นทุกครั้ง - print อื่นทั้งหมดยังออกตามปกติ
+-- ต้องติดตั้งก่อนโหลด on_loaded.lua: โค้ด obfuscated อาจจับค่า print ไปตั้งแต่ตอนโหลด
+if Config.Horst then
+    local horstRealPrint = print
+    print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do
+            parts[#parts + 1] = tostring((select(i, ...)))
+        end
+        local line = string.lower(table.concat(parts, " "))
+        if line:find("sheet", 1, true)
+            or line:find("sent description", 1, true)
+            or line:find("sent done", 1, true) then
+            return
+        end
+        horstRealPrint(...)
+    end
+end
 
 -- If Horst is enabled, load the Horst script
 if Config.Horst then
@@ -373,112 +393,48 @@ end
 
 -- ส่งเข้า Sheets: Horst_SetDescription ตัวที่ 2 = HttpService:JSONEncode(...)
 -- (เอกสาร: https://github.com/HorstSpaceX/Documentation)
--- ชีทอ่านค่าเป็นคอลัมน์ ข้อมูลจึงต้องแบน ไม่มีตารางซ้อน
--- ช่อง Class รวมเลเวลไว้ช่องเดียว: "Cyborg (Lv.3)"
--- เลเวลอ่านจาก ClassProgress ก่อน (lobby ใช้ attribute นี้) ไม่งั้นค่อยใช้ ClassLevel
-local function horstClassText(className)
-    className = className or LocalPlayer:GetAttribute("Class")
-    if not className then return "None" end
-    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+-- ชีทเก็บแค่ Diamonds + Class (ชื่อ+เลเวลรวมช่องเดียว "Cyborg (Lv.3)") ข้อมูล quest อยู่ในข้อความอย่างเดียว
+-- เลเวลอ่านจาก ClassProgress ก่อน (ตอนอยู่ lobby เกมเก็บเลเวลไว้ที่นั้น) ไม่งั้นค่อยใช้ attribute
+local function horstClassText()
     local cp = LocalPlayer:FindFirstChild("ClassProgress")
-    local folder = cp and cp:FindFirstChild(className)
+    local cls = LocalPlayer:GetAttribute("Class")
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+
+    -- ตอนอยู่ lobby เกมอาจยังไม่ sync attribute Class มา — หา folder ที่ Equipped แทน
+    if not cls and cp then
+        for _, folder in ipairs(cp:GetChildren()) do
+            if folder:GetAttribute("Equipped") == true then
+                cls, lvl = folder.Name, folder:GetAttribute("Level") or lvl
+                break
+            end
+        end
+    end
+    if not cls then return "None" end
+
+    local folder = cp and cp:FindFirstChild(cls)
     if folder then lvl = folder:GetAttribute("Level") or lvl end
-    return string.format("%s (Lv.%d)", className, lvl)
+    return string.format("%s (Lv.%d)", cls, lvl)
 end
 
-local function horstJson(extra)
+local function horstJson()
     local data = {
         Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
         Class = horstClassText(),
     }
-    for k, v in pairs(extra or {}) do
-        data[k] = v
-    end
     local ok, json = pcall(function() return HttpService:JSONEncode(data) end)
     return ok and json or nil
 end
 
 -- ข้อความห้ามมี | และ ; (Horst ใช้เป็นตัวคั่นฟิลด์) — ตัดทิ้งก่อนส่งเสมอ
-local function horstSend(text, extra)
+local function horstSend(text)
     text = tostring(text):gsub("|", "/"):gsub(";", ",")
-    _G.Horst_SetDescription(text, horstJson(extra))
-end
-
--- quest -> คอลัมน์ชีทชุดเดียวตลอด ไม่ผูกกับชื่อ class (Stat = ค่าที่มี, QuestPct = % เฉลี่ย)
--- getValue(statKey) คืนค่าปัจจุบันของ stat (attribute หรือ cache แล้วแต่ที่เรียก)
--- คืน nil = ไม่มี reqs หรือไม่มี stat ไหนมีตัวเลขให้เทียบ
-local function questSheet(reqs, getValue)
-    if not reqs then return nil end
-    local extra, totalPct, count = {}, 0, 0
-    for statKey, goal in pairs(reqs) do
-        local have = getValue(statKey)
-        extra[statKey] = have
-        if type(have) == "number" and goal > 0 then
-            totalPct = totalPct + math.min(have / goal, 1) * 100
-            count = count + 1
-        end
-    end
-    if count == 0 then return nil end
-    extra.QuestPct = math.floor(totalPct / count)
-    return extra
-end
-
--- ============================================
--- Sheets header: สร้างหัวตารางให้เอง (ชีทว่างเปล่า)
--- ค่าในแถว header ต้องเป็น "ชื่อคอลัมน์" ตรงๆ ไม่งั้นข้อมูลแถวถัดไปจะไม่ตรงคอลัมน์
--- คอลัมน์สี/ตัวหนาใส่เองไม่ได้ (ต้องทำใน Sheets) — ข้างล่างมี TSV ให้ copy ไปวาง
--- ปิดด้วย Config.HorstHeader = false (ถ้ามี header อยู่แล้วไม่อยากได้แถวซ้ำ)
--- ============================================
-local HORST_BASE_COLUMNS = { "Diamonds", "Class", "QuestPct" }
-
-local function buildHorstHeader(quests)
-    -- รวมชื่อ stat ทุก class/เลเวล เอาตัวซ้ำออก (ต้องเก็บทีละตัว: table.sort มีแค่ arg แบบ comparator)
-    local seen, stats = {}, {}
-    for _, byLevel in pairs(quests or {}) do
-        for _, levelStats in pairs(byLevel) do
-            for statKey in pairs(levelStats) do
-                if not seen[statKey] then
-                    seen[statKey] = true
-                    stats[#stats + 1] = statKey
-                end
-            end
-        end
-    end
-    table.sort(stats)
-
-    local names, row = {}, {}
-    for _, n in ipairs(HORST_BASE_COLUMNS) do
-        names[#names + 1] = n
-        row[n] = n
-    end
-    for _, n in ipairs(stats) do
-        names[#names + 1] = n
-        row[n] = n
-    end
-    return row, names
-end
-
-local function sendHorstHeader()
-    if Config.HorstHeader == false then return false end
-    if not (Config.Horst and _G.Horst_SetDescription) then return false end
-    local row, names = buildHorstHeader(CLASS_QUESTS)
-    local ok, json = pcall(function() return HttpService:JSONEncode(row) end)
-    if not ok then
-        warn("[Sheet] Failed to encode header row")
-        return false
-    end
-    _G.Horst_SetDescription("🌲 99 Nights • Sheet header initialized", json)
-    print(("[Sheet] Header row sent (%d columns)"):format(#names))
-    print("[Sheet] Columns: " .. table.concat(names, ", "))
-    print("[Sheet] TSV for Sheets row 1:\n" .. table.concat(names, "\t"))
-    return true
+    _G.Horst_SetDescription(text, horstJson())
 end
 
 local function sendHorstDescription(force)
     if not horstThrottle(force) then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local sheet = {}  -- ข้อมูล quest ของ class ที่กำลังเล่นอันเดียว (คอลัมน์จึงคงที่ข้าม class)
 
     local isLobby = game.PlaceId == 79546208627805
     local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
@@ -486,32 +442,9 @@ local function sendHorstDescription(force)
 
     -- ถ้าไม่มี config เลย → ไม่ต้องแสดง Class
     if not hasConfig then
-        horstSend(string.format("🌲 99 Nights • Diamonds: %d", diamonds), sheet)
+        horstSend(string.format("🌲 99 Nights • Diamonds: %d", diamonds))
         return
     end
-
-    -- เลือก class ที่จะรายงานลงชีท: equipped ก่อน ถ้ายังไม่ equip = ตัวแรกของลิสต์
-    local questClass
-    if isLobby then
-        local cp = LocalPlayer:FindFirstChild("ClassProgress")
-        local function pick(list)
-            local firstOwned
-            for _, cn in ipairs(list or {}) do
-                local f = cp and cp:FindFirstChild(cn)
-                if f then
-                    if f:GetAttribute("Equipped") == true then return cn end
-                    firstOwned = firstOwned or cn
-                end
-            end
-            return firstOwned
-        end
-        questClass = pick(Config.UpgradeClass) or pick(Config.BuyClass)
-    else
-        questClass = LocalPlayer:GetAttribute("Class")
-    end
-
-    -- ช่อง Class ต้องตรงกับ quest ที่ส่ง = ใช้ตัวเดียวกันเสมอ
-    sheet.Class = horstClassText(questClass)
 
     local classText
     if isLobby then
@@ -538,16 +471,17 @@ local function sendHorstDescription(force)
                             local targetLevel = lvl + 1
                             local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
                             if reqs then
-                                local statSheet = questSheet(reqs, function(statKey)
-                                    return folder:GetAttribute(statKey) or 0
-                                end)
-                                if statSheet then
-                                    local avgPct = statSheet.QuestPct
-                                    classStr = classStr .. " (" .. avgPct .. "%)"
-                                    -- ชีทรับได้ class เดียว (คอลัมน์คงที่) — class อื่นแสดงอยู่แค่ในข้อความ
-                                    if className == questClass then
-                                        for k, v in pairs(statSheet) do sheet[k] = v end
+                                local totalPct, count = 0, 0
+                                for statKey, goal in pairs(reqs) do
+                                    local have = folder:GetAttribute(statKey) or 0
+                                    if type(have) == "number" and goal > 0 then
+                                        totalPct = totalPct + math.min(have / goal, 1) * 100
+                                        count = count + 1
                                     end
+                                end
+                                if count > 0 then
+                                    local avgPct = math.floor(totalPct / count)
+                                    classStr = classStr .. " (" .. avgPct .. "%)"
                                     -- Dev Logs: แสดงแต่ละ stat แยก
                                     print(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
                                         className, targetLevel, avgPct))
@@ -584,13 +518,16 @@ local function sendHorstDescription(force)
                 local cp = LocalPlayer:FindFirstChild("ClassProgress")
                 local folder = cp and cp:FindFirstChild(equipped)
                 if folder then
-                    local statSheet = questSheet(reqs, function(statKey)
-                        return folder:GetAttribute(statKey) or 0
-                    end)
-                    if statSheet then
-                        local avgPct = statSheet.QuestPct
-                        for k, v in pairs(statSheet) do sheet[k] = v end
-                        classTextPart = classTextPart .. " (" .. avgPct .. "%)"
+                    local totalPct, count = 0, 0
+                    for statKey, goal in pairs(reqs) do
+                        local have = folder:GetAttribute(statKey) or 0
+                        if type(have) == "number" and goal > 0 then
+                            totalPct = totalPct + math.min(have / goal, 1) * 100
+                            count = count + 1
+                        end
+                    end
+                    if count > 0 then
+                        classTextPart = classTextPart .. " (" .. math.floor(totalPct / count) .. "%)"
                     end
                 end
                 classText = classTextPart .. " [Can't check classes during farming]"
@@ -603,7 +540,7 @@ local function sendHorstDescription(force)
     end
 
     horstSend(string.format(
-        "🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText), sheet)
+        "🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText))
 end
 
 local function checkDiamondsGoalAndSendDone()
@@ -655,15 +592,20 @@ pcall(function()
                     if lvl < 3 then
                         local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
                         if reqs then
-                            local statSheet = questSheet(reqs, function(sk)
-                                return classStatCache[mainClass][sk]
+                            local totalPct, count = 0, 0
+                            for sk, goal in pairs(reqs) do
+                                local have = classStatCache[mainClass][sk]
                                     or (LocalPlayer.ClassProgress
                                         and LocalPlayer.ClassProgress:FindFirstChild(mainClass)
                                         and LocalPlayer.ClassProgress:FindFirstChild(mainClass):GetAttribute(sk))
                                     or 0
-                            end)
-                            if statSheet then
-                                local avgPct = statSheet.QuestPct
+                                if type(have) == "number" and goal > 0 then
+                                    totalPct = totalPct + math.min(have / goal, 1) * 100
+                                    count = count + 1
+                                end
+                            end
+                            if count > 0 then
+                                local avgPct = math.floor(totalPct / count)
                                 if os.clock() - lastFarmReport >= 1 then
                                     lastFarmReport = os.clock()
                                     print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
@@ -688,7 +630,7 @@ pcall(function()
                                     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
                                     horstSend(string.format(
                                         "🌲 99 Nights • Diamonds: %d • Class: %s [Can't check classes during farming]",
-                                        diamonds, classTextPart), statSheet)
+                                        diamonds, classTextPart))
                                 end
                             end
                         end
@@ -3930,9 +3872,6 @@ for k, v in pairs(_questKeys) do
     CLASS_QUESTS[k] = v
 end
 end  -- end of do block (CLASS_QUESTS merge)
-
--- ส่งหัวตารางให้ชีทหลัง CLASS_QUESTS ครบทุก class (ส่งก่อนจุดนี้จะได้ header ไม่ครบคอลัมน์)
-sendHorstHeader()
 
 local useCannon = false
 local cannonTool = nil
