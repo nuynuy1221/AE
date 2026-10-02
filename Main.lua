@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.14 / 1.53")
+print("Version - 1.2.14 / 2.03")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -374,11 +374,22 @@ end
 -- ส่งเข้า Sheets: Horst_SetDescription ตัวที่ 2 = HttpService:JSONEncode(...)
 -- (เอกสาร: https://github.com/HorstSpaceX/Documentation)
 -- ชีทอ่านค่าเป็นคอลัมน์ ข้อมูลจึงต้องแบน ไม่มีตารางซ้อน
+-- ช่อง Class รวมเลเวลไว้ช่องเดียว: "Cyborg (Lv.3)"
+-- เลเวลอ่านจาก ClassProgress ก่อน (lobby ใช้ attribute นี้) ไม่งั้นค่อยใช้ ClassLevel
+local function horstClassText(className)
+    className = className or LocalPlayer:GetAttribute("Class")
+    if not className then return "None" end
+    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+    local cp = LocalPlayer:FindFirstChild("ClassProgress")
+    local folder = cp and cp:FindFirstChild(className)
+    if folder then lvl = folder:GetAttribute("Level") or lvl end
+    return string.format("%s (Lv.%d)", className, lvl)
+end
+
 local function horstJson(extra)
     local data = {
         Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
-        Class = LocalPlayer:GetAttribute("Class") or "None",
-        ClassLevel = LocalPlayer:GetAttribute("ClassLevel") or 0,
+        Class = horstClassText(),
     }
     for k, v in pairs(extra or {}) do
         data[k] = v
@@ -410,6 +421,57 @@ local function questSheet(reqs, getValue)
     if count == 0 then return nil end
     extra.QuestPct = math.floor(totalPct / count)
     return extra
+end
+
+-- ============================================
+-- Sheets header: สร้างหัวตารางให้เอง (ชีทว่างเปล่า)
+-- ค่าในแถว header ต้องเป็น "ชื่อคอลัมน์" ตรงๆ ไม่งั้นข้อมูลแถวถัดไปจะไม่ตรงคอลัมน์
+-- คอลัมน์สี/ตัวหนาใส่เองไม่ได้ (ต้องทำใน Sheets) — ข้างล่างมี TSV ให้ copy ไปวาง
+-- ปิดด้วย Config.HorstHeader = false (ถ้ามี header อยู่แล้วไม่อยากได้แถวซ้ำ)
+-- ============================================
+local HORST_BASE_COLUMNS = { "Diamonds", "Class", "QuestPct" }
+
+local function buildHorstHeader(quests)
+    -- รวมชื่อ stat ทุก class/เลเวล เอาตัวซ้ำออก (ต้องเก็บทีละตัว: table.sort มีแค่ arg แบบ comparator)
+    local seen, stats = {}, {}
+    for _, byLevel in pairs(quests or {}) do
+        for _, levelStats in pairs(byLevel) do
+            for statKey in pairs(levelStats) do
+                if not seen[statKey] then
+                    seen[statKey] = true
+                    stats[#stats + 1] = statKey
+                end
+            end
+        end
+    end
+    table.sort(stats)
+
+    local names, row = {}, {}
+    for _, n in ipairs(HORST_BASE_COLUMNS) do
+        names[#names + 1] = n
+        row[n] = n
+    end
+    for _, n in ipairs(stats) do
+        names[#names + 1] = n
+        row[n] = n
+    end
+    return row, names
+end
+
+local function sendHorstHeader()
+    if Config.HorstHeader == false then return false end
+    if not (Config.Horst and _G.Horst_SetDescription) then return false end
+    local row, names = buildHorstHeader(CLASS_QUESTS)
+    local ok, json = pcall(function() return HttpService:JSONEncode(row) end)
+    if not ok then
+        warn("[Sheet] Failed to encode header row")
+        return false
+    end
+    _G.Horst_SetDescription("🌲 99 Nights • Sheet header initialized", json)
+    print(("[Sheet] Header row sent (%d columns)"):format(#names))
+    print("[Sheet] Columns: " .. table.concat(names, ", "))
+    print("[Sheet] TSV for Sheets row 1:\n" .. table.concat(names, "\t"))
+    return true
 end
 
 local function sendHorstDescription(force)
@@ -447,6 +509,9 @@ local function sendHorstDescription(force)
     else
         questClass = LocalPlayer:GetAttribute("Class")
     end
+
+    -- ช่อง Class ต้องตรงกับ quest ที่ส่ง = ใช้ตัวเดียวกันเสมอ
+    sheet.Class = horstClassText(questClass)
 
     local classText
     if isLobby then
@@ -3865,6 +3930,9 @@ for k, v in pairs(_questKeys) do
     CLASS_QUESTS[k] = v
 end
 end  -- end of do block (CLASS_QUESTS merge)
+
+-- ส่งหัวตารางให้ชีทหลัง CLASS_QUESTS ครบทุก class (ส่งก่อนจุดนี้จะได้ header ไม่ครบคอลัมน์)
+sendHorstHeader()
 
 local useCannon = false
 local cannonTool = nil
