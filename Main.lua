@@ -138,8 +138,68 @@ end
 --   Button เป็น TextButton (GradientButton.lua:48) ส่วน BG เป็น Frame ที่เก็บสีปุ่ม
 --   สีเขียว 38,255,38 = ติ๊กถูก (ยืนยัน) / สีแดง = กากบาท (ยกเลิก)
 -- ============================================
+-- ============================================
+-- กด popup ยืนยันการรีดีมให้อัตโนมัติ
+--   เซิร์ฟเวอร์ยิง "InferPopup" -> ServerSignals.InferPopup -> PopUpCreator.new(...):WaitResult(true)
+--   ถ้าไม่มีใครกด ครบ Timeout จะยิงค่า default = ปุ่มสุดท้าย = ไม่รีดีม
+--
+--   ปุ่มใน popup ไม่ใช่ข้อความ แต่เป็นรูป เพราะเกมแปลงข้อความเป็นไอคอน:
+--     u57 = {Yes = Checkmark2, No = DeniedMark2}          (Question.lua:12)
+--     GradientButton ใช้ Image = u57[ข้อความ]          (Question.lua:215)
+--   ถ้าเซิร์ฟเวอร์ไม่ได้ส่ง Options มาเกมจะใช้ค่าปริยาย (Question.lua:70-75)
+--     {{Text="Yes", Color=Color3.new(0.15,1,0.15)},
+--      {Text="No",  Color=Color3.new(1,0.15,0.15)}}
+--   0.15*255 = 38 -> สีเขียว 38,255,38 ตรงกับที่เจอในหน้าจอพอดี
+--   เซิร์ฟเวอร์เช็คผลเป็น "Yes" เช่นเดียวกับ Shop.lua:414 / Horse Server.lua:396
+-- ============================================
 local autoConfirmRedeem = false
-local CONFIRM_COLOR = Color3.fromRGB(38, 255, 38)
+
+local function confirmTextOf(popupData)
+    if type(popupData) ~= "table" then
+        return "Yes"
+    end
+    local content = popupData.Content
+    local options = (type(content) == "table") and content.Options or nil
+    if type(options) ~= "table" then
+        options = popupData.Options
+    end
+    if type(options) ~= "table" or #options == 0 then
+        return "Yes" -- ไม่ได้ส่ง Options มา = ใช้ค่าปริยายข้างบน
+    end
+    local first = options[1]
+    local text = (type(first) == "table") and first.Text or first
+    if type(text) == "string" and text ~= "" then
+        return text
+    end
+    return "Yes"
+end
+
+-- วิธีหลัก: ครอบ PopUpCreator.new แล้วยิงผลลัพธ์แทนผู้เล่นทันที ไม่ต้องรอ GUI
+-- ต้องอ่าน require ให้ครบทั้งเส้นทาง ไม่งั้น error จะหลุดออกมาก่อน pcall ตัว
+local confirmHooked = false
+local okMod, PopUpCreator = pcall(function()
+    return require(ReplicatedStorage.CAM.Global.Subsets.Classes.PopUpCreator)
+end)
+if okMod and type(PopUpCreator) == "table"
+    and type(PopUpCreator.new) == "function" and PopUpCreator.signal then
+    local originalNew = PopUpCreator.new
+    PopUpCreator.new = function(popupData, ...)
+        local popup = originalNew(popupData, ...)
+        if autoConfirmRedeem and typeof(popup) == "table" and popup.Result ~= nil then
+            local answer = confirmTextOf(popupData)
+            task.defer(function()
+                pcall(function() popup.Result:Fire(answer) end)
+                pcall(function() PopUpCreator.signal:Fire(popup.id) end)
+            end)
+        end
+        return popup
+    end
+    confirmHooked = true
+end
+
+-- วิธีสำรอง: ถ้า hook ไม่สำเร็จ ให้ไล่หาปุ่มสีเขียวในหน้าจอแล้วกดแทน
+--   โครงสร้าง: MenuPopups.<Popup>.Holder.CanvasGroup.Holder.ZButtonsHolder.<Frame>.Button.BG
+--   Button เป็น TextButton (GradientButton.lua:48) BG เก็บสีปุ่ม (GradientButton.lua:71-80)
 
 local function isConfirmColor(c)
     if typeof(c) ~= "Color3" then return false end
@@ -268,7 +328,9 @@ end
 --   RedeemedCodes เก็บชื่อโค้ดที่รีดีมแล้ว (NumberValue = เวลาที่รีดีม)
 -- ============================================
 autoConfirmRedeem = true
-task.spawn(watchAndConfirm)
+if not confirmHooked then
+    task.spawn(watchAndConfirm)
+end
 
 for _, code in ipairs(Config.Code) do
     if type(code) == "string" and code ~= "" then
