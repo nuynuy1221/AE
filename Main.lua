@@ -130,64 +130,52 @@ local function confirmSpin()
 end
 
 -- ============================================
--- ดัก popup ยืนยันการรีดีมที่เซิร์ฟเวอร์ส่งมา
+-- กด popup ยืนยันการรีดีมให้อัตโนมัติ
 --   เซิร์ฟเวอร์ยิง "InferPopup" -> ServerSignals.InferPopup -> PopUpCreator.new(...):WaitResult(true)
---   ปุ่มยืนยันคือ Options[1] (ปุ่มสุดท้ายถูกใช้เป็นค่า default ตอน timeout = Cancel)
---   เราจึงแทนผู้เล่นกดปุ่มให้เอง โดยอ่านค่าจาก Options[1].Text สดๆ (ไม่เดาค่า "Yes")
+--   ถ้าไม่มีใครกด ครบ Timeout (5 วิ) จะยิงค่า default = ปุ่มสุดท้าย (กากบาท) = ไม่รีดีม
+--   ปุ่มใน popup ไม่ใช่ TextButton ธรรมดา แต่เป็น GradientButton ที่โหลดรูปมาแทนข้อความ
+--   โครงสร้าง: MenuPopups.<Popup>.Holder.CanvasGroup.Holder.ZButtonsHolder.<Frame>.Button.BG
+--   Button เป็น TextButton (GradientButton.lua:48) ส่วน BG เป็น Frame ที่เก็บสีปุ่ม
+--   สีเขียว 38,255,38 = ติ๊กถูก (ยืนยัน) / สีแดง = กากบาท (ยกเลิก)
 -- ============================================
 local autoConfirmRedeem = false
+local CONFIRM_COLOR = Color3.fromRGB(38, 255, 38)
 
-local function confirmTextOf(popupData)
-    if type(popupData) ~= "table" then
-        return nil
-    end
-    local content = popupData.Content
-    local options = nil
-    if type(content) == "table" then
-        options = content.Options
-    end
-    if type(options) ~= "table" then
-        options = popupData.Options
-    end
-    if type(options) ~= "table" or #options == 0 then
-        return nil
-    end
-    local first = options[1]
-    local text = (type(first) == "table") and first.Text or first
-    if type(text) == "string" and text ~= "" then
-        return text
+local function isConfirmColor(c)
+    if typeof(c) ~= "Color3" then return false end
+    local r, g, b = c.R * 255, c.G * 255, c.B * 255
+    return math.abs(r - 38) < 28
+        and math.abs(g - 255) < 28
+        and math.abs(b - 38) < 28
+end
+
+local function findConfirmButton()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local gui = pg and pg:FindFirstChild("MenuPopups")
+    if not gui then return nil end
+    for _, holder in ipairs(gui:GetDescendants()) do
+        if holder.Name == "ZButtonsHolder" then
+            for _, wrapper in ipairs(holder:GetChildren()) do
+                local btn = wrapper:FindFirstChild("Button")
+                local bg  = btn and btn:FindFirstChild("BG")
+                if bg and isConfirmColor(bg.BackgroundColor3) then
+                    return btn
+                end
+            end
+        end
     end
     return nil
 end
 
--- ครอบ PopUpCreator.new (ตัวเดียวกับที่ Question.lua เรียกตอนผู้เล่นกดปุ่ม)
--- ต้องอ่านค่า require ให้ครบทั้งเส้นทาง ไม่งั้น error จะหลุดออกมาก่อน pcall ตัว
-local PopUpCreator = nil
-for _ = 1, 10 do
-    local ok, mod = pcall(function()
-        return require(ReplicatedStorage.CAM.Global.Subsets.Classes.PopUpCreator)
-    end)
-    if ok and type(mod) == "table" and type(mod.new) == "function" and type(mod.signal) == "table" then
-        PopUpCreator = mod
-        break
-    end
-    task.wait(1)
-end
-
-if PopUpCreator then
-    local originalNew = PopUpCreator.new
-    PopUpCreator.new = function(popupData, ...)
-        local popup = originalNew(popupData, ...)
-        if autoConfirmRedeem and typeof(popup) == "table" and popup.Result ~= nil then
-            local answer = confirmTextOf(popupData)
-            if answer then
-                task.defer(function()
-                    pcall(function() popup.Result:Fire(answer) end)
-                    pcall(function() PopUpCreator.signal:Fire(popup.id) end)
-                end)
-            end
+local function watchAndConfirm()
+    while autoConfirmRedeem do
+        local btn = findConfirmButton()
+        if btn then
+            pcall(function() btn:Activate() end)
+            task.wait(0.3)
+        else
+            task.wait(0.05)
         end
-        return popup
     end
 end
 
@@ -280,6 +268,7 @@ end
 --   RedeemedCodes เก็บชื่อโค้ดที่รีดีมแล้ว (NumberValue = เวลาที่รีดีม)
 -- ============================================
 autoConfirmRedeem = true
+task.spawn(watchAndConfirm)
 
 for _, code in ipairs(Config.Code) do
     if type(code) == "string" and code ~= "" then
