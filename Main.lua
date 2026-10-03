@@ -131,34 +131,63 @@ end
 
 -- ============================================
 -- ดัก popup ยืนยันการรีดีมที่เซิร์ฟเวอร์ส่งมา
---   เซิร์ฟเวอร์ยิง "InferPopup" -> ServerSignals.InferPopup โชว์ popup -> รอผู้เล่นกด
---   ถ้าไม่มีใครกด ครบ Timeout (5 วิ) PopUpCreator จะยิงค่า default = ปุ่มสุดท้าย (Cancel)
---   ทำให้รีดีมไม่ผ่าน เราจึงตอบแทน โดยอ่านค่าจาก Options[1].Text สดๆ (ไม่เดาค่า "Yes")
+--   เซิร์ฟเวอร์ยิง "InferPopup" -> ServerSignals.InferPopup -> PopUpCreator.new(...):WaitResult(true)
+--   ปุ่มยืนยันคือ Options[1] (ปุ่มสุดท้ายถูกใช้เป็นค่า default ตอน timeout = Cancel)
+--   เราจึงแทนผู้เล่นกดปุ่มให้เอง โดยอ่านค่าจาก Options[1].Text สดๆ (ไม่เดาค่า "Yes")
 -- ============================================
 local autoConfirmRedeem = false
 
--- รอจนกว่า ServerSignals จะเซ็ต OnClientInvoke เสร็จ (Utility.Connect เซ็ตตรงนั้น)
-for _ = 1, 30 do
-    if type(Remote.OnClientInvoke) == "function" then break end
+local function confirmTextOf(popupData)
+    if type(popupData) ~= "table" then
+        return nil
+    end
+    local content = popupData.Content
+    local options = nil
+    if type(content) == "table" then
+        options = content.Options
+    end
+    if type(options) ~= "table" then
+        options = popupData.Options
+    end
+    if type(options) ~= "table" or #options == 0 then
+        return nil
+    end
+    local first = options[1]
+    local text = (type(first) == "table") and first.Text or first
+    if type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
+-- ครอบ PopUpCreator.new (ตัวเดียวกับที่ Question.lua เรียกตอนผู้เล่นกดปุ่ม)
+-- ต้องอ่านค่า require ให้ครบทั้งเส้นทาง ไม่งั้น error จะหลุดออกมาก่อน pcall ตัว
+local PopUpCreator = nil
+for _ = 1, 10 do
+    local ok, mod = pcall(function()
+        return require(ReplicatedStorage.CAM.Global.Subsets.Classes.PopUpCreator)
+    end)
+    if ok and type(mod) == "table" and type(mod.new) == "function" and type(mod.signal) == "table" then
+        PopUpCreator = mod
+        break
+    end
     task.wait(1)
 end
 
-local oldInvoke = Remote.OnClientInvoke
-if type(oldInvoke) == "function" then
-    Remote.OnClientInvoke = function(player, signalName, popupData, ...)
-        if signalName == "InferPopup" and autoConfirmRedeem then
-            -- ServerSignals.InferPopup คืนค่า = Text ของปุ่มที่ถูกกด
-            -- ปุ่มแรกคือปุ่มยืนยัน (ปุ่มสุดท้ายถูกใช้เป็นค่า default ตอน timeout)
-            local content = type(popupData) == "table" and popupData.Content
-            local answer
-            if type(content) == "table" and type(content.Options) == "table" then
-                local first = content.Options[1]
-                answer = (type(first) == "table") and first.Text or first
+if PopUpCreator then
+    local originalNew = PopUpCreator.new
+    PopUpCreator.new = function(popupData, ...)
+        local popup = originalNew(popupData, ...)
+        if autoConfirmRedeem and typeof(popup) == "table" and popup.Result ~= nil then
+            local answer = confirmTextOf(popupData)
+            if answer then
+                task.defer(function()
+                    pcall(function() popup.Result:Fire(answer) end)
+                    pcall(function() PopUpCreator.signal:Fire(popup.id) end)
+                end)
             end
-            if type(answer) ~= "string" then answer = "Yes" end
-            return answer
         end
-        return oldInvoke(player, signalName, popupData, ...)
+        return popup
     end
 end
 
