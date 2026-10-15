@@ -1323,6 +1323,14 @@ if isLobby() then
         {num = 3, obj = workspace:FindFirstChild("Teleporter3")},
     }
 
+    -- DIAG (ชั่วคราว): log ทุกคำสั่งที่ server ส่งกลับมาพร้อมเวลาที่ส่ง
+    -- ใช้ดูว่าตอน "หลุด" server ส่งอะไรมาเป็นลำดับ แล้วลบทั้งบล็อกนี้ทิ้ง
+    local t0 = tick()
+    Client.Events.TeleportEvent:Connect(function(action, a, b, c)
+        print(("[TeleportEvent] +%.1fs %s | %s | %s | %s"):format(
+            tick() - t0, tostring(action), tostring(a), tostring(b), tostring(c)))
+    end)
+
     -- วนลองหาห้องจนกว่าจะเข้าได้จริง (กันเคสมีคนเข้าพร้อมกันแล้ว teleport ล้มเหลว)
     while isLobby() do
         local selectedTeleporter = nil
@@ -1360,8 +1368,11 @@ if isLobby() then
                 someoneJoined = true
                 break
             end
-            if math.floor(waited) % 5 == 0 and math.abs(waited - math.floor(waited)) < 0.05 then
-                print(("Still in Lobby... (%ds)"):format(math.floor(waited)))
+            -- DIAG (ชั่วคราว): พิมพ์ทุกวินาทีแทนทุก 5 วิ + จำนวนคนที่ยืนอยู่ในวง
+            -- beam>0 ตอนหลุด = ยืนยันว่าสคริปต์ยกเลิกคิวเอง (บรรทัด Remove ถัดไป)
+            if math.abs(waited - math.floor(waited)) < 0.05 then
+                print(("Still in Lobby... (%ds) beam=%d"):format(
+                    math.floor(waited), countPlayersInBeam(selectedTeleporter)))
             end
             updateStatus(("Loading Map... (%.0fs)"):format(waited))
             task.wait(0.1)
