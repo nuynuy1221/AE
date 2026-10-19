@@ -68,11 +68,14 @@ local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง twe
 local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
 local TWEEN_ARRIVE_XZ = 1.5    -- ต้องแตะจริง (HRP 2 + กล่อง Coin_Server 1.378 → แตะได้ที่ระยะ ≤ 1.69)
 local TWEEN_ARRIVE_Y = 6       -- tolerance แนวตั้ง (กันพื้นดันตัวขึ้นหลัง tween)
+local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
+local MAX_FAILED_COLLECTS = 10 -- ไปถึงแล้วของไม่เข้าติดกันกี่ครั้ง = ถือว่ากระเป๋าเต็ม (fallback)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
 local doneSent = false -- เช็คว่าส่ง DONE ไปแล้วหรือยัง
 local bagWasFull = false -- กัน BreakJoints ซ้ำรัวๆ ตอน Full ค้าง
 local lastCharacter = nil -- ใช้รีเซ็ตสถานะเมื่อ respawn
+local collectAttempts = 0 -- ไปถึงเหรียญแล้วของไม่เข้าติดกันกี่ครั้ง (รีเซ็ตเมื่อเก็บสำเร็จ)
 
 -- เวลาจริง (ใช้ GetServerTimeNow เหมือน Fishing Master — ไม่นับเวลาเองด้วย os.clock)
 local function nowReal()
@@ -82,6 +85,63 @@ local function nowReal()
     if ok and type(t) == "number" and t > 0 then return t end
     return os.time()
 end
+
+-- ── ติดตามกระเป๋าจาก remote ของเกม ───────────────────────────────────
+-- CoinCollected(a1, a2 = จำนวนปัจจุบัน, a3 = ความจุกระเป๋า)
+--   CoinBagContainerScript.client.lua: if a3 <= a2 then Full.Visible = true
+--   → a3 คือความจุจริงของ "ผู้เล่นคนนี้" (ขนาดกระเป๋าแต่ละคนไม่เท่ากัน)
+--   → จำ cap ไว้แทนการ hardcode 40
+--   → remote ยังเป็นสัญญาณเร็วสุดว่า "เกมรับการเก็บแล้ว" ใช้ต่อการไปชิ้นถัดไป
+-- ⚠ เก็บ cap ทั้งแบบต่อชื่อ bag และแบบ lastCap (ไม่รู้แน่ว่า a1 เป็นชื่อ bag หรือ CoinID)
+--   ในทางปฏิบัติมี bag เดียวที่ใช้งานต่อรอบ → lastCap คือ cap ของ bag นั้น
+--   ตัวนับ ack ใช้แบบ global (ไม่ผูกกับ a1) เพื่อไม่ให้พลาดถ้า a1 ไม่ใช่ชื่อ bag
+local bagCaps = {}       -- [bagName] = ความจุจริง (ถ้า a1 เป็นชื่อ bag)
+local lastCap = nil      -- ความจุจาก CoinCollected ครั้งล่าสุด (ใช้กับ bag ที่กำลังใช้งาน)
+local collectSerial = 0  -- จำนวนครั้งที่ CoinCollected ถูกยิง (สัญญาณว่าเก็บสำเร็จ)
+
+task.spawn(function()
+    -- รอ remote แบบวนซ้ำ (ไม่ใช้ WaitForChild timeout ครั้งเดียว เพราะถ้าพลาดจะไม่ได้ hook เลย)
+    local gameplay
+    while not gameplay do
+        pcall(function()
+            local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+            gameplay = remotes and remotes:FindFirstChild("Gameplay")
+        end)
+        if not gameplay then task.wait(1) end
+    end
+
+    local coinCollected
+    while not coinCollected do
+        coinCollected = gameplay:FindFirstChild("CoinCollected")
+        if not coinCollected then task.wait(1) end
+    end
+
+    coinCollected.OnClientEvent:Connect(function(bagName, amount, cap)
+        collectSerial = collectSerial + 1
+        if type(cap) == "number" and cap > 0 then
+            if bagName ~= nil then
+                bagCaps[bagName] = cap
+            end
+            lastCap = cap
+        end
+        -- มีของเข้ากระเป๋าจริง = ไม่ใช่ "เก็บไม่ได้" → รีเซ็ตตัวนับล้มเหลว
+        collectAttempts = 0
+    end)
+
+    -- รอบใหม่ = ตัวนับล้มเหลวต้องเริ่มใหม่ (ไม่งั้นกระเป๋าเต็มปลอมข้ามรอบ)
+    local coinsStarted
+    while not coinsStarted do
+        coinsStarted = gameplay:FindFirstChild("CoinsStarted")
+        if not coinsStarted then task.wait(1) end
+    end
+    coinsStarted.OnClientEvent:Connect(function()
+        collectAttempts = 0
+        -- ล้าง cap เก่า: ความจุอาจต่างกันระหว่างรอบ/เซิร์ฟเวอร์
+        --   (cap จะถูกเรียนรู้ใหม่จาก CoinCollected ครั้งแรกของรอบนี้)
+        bagCaps = {}
+        lastCap = nil
+    end)
+end)
 
 
 -- ฟังก์ชันเช็ค Event ปัจจุบัน (ชื่อกล่อง / สกุลเงิน / กุญแจ)
@@ -137,6 +197,89 @@ local function getEventContext()
     end
 
     return ctx
+end
+
+-- ══════════════════════════════════════════════════════════════════
+-- รายการไอเทมที่ถือครอง (ใช้ร่วมกันทั้ง Horst Description และ Low Mode GUI)
+--   - อ่านจาก ProfileData.Weapons.Owned (แหล่งจริง ไม่ใช่ UI)
+--   - Chroma: Sync entry มี Chroma = true และ ItemName = ชื่อฐาน
+--     → แสดงเป็น "ชื่อฐาน (Chroma)" เพื่อไม่ให้ซ้ำกับไอเทมฐาน
+--   - Embersickle (base หรือ chroma) ต่อท้ายด้วย ✅
+-- ══════════════════════════════════════════════════════════════════
+local EMBERSICKLE_MARK = " ✅"
+
+local function isEmbersickleName(text)
+    if type(text) ~= "string" then return false end
+    return string.find(string.lower(text), "embersickle", 1, true) ~= nil
+end
+
+-- true ถ้า itemKey/ข้อมูลนี้เป็น Embersickle (base หรือ chroma)
+local function isEmbersickleEntry(itemKey, info)
+    if isEmbersickleName(itemKey) then return true end
+    if info then
+        local name = info.ItemName or info.Name
+        if type(name) == "string" and string.lower(name) == "embersickle" then
+            return true
+        end
+    end
+    return false
+end
+
+-- ชื่อที่ใช้แสดง: Chroma → "Base (Chroma)"
+local function displayItemName(key, info)
+    local base = (info and (info.ItemName or info.Name)) or tostring(key)
+    if info and info.Chroma == true then
+        return base .. " (Chroma)"
+    end
+    return base
+end
+
+-- คืน array ของ { name, rarity, amount, sort, chroma, embersickle }
+-- เรียงจากหายาก → ธรรมดา (Sort น้อย = หายากกว่า)
+local function collectOwnedItems()
+    local items = {}
+
+    pcall(function()
+        local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
+        local Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync"))
+
+        local owned = ProfileData.Weapons and ProfileData.Weapons.Owned
+        if not owned then return end
+
+        local rarities = Sync.Rarities or {}
+
+        for key, amount in pairs(owned) do
+            amount = tonumber(amount) or 0
+            local info = Sync.Weapons and Sync.Weapons[key]
+            local name = displayItemName(key, info)
+
+            if amount > 0 and name ~= "Default Knife" and name ~= "Default Gun" then
+                local rarity = (info and info.Rarity) or "Common"
+                local sort = (rarities[rarity] and rarities[rarity].Sort) or 999
+                local isChroma = (info and info.Chroma == true) or false
+                local ember = isEmbersickleEntry(key, info)
+
+                -- ไอเทมฐานกับ chroma มี ItemName เดียวกัน — กันชื่อชนกันด้วย key
+                table.insert(items, {
+                    key = key,
+                    name = name,
+                    rarity = rarity,
+                    amount = amount,
+                    sort = sort,
+                    chroma = isChroma,
+                    embersickle = ember,
+                })
+            end
+        end
+    end)
+
+    table.sort(items, function(a, b)
+        if a.sort ~= b.sort then return a.sort < b.sort end
+        if a.name ~= b.name then return a.name < b.name end
+        return tostring(a.key) < tostring(b.key)
+    end)
+
+    return items
 end
 
 -- ══════════════════════════════════════════════════════════════════
@@ -555,40 +698,15 @@ local function fetchLowData()
 
 	pcall(function()
 		local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-		local Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync"))
 		local ctx = getEventContext()
 
 		data.coins = ProfileData.Materials.Owned["Coins"] or 0
 		data.candies = ProfileData.Materials.Owned[ctx.currencyName] or 0
-
-		local owned = ProfileData.Weapons and ProfileData.Weapons.Owned
-		if owned then
-			local rarities = Sync.Rarities or {}
-			for key, amount in pairs(owned) do
-				amount = tonumber(amount) or 0
-				local info = Sync.Weapons and Sync.Weapons[key]
-				local name = info and (info.ItemName or info.Name) or tostring(key)
-
-				if amount > 0 and name ~= "Default Knife" and name ~= "Default Gun" then
-					local rarity = (info and info.Rarity) or "Common"
-					-- Sort น้อย = หายากกว่า · ไม่รู้จัก = ต่อท้ายสุด
-					local sort = (rarities[rarity] and rarities[rarity].Sort) or 999
-					table.insert(data.items, {
-						name = name,
-						rarity = rarity,
-						amount = amount,
-						sort = sort,
-					})
-				end
-			end
-		end
-
-		-- เรียงจากหายาก -> ธรรมดา (Sort น้อย = หายากกว่า)
-		table.sort(data.items, function(a, b)
-			if a.sort ~= b.sort then return a.sort < b.sort end
-			return a.name < b.name
-		end)
 	end)
+
+	-- ใช้ตัวรวบรวมเดียวกันกับ Horst Description
+	-- (Chroma แสดงเป็น "Base (Chroma)" · Embersickle มี ✅ ต่อท้าย)
+	data.items = collectOwnedItems()
 
 	return data
 end
@@ -601,10 +719,14 @@ local function buildItemRow(data)
 
 	for i = 1, n do
 		local it = list[i]
+		local tail = it.amount > 1 and (" x" .. it.amount) or nil
+		if it.embersickle then
+			tail = (tail or "") .. EMBERSICKLE_MARK
+		end
 		cells[#cells + 1] = {
 			t = it.name,
 			c = rarityColor3(it.rarity),
-			tail = it.amount > 1 and (" x" .. it.amount) or nil,
+			tail = tail,
 			-- มี ", " ต่อท้ายทุกชิ้นยกเว้นชิ้นสุดท้าย (รวมกรณีมี "+N" ต่อท้าย)
 			sep = (i < n) or (#list > n),
 		}
@@ -974,11 +1096,6 @@ local embersickleKeys = nil   -- array ของ key ทุกตัว (base + 
 local lastEmbersickleScan = 0
 local embersickleMatchedKey = nil  -- key ที่เจอใน inventory จริง (ไว้ log/description)
 
-local function isEmbersickleName(text)
-    if type(text) ~= "string" then return false end
-    return string.find(string.lower(text), "embersickle", 1, true) ~= nil
-end
-
 local function resolveEmbersickleKeys()
     local keys = {}
     local seen = {}
@@ -1100,72 +1217,27 @@ local function refreshEmbersickle()
     return cachedHasEmbersickle
 end
 
--- รวมรายการไอเทมใน inventory
+-- รวมรายการไอเทมใน inventory สำหรับ Description
+-- ใช้ collectOwnedItems() (ProfileData) — ไม่ scrape UI
+--   Chroma → "Base (Chroma)" · Embersickle → ต่อท้าย ✅
 local function collectInventoryNames()
-    local itemNames = {}
-    local playerGui = player:FindFirstChild("PlayerGui")
+    local names = {}
 
-    if not playerGui then return itemNames end
-
-    local mainGUI = playerGui:FindFirstChild("MainGUI")
-    local gameUI = mainGUI and mainGUI:FindFirstChild("Game")
-    local inventory = gameUI and gameUI:FindFirstChild("Inventory")
-    local main = inventory and inventory:FindFirstChild("Main")
-    local weapons = main and main:FindFirstChild("Weapons")
-    local items = weapons and weapons:FindFirstChild("Items")
-    local container = items and items:FindFirstChild("Container")
-    local current = container and container:FindFirstChild("Current")
-    local currentContainer = current and current:FindFirstChild("Container")
-
-    if not currentContainer then return itemNames end
-
-    for _, item in ipairs(currentContainer:GetChildren()) do
-        if item:IsA("Frame") or item:IsA("ImageLabel") then
-            local itemName = item:FindFirstChild("ItemName")
-            local label = itemName and itemName:FindFirstChild("Label")
-            if label and label.Text and label.Text ~= "Default Gun" and label.Text ~= "Default Knife" then
-                local name = label.Text
-                local amount = 1
-
-                -- วิธีที่ 1: NewItem > Container > Amount
-                local newItem = item:FindFirstChild("NewItem")
-                local newItemContainer = newItem and newItem:FindFirstChild("Container")
-                local amountObj = newItemContainer and newItemContainer:FindFirstChild("Amount")
-                if amountObj and amountObj.Text then
-                    local numStr = string.match(amountObj.Text, "x?(%d+)")
-                    if numStr then
-                        amount = tonumber(numStr) or 1
-                    end
-                end
-
-                -- วิธีที่ 2: สแกน TextLabel ที่มี pattern x2, x3
-                if amount == 1 then
-                    for _, child in ipairs(item:GetDescendants()) do
-                        if child:IsA("TextLabel") or child:IsA("TextButton") then
-                            if child.Text and string.match(child.Text, "x%d+") then
-                                local numStr = string.match(child.Text, "x(%d+)")
-                                if numStr then
-                                    amount = tonumber(numStr) or 1
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-
-                if amount > 1 then
-                    table.insert(itemNames, name .. " x" .. amount)
-                else
-                    table.insert(itemNames, name)
-                end
-            end
+    for _, it in ipairs(collectOwnedItems()) do
+        local text = it.name
+        if it.amount > 1 then
+            text = text .. " x" .. it.amount
         end
+        if it.embersickle then
+            text = text .. EMBERSICKLE_MARK
+        end
+        names[#names + 1] = text
     end
 
-    return itemNames
+    return names
 end
 
--- สร้างข้อความ Description (ไม่แสดง Halloween Keys)
+-- สร้างข้อความ Description (ไม่แสดง Halloween Keys, ไม่มีวันที่)
 local function buildDescription()
     local coins = 0
     local candies = 0
@@ -1178,10 +1250,9 @@ local function buildDescription()
     end)
 
     local description = string.format(
-        "🎮 MM2 • Coins: %d • Candies: %d • %s",
+        "🎮 MM2 • Coins: %d • Candies: %d",
         coins,
-        candies,
-        os.date("%d/%m/%y")
+        candies
     )
 
     local itemNames = collectInventoryNames()
@@ -1430,7 +1501,8 @@ local function tweenToPosition(targetPosition, currentVisual)
             return false, better
         end
 
-        task.wait(0.15)
+        -- ไม่หน่วงระหว่างรอบ: ถึงแล้วเช็คต่อในรอบถัดไปทันที
+        --   (ของเดิม task.wait(0.15) ตรงนี้ = ดีเลย์เปล่าๆ ก่อนไปชิ้นถัดไป)
 
         -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
         if arrivedAt(targetPosition) then return true end
@@ -1739,6 +1811,7 @@ while true do
         if character ~= lastCharacter then
             lastCharacter = character
             bagWasFull = false
+            collectAttempts = 0
         end
 
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -1790,18 +1863,17 @@ while true do
 
         -- หา bag ที่เกมกำลังใช้งาน (Halloween = Candy, ปกติ = Coin)
         -- ใช้ frame ที่ Visible ตัวแรกที่มีช่องตัวเลข (CoinsStarted เปิดเฉพาะ bag ของอีเวนท์)
-        local activeBag, coinAmount, bagFull = nil, 0, false
+        local activeBag, bagCountText, bagFullFrame = nil, nil, nil
         for _, frame in ipairs(container:GetChildren()) do
             if frame:IsA("Frame") and frame.Visible then
                 local currencyFrame = frame:FindFirstChild("CurrencyFrame")
                 local icon = currencyFrame and currencyFrame:FindFirstChild("Icon")
                 local coinsText = icon and icon:FindFirstChild("Coins")
-                local fullFrame = frame:FindFirstChild("Full")
 
                 if coinsText then
                     activeBag = frame
-                    coinAmount = tonumber(coinsText.Text) or 0
-                    bagFull = fullFrame ~= nil and fullFrame.Visible
+                    bagCountText = coinsText
+                    bagFullFrame = frame:FindFirstChild("Full")
                     break
                 end
             end
@@ -1809,8 +1881,23 @@ while true do
 
         if not activeBag then task.wait(0.1) return end
 
-        -- เต็มเมื่อเกมแจ้ง Full หรือจำนวนถึง cap เดิม (40)
-        local isBagFull = bagFull or coinAmount >= 40
+        -- อ่านสถานะกระเป๋าสดๆ (เรียกซ้ำได้หลังเก็บแต่ละชิ้น)
+        --   ความจุจริงของผู้เล่นคนนี้ (จาก CoinCollected: a3) — แต่ละคนขนาดไม่เท่ากัน
+        --   bagCaps ผูกตามชื่อ bag; lastCap คือค่าล่าสุดของรอบนี้ (มี bag เดียวที่ใช้งานต่อรอบ)
+        --   ถ้ายังไม่เคยได้ค่าจาก remote = nil (ไม่ใช้ตัวเลขเดา)
+        local function readBag()
+            local amount = tonumber(bagCountText.Text) or 0
+            local cap = bagCaps[activeBag.Name] or lastCap
+            local full = (bagFullFrame ~= nil and bagFullFrame.Visible)
+                or (cap ~= nil and amount >= cap)
+            return amount, full
+        end
+
+        local _, bagFull = readBag()
+
+        -- กระเป๋าเต็ม: เชื่อสัญญาณเกม (Full.Visible = a3 <= a2) หรือจำนวนถึง cap จริง
+        --   + fallback: ไปถึงเหรียญแล้วของไม่เข้าติดกันหลายครั้ง (เช่น กระเป๋าเต็มแต่ UI ยังไม่ขึ้น)
+        local isBagFull = bagFull or (collectAttempts >= MAX_FAILED_COLLECTS)
 
         if isBagFull then
             -- กัน BreakJoints ซ้ำตอน Full ค้างหลัง respawn
@@ -1833,32 +1920,66 @@ while true do
 
             -- เดินตามเป้า; ถ้าระหว่างทางเจอชิ้นที่ใกล้กว่ามากจะเปลี่ยนเป้าให้ทันที
             --   (สูงสุด 8 ครั้ง กันวนไม่จบ)
+            --   เก็บได้แล้วเลือกชิ้นถัดไปต่อในลูปเดิมทันที (ไม่กลับไปเริ่มลูปหลัก)
             for _ = 1, 8 do
-                if not targetVisual then break end
+                if not targetVisual then
+                    -- ไม่มีเหรียญให้เก็บแล้ว (รอรอบใหม่) — หน่วงสั้นๆ กัน busy loop
+                    task.wait(0.1)
+                    break
+                end
 
                 local targetPos = visualPos(targetVisual)
                 if not targetPos then break end
 
+                local serialBefore = collectSerial
                 local reached, retarget = tweenToPosition(targetPos, targetVisual)
 
                 if retarget then
                     targetVisual = retarget
+                elseif not coinIsCollectible(targetVisual) then
+                    -- เป้าหายกลางทาง (ถูกเก็บไปแล้ว ไม่ว่าใครเก็บ) → เลือกชิ้นถัดไปทันที
+                    targetVisual = findNearestCoin()
                 else
-                    -- ถึงแล้ว: รอสั้นๆ ให้เกมเก็บของ (Collected/Delete)
-                    -- ถ้ายังเก็บได้อยู่ = เป้านี้เอาไม่ได้ (ติด/อยู่ไกลเกิน) → ข้ามชั่วคราว
+                    -- ถึงแล้ว: "เก็บปุ๊บ ไปปั๊บ"
+                    --   รอ CoinCollected (สัญญาณจากเซิร์ฟเวอร์ว่าเก็บสำเร็จ) แค่สั้นๆ
+                    --   ถ้าเกมทำเครื่องหมาย Collected/Delete แล้ว ก็ไปต่อได้ทันทีเช่นกัน
+                    local gotIt = false
                     if reached then
-                        local waited = 0
-                        while waited < 0.25 and coinIsCollectible(targetVisual) do
-                            task.wait(0.05)
-                            waited = waited + 0.05
+                        local deadline = nowReal() + COLLECT_ACK_WAIT
+                        while nowReal() < deadline do
+                            if collectSerial ~= serialBefore then break end
+                            if not coinIsCollectible(targetVisual) then break end
+                            task.wait(0.02)
                         end
+
+                        -- สำเร็จเมื่อ: remote ยืนยัน (ของเข้ากระเป๋า) หรือเกมทำเครื่องหมายว่าเก็บแล้ว
+                        gotIt = (collectSerial ~= serialBefore)
+                            or not coinIsCollectible(targetVisual)
                     end
-                    -- ถึงหรือไม่ถึง ก็ข้ามชิ้นนี้ชั่วคราวถ้ายังเก็บได้
-                    --   กันลูปจมอยู่กับเหรียญที่เอาไม่ได้ (ติดกำแพง/อยู่นอกระยะ)
-                    if targetVisual.Parent and coinIsCollectible(targetVisual) then
-                        visualSkipUntil[targetVisual] = nowReal() + 1
+
+                    if gotIt then
+                        collectAttempts = 0
+                        -- กันเลือกชิ้นเดิมซ้ำระหว่างที่ visual ยังไม่ถูกลบ (ลบจริงหลัง 0.5 วิ)
+                        if targetVisual.Parent then
+                            visualSkipUntil[targetVisual] = nowReal() + 0.5
+                        end
+                        -- เก็บชิ้นนี้แล้วกระเป๋าเต็มพอดี → หยุดเก็บทันที (ไม่ไปชิ้นถัดไปให้เสียเวลา)
+                        local _, nowFull = readBag()
+                        if nowFull then break end
+                        -- ไปชิ้นถัดไปทันที (ไม่กลับไปเริ่มลูปหลัก)
+                        targetVisual = findNearestCoin()
+                    else
+                        if reached then
+                            -- ไปถึงแล้วแต่ของไม่เข้า = เป้านี้เอาไม่ได้ (เช่น กระเป๋าเต็ม)
+                            collectAttempts = collectAttempts + 1
+                        end
+                        -- ถึงหรือไม่ถึง ก็ข้ามชิ้นนี้ชั่วคราวถ้ายังเก็บได้
+                        --   กันลูปจมอยู่กับเหรียญที่เอาไม่ได้ (ติดกำแพง/อยู่นอกระยะ)
+                        if targetVisual.Parent and coinIsCollectible(targetVisual) then
+                            visualSkipUntil[targetVisual] = nowReal() + 0.5
+                        end
+                        break
                     end
-                    break
                 end
             end
         end
