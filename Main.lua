@@ -38,11 +38,24 @@ local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
 -- ตั้งค่า
 local SPEED = Config.TweenSpeed or 25
+local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง tween ซ้ำถ้ายังไม่ถึงเป้า
+local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
+local TWEEN_ARRIVE_XZ = 3      -- ถือว่าถึงเป้าเมื่อห่างแนวนอนไม่เกินกี่ studs
+local TWEEN_ARRIVE_Y = 6       -- tolerance แนวตั้ง
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
 local doneSent = false -- เช็คว่าส่ง DONE ไปแล้วหรือยัง
 local bagWasFull = false -- กัน BreakJoints ซ้ำรัวๆ ตอน Full ค้าง
 local lastCharacter = nil -- ใช้รีเซ็ตสถานะเมื่อ respawn
+
+-- เวลาจริง (ใช้ GetServerTimeNow เหมือน Fishing Master — ไม่นับเวลาเองด้วย os.clock)
+local function nowReal()
+    local ok, t = pcall(function() return workspace:GetServerTimeNow() end)
+    if ok and type(t) == "number" and t > 0 then return t end
+    ok, t = pcall(function() return DateTime.now():UnixTimestampMillis() / 1000 end)
+    if ok and type(t) == "number" and t > 0 then return t end
+    return os.time()
+end
 
 
 -- ฟังก์ชันเช็ค Event ปัจจุบัน (ชื่อกล่อง / สกุลเงิน / กุญแจ)
@@ -1153,25 +1166,121 @@ local function maybeSendDone()
     end)
 end
 
--- ฟังก์ชัน Tween ไปยังตำแหน่ง
-local function tweenToPosition(targetPosition)
-    local distance = (humanoidRootPart.Position - targetPosition).Magnitude
-    local duration = distance / SPEED
+-- ── Tween ไปยังตำแหน่ง (แบบเดียวกับ Fishing Master) ──────────────────
+--   ต่างจากของเดิม 3 จุด:
+--     1) เก็บการหมุนเดิมไว้ (CFrame.new(pos) รีเซ็ตการหมุนทุกครั้ง)
+--     2) EasingStyle.Linear + เวลาจริง = ความเร็วคงที่ทุก FPS
+--     3) มีตัวจับค้าง/ไม่ถึงเป้า แล้วยิงซ้ำจากตำแหน่งจริง (ไม่ค้างรอ tween ที่ล้มเหลว)
+local function arrivedAt(target)
+    local hrp = humanoidRootPart
+    if not (hrp and hrp.Parent) then return false end
+    local p = hrp.Position
+    local dxz = Vector3.new(target.X - p.X, 0, target.Z - p.Z).Magnitude
+    local dy = math.abs(target.Y - p.Y)
+    return (dxz <= TWEEN_ARRIVE_XZ and dy <= TWEEN_ARRIVE_Y), dxz, dy
+end
 
-    local tweenInfo = TweenInfo.new(
-        duration,
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.InOut
-    )
+local function tweenOnce(target)
+    local hrp = humanoidRootPart
+    if not (hrp and hrp.Parent) then return false end
 
-    local tween = TweenService:Create(
-        humanoidRootPart,
-        tweenInfo,
-        {CFrame = CFrame.new(targetPosition)}
-    )
+    local from = hrp.Position
+    local distance = (target - from).Magnitude
 
+    -- เก็บทิศหันเดิม ไม่ให้ CFrame.new() รีเซ็ตการหมุน
+    local rot = hrp.CFrame - hrp.CFrame.Position
+
+    if distance < 1 then
+        pcall(function()
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end)
+        return true
+    end
+
+    local duration = math.max(distance / SPEED, 0.05)
+    local ok, tween = pcall(function()
+        return TweenService:Create(
+            hrp,
+            TweenInfo.new(duration, Enum.EasingStyle.Linear),
+            { CFrame = CFrame.new(target) * rot }
+        )
+    end)
+    if not ok or not tween then return false end
+
+    local done = false
+    local conn
+    conn = tween.Completed:Connect(function() done = true end)
     tween:Play()
-    tween.Completed:Wait()
+
+    -- ตัวจับค้าง: ถ้าตำแหน่งจริงไม่เข้าใกล้เป้าเลยใน TWEEN_STUCK_SEC = ปล่อย
+    --   (เทียบกับ "จุดที่ควรอยู่ ณ เวลานี้" ไม่ใช่ตำแหน่งที่เราเพิ่งเขียนเอง)
+    local t0 = nowReal()
+    local lastCheck = t0
+    local bestGap = math.huge
+    local noGainAt = t0
+
+    while not done do
+        task.wait(0.05)
+
+        local hrpNow = humanoidRootPart
+        if not (hrpNow and hrpNow.Parent) then
+            pcall(function() tween:Cancel() end)
+            if conn then pcall(function() conn:Disconnect() end) end
+            return false
+        end
+
+        local now = nowReal()
+        if now - lastCheck >= 1 then
+            lastCheck = now
+            local alpha = math.clamp((now - t0) / duration, 0, 1)
+            local want = from:Lerp(target, alpha)
+            local gap = (hrpNow.Position - want).Magnitude
+
+            if gap < bestGap - 0.5 then
+                bestGap = gap
+                noGainAt = now
+            elseif now - noGainAt >= TWEEN_STUCK_SEC then
+                -- ตัวละครไม่ขยับตามที่ tween สั่ง (ถูกดึงกลับ/ติดอะไร) = เลิก
+                pcall(function() tween:Cancel() end)
+                if conn then pcall(function() conn:Disconnect() end) end
+                return false
+            end
+        end
+    end
+
+    if conn then pcall(function() conn:Disconnect() end) end
+    return true
+end
+
+local function tweenToPosition(targetPosition)
+    local attempts = 0
+
+    while attempts < TWEEN_MAX_TRY do
+        attempts = attempts + 1
+
+        local reached = arrivedAt(targetPosition)
+        if reached then return true end
+
+        -- ตาย/เกิดใหม่กลางทาง = อ่าน hrp ใหม่ทุกครั้ง (ตัวแปรอัปเดตใน main loop)
+        if not (humanoidRootPart and humanoidRootPart.Parent) then return false end
+
+        tweenOnce(targetPosition)
+        task.wait(0.15)
+
+        -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
+        if arrivedAt(targetPosition) then return true end
+    end
+
+    -- ถึงหรือไม่ก็หยุด velocity ไม่ให้ไถลต่อ
+    pcall(function()
+        if humanoidRootPart and humanoidRootPart.Parent then
+            humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+            humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+        end
+    end)
+
+    return false
 end
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
