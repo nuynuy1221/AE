@@ -24,8 +24,33 @@ Config.Embersickle = Config.Embersickle == true
 Config.CoinsBox = Config.CoinsBox or nil
 
 -- ถ้าเปิด Horst ให้โหลด script
+-- ⚠ ต้องกรอง print ก่อนโหลด on_loaded.lua เพราะโค้ดอาจจับค่า print ไปตั้งแต่ตอนโหลด
+--   (แบบเดียวกับ horstInstall ใน Fishing Master)
+--   on_loaded.lua พิมพ์ "Successfully sent description" ทุกครั้งที่อัปเดต (ทุก ~30 วิ)
+--   = สัญญาณว่าส่งถึงปลายทาง ไม่ต้องเห็นทุกครั้ง
 if Config.Horst then
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
+    local realPrint = print
+    print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do
+            parts[#parts + 1] = tostring((select(i, ...)))
+        end
+        local line = string.lower(table.concat(parts, " "))
+        if line:find("sheet", 1, true)
+            or line:find("sent description", 1, true)
+            or line:find("sent done", 1, true) then
+            return
+        end
+        realPrint(...)
+    end
+
+    local ok, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
+    end)
+    if not ok then
+        print = realPrint
+        warn("[Horst] โหลด on_loaded.lua ไม่สำเร็จ: " .. tostring(err))
+    end
 end
 
 local TweenService = game:GetService("TweenService")
