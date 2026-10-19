@@ -56,6 +56,7 @@ end
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local character = player.Character or player.CharacterAdded:Wait()
@@ -65,8 +66,8 @@ local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local SPEED = Config.TweenSpeed or 25
 local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง tween ซ้ำถ้ายังไม่ถึงเป้า
 local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
-local TWEEN_ARRIVE_XZ = 3      -- ถือว่าถึงเป้าเมื่อห่างแนวนอนไม่เกินกี่ studs
-local TWEEN_ARRIVE_Y = 6       -- tolerance แนวตั้ง
+local TWEEN_ARRIVE_XZ = 1.5    -- ต้องแตะจริง (HRP 2 + กล่อง Coin_Server 1.378 → แตะได้ที่ระยะ ≤ 1.69)
+local TWEEN_ARRIVE_Y = 6       -- tolerance แนวตั้ง (กันพื้นดันตัวขึ้นหลัง tween)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
 local doneSent = false -- เช็คว่าส่ง DONE ไปแล้วหรือยัง
@@ -926,6 +927,10 @@ end
 
 print("✅ MM2 Low Mode GUI Loaded - Press N to toggle")
 -- ราคากล่อง (อ่านจาก NewShop ที่ถูก merge จาก EventStartInfo.ShopData ตอนรันไทม์)
+--   NewShop[boxId].Price[currencyKey] = ราคาจริงจากเซิร์ฟเวอร์ (แม่นที่สุด)
+--   ถ้ายังไม่มี entry (event ยังไม่ init) → ใช้ fallback ที่ส่งเข้ามา
+--   Halloween Box '26 = 600 Candies + 1 Halloween Key
+--   ⚠ ไม่ scrape จาก UI: ค่าที่ค้างใน TextLabel อาจเป็นค่าเก่า (เช่น 1,000) แล้วทับราคาจริง
 local function getBoxPrice(currencyKey, fallback)
     local price = fallback
 
@@ -934,8 +939,8 @@ local function getBoxPrice(currencyKey, fallback)
         local boxId = getEventContext().boxId
         local shopItem = Sync.NewShop and Sync.NewShop[boxId]
         local amount = shopItem and shopItem.Price and shopItem.Price[currencyKey]
-        if amount then
-            price = amount
+        if tonumber(amount) then
+            price = tonumber(amount)
         end
     end)
 
@@ -961,77 +966,116 @@ pcall(function()
 end)
 
 -- หา key ของ Embersickle (ไอเทมอีเวนท์ถูก inject ตอนรันไทม์)
-local embersickleKey = nil
+-- ⚠ ต้องรองรับ Chroma ด้วย: ใน Sync ตัว chroma เป็น "คนละ entry" กับไอเทมฐาน
+--   และ ItemName ของ chroma = ชื่อไอเทมฐาน (เช่น DeathshardChroma -> ItemName "Deathshard")
+--   key ของ chroma ตั้งได้ 2 แบบในเกม: EmbersickleChroma / ChromaEmbersickle
+--   → แมตช์จาก key ที่มีคำว่า embersickle ก่อน แล้วค่อยแมตช์ ItemName ฐาน
+local embersickleKeys = nil   -- array ของ key ทุกตัว (base + chroma)
 local lastEmbersickleScan = 0
+local embersickleMatchedKey = nil  -- key ที่เจอใน inventory จริง (ไว้ log/description)
 
-local function resolveEmbersickleKey()
-    local found = nil
+local function isEmbersickleName(text)
+    if type(text) ~= "string" then return false end
+    return string.find(string.lower(text), "embersickle", 1, true) ~= nil
+end
+
+local function resolveEmbersickleKeys()
+    local keys = {}
+    local seen = {}
+
+    local function add(key)
+        if key and not seen[key] then
+            seen[key] = true
+            keys[#keys + 1] = key
+        end
+    end
 
     pcall(function()
         local Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync"))
         for _, tableName in ipairs({ "Weapons", "Materials" }) do
             local items = Sync[tableName]
-            if items and not found then
+            if items then
                 for itemKey, itemInfo in pairs(items) do
                     local name = itemInfo.ItemName or itemInfo.Name
-                    if type(name) == "string" and string.lower(name) == "embersickle" then
-                        found = itemKey
-                        break
+                    -- key มีคำว่า embersickle = ครอบคลุมทั้ง base และ chroma
+                    if isEmbersickleName(itemKey) then
+                        add(itemKey)
+                    -- ItemName ฐานตรงกับ Embersickle (ไอเทมปกติ / chroma ที่ใช้ชื่อฐาน)
+                    elseif type(name) == "string" and string.lower(name) == "embersickle" then
+                        add(itemKey)
                     end
                 end
             end
         end
     end)
 
-    return found
+    return keys
 end
 
-local function getEmbersickleKey()
+local function getEmbersickleKeys()
     -- สแกนซ้ำทุก 30 วิ เผื่อไอเทมถูก inject หลังจากสคริปต์เริ่มทำงาน
-    if not embersickleKey and tick() - lastEmbersickleScan >= 30 then
-        lastEmbersickleScan = tick()
-        embersickleKey = resolveEmbersickleKey()
+    -- (ถ้าสแกนแล้วยังว่าง ให้ลองใหม่รอบหน้า ไม่ cache ตารางว่าง)
+    local now = tick()
+    if (not embersickleKeys or #embersickleKeys == 0) and now - lastEmbersickleScan >= 30 then
+        lastEmbersickleScan = now
+        local found = resolveEmbersickleKeys()
+        if #found > 0 then
+            embersickleKeys = found
+        end
     end
-    return embersickleKey
+    return embersickleKeys or {}
 end
 
--- เช็คว่ามี Embersickle ใน inventory หรือยัง (cache 1 วิ กันสแกนถี่เกิน)
+-- เช็คว่ามี Embersickle (หรือ Chroma Embersickle) ใน inventory หรือยัง
+-- cache 1 วิ กันสแกนถี่เกิน
 local cachedHasEmbersickle = false
 local lastEmbersickleCheck = 0
 
 local function checkHasEmbersickle()
     local owned = 0
+    local matched = nil
+    local groups = { "Weapons", "Materials" }
 
     pcall(function()
         local ProfileData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ProfileData"))
-        local key = getEmbersickleKey()
 
-        if key then
-            owned = (ProfileData.Weapons.Owned and ProfileData.Weapons.Owned[key])
-                or (ProfileData.Materials.Owned and ProfileData.Materials.Owned[key])
-                or 0
+        -- 1) key ที่ resolve ได้จาก Sync (base + chroma)
+        for _, key in ipairs(getEmbersickleKeys()) do
+            for _, group in ipairs(groups) do
+                local data = ProfileData[group]
+                local amount = data and data.Owned and data.Owned[key]
+                if (tonumber(amount) or 0) > 0 then
+                    owned = tonumber(amount)
+                    matched = key
+                    break
+                end
+            end
+            if owned > 0 then break end
         end
 
-        -- fallback: ค้นชื่อใน Owned (เผื่อ key ต่างจากที่คาด)
+        -- 2) fallback: สแกนชื่อ key ใน Owned ทั้งหมด
+        --    (ครอบคลุม Chroma ที่ Sync ยังไม่ inject ตอนสแกน)
         if owned <= 0 then
-            for _, group in ipairs({ "Weapons", "Materials" }) do
+            for _, group in ipairs(groups) do
                 local data = ProfileData[group]
                 if data and data.Owned then
                     for itemKey, amount in pairs(data.Owned) do
-                        if type(itemKey) == "string"
-                            and string.find(string.lower(itemKey), "embersickle")
-                            and (tonumber(amount) or 0) > 0 then
+                        if isEmbersickleName(itemKey) and (tonumber(amount) or 0) > 0 then
                             owned = tonumber(amount) or 1
+                            matched = itemKey
                             break
                         end
                     end
                 end
-                if owned > 0 then
-                    break
-                end
+                if owned > 0 then break end
             end
         end
     end)
+
+    if owned > 0 and embersickleMatchedKey ~= matched then
+        embersickleMatchedKey = matched
+        print(("[Embersickle] พบใน inventory: %s"):format(tostring(matched)))
+    end
 
     return owned > 0
 end
@@ -1181,7 +1225,7 @@ local function maybeSendDone()
         _G.Horst_SetDescription(buildDescription())
         task.wait(7)
         _G.Horst_AccountChangeDone()
-        print("[DONE] Embersickle obtained")
+        print(("[DONE] Embersickle obtained (%s)"):format(tostring(embersickleMatchedKey or "unknown")))
 
         -- ส่ง description ต่อทุก 3 วิ
         while true do
@@ -1205,7 +1249,77 @@ local function arrivedAt(target)
     return (dxz <= TWEEN_ARRIVE_XZ and dy <= TWEEN_ARRIVE_Y), dxz, dy
 end
 
-local function tweenOnce(target)
+-- เช็คว่าเหรียญนี้เก็บได้จริงไหม — ใช้ "CoinVisual" เป็นตัวตัดสิน
+-- ⚠ ห้าม fallback ไปดู coin.CanTouch ของ Coin_Server เด็ดขาด
+--   Coin_Server เป็น Part ถาวร (Anchored=true, CanTouch=true) ที่ไม่เคยถูกลบ
+--   ตอนเก็บได้ เกม (CoinVisualizer) จะ Destroy เฉพาะลูก CoinVisual เท่านั้น
+--   → ช่องที่เก็บไปแล้วจะไม่มีลูก CoinVisual แต่ CanTouch ยังเป็น true
+--   → ของเดิมมองช่องว่างเป็น "เก็บได้" และมักเลือกช่องที่ใกล้ที่สุด
+--     (จุดที่เพิ่งยืนอยู่ = ระยะ 0) → tween ระยะ 0 แล้ววนอยู่กับที่
+--     = อาการ "แคนดี้เกิดตรงหน้าแต่ไม่ยอมไปเก็บ"
+-- ใช้ logic เดียวกับ CoinVisualizer: attribute Collected / Delete = เก็บแล้ว/กำลังจะหาย
+local visualSkipUntil = setmetatable({}, { __mode = "k" })
+
+-- ตำแหน่งของ CoinVisual — รองรับทั้ง BasePart และ Model
+local function visualPos(visual)
+    if not (visual and visual.Parent) then return nil end
+    if visual:IsA("BasePart") then
+        return visual.Position
+    end
+    local ok, pivot = pcall(function() return visual:GetPivot().Position end)
+    return ok and pivot or nil
+end
+
+local function coinIsCollectible(visual)
+    if not (visual and visual.Parent) then
+        return false
+    end
+    if visual:GetAttribute("Collected") or visual:GetAttribute("Delete") then
+        return false
+    end
+    local skipUntil = visualSkipUntil[visual]
+    if skipUntil and nowReal() < skipUntil then
+        return false
+    end
+    return true
+end
+
+-- ระหว่างเดิน: ถ้ามีแคนดี้ใหม่โผล่ใกล้กว่าชิ้นที่กำลังไปมากพอ = เปลี่ยนเป้าทันที
+--   กันอาการ "เดินผ่าน/ยืนอยู่ใกล้แคนดี้ที่เพิ่งเกิด แต่ไม่ยอมไปเก็บ"
+--   เพราะ tween ที่ตั้งเป้าไว้แล้วจะไม่เปลี่ยนเป้าจนกว่าจะถึงจุดเดิม
+local RETARGET_MARGIN = 8      -- ต้องใกล้กว่าอย่างน้อยกี่ studs ถึงจะเปลี่ยนเป้า
+local RETARGET_RADIUS = 45     -- สนใจเฉพาะแคนดี้ที่อยู่ในรัศมีนี้
+local RETARGET_CHECK = 0.25    -- เช็คทุกกี่วินาที
+
+local function findBetterCoin(currentVisual, currentPos, hrpPos)
+    local bestVisual, bestDist = nil, math.huge
+
+    for _, visual in ipairs(CollectionService:GetTagged("CoinVisual")) do
+        if visual ~= currentVisual and coinIsCollectible(visual) then
+            local pos = visualPos(visual)
+            if pos then
+                local d = (hrpPos - pos).Magnitude
+                if d < bestDist then
+                    bestDist = d
+                    bestVisual = visual
+                end
+            end
+        end
+    end
+
+    if not bestVisual or bestDist > RETARGET_RADIUS then
+        return nil
+    end
+
+    local currentDist = (hrpPos - currentPos).Magnitude
+    if bestDist + RETARGET_MARGIN < currentDist then
+        return bestVisual, bestDist
+    end
+
+    return nil
+end
+
+local function tweenOnce(target, currentVisual)
     local hrp = humanoidRootPart
     if not (hrp and hrp.Parent) then return false end
 
@@ -1242,6 +1356,7 @@ local function tweenOnce(target)
     --   (เทียบกับ "จุดที่ควรอยู่ ณ เวลานี้" ไม่ใช่ตำแหน่งที่เราเพิ่งเขียนเอง)
     local t0 = nowReal()
     local lastCheck = t0
+    local lastRetargetCheck = t0
     local bestGap = math.huge
     local noGainAt = t0
 
@@ -1256,6 +1371,25 @@ local function tweenOnce(target)
         end
 
         local now = nowReal()
+
+        -- เป้าหายกลางทาง (ถูกเก็บไปแล้ว/despawn) = ไม่ต้องเดินต่อให้เสียเวลา
+        if currentVisual and not coinIsCollectible(currentVisual) then
+            pcall(function() tween:Cancel() end)
+            if conn then pcall(function() conn:Disconnect() end) end
+            return false, nil, true
+        end
+
+        -- มีแคนดี้ใหม่ใกล้กว่าเดิมมาก = เปลี่ยนเป้าทันที ไม่ต้องรอถึงจุดเก่า
+        if currentVisual and now - lastRetargetCheck >= RETARGET_CHECK then
+            lastRetargetCheck = now
+            local better, betterDist = findBetterCoin(currentVisual, target, hrpNow.Position)
+            if better then
+                pcall(function() tween:Cancel() end)
+                if conn then pcall(function() conn:Disconnect() end) end
+                return false, better
+            end
+        end
+
         if now - lastCheck >= 1 then
             lastCheck = now
             local alpha = math.clamp((now - t0) / duration, 0, 1)
@@ -1278,7 +1412,7 @@ local function tweenOnce(target)
     return true
 end
 
-local function tweenToPosition(targetPosition)
+local function tweenToPosition(targetPosition, currentVisual)
     local attempts = 0
 
     while attempts < TWEEN_MAX_TRY do
@@ -1290,7 +1424,12 @@ local function tweenToPosition(targetPosition)
         -- ตาย/เกิดใหม่กลางทาง = อ่าน hrp ใหม่ทุกครั้ง (ตัวแปรอัปเดตใน main loop)
         if not (humanoidRootPart and humanoidRootPart.Parent) then return false end
 
-        tweenOnce(targetPosition)
+        local _, better, lost = tweenOnce(targetPosition, currentVisual)
+        if better or lost then
+            -- เปลี่ยนเป้า/เป้าหาย — คืนทันที ให้ลูปหลักเลือกใหม่จากตำแหน่งจริง
+            return false, better
+        end
+
         task.wait(0.15)
 
         -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
@@ -1319,49 +1458,53 @@ local function findCoinContainer()
     return nil
 end
 
--- เช็คว่าเหรียญยังเก็บได้อยู่ไหม
--- ใช้ logic เดียวกับ CoinVisualizer ของเกม: ดู attribute Collected/Delete
--- (ไม่ใช้ Transparency เพราะ CoinVisual ถูกตั้งเป็น 1 เป็นค่าเริ่มต้น และ attribute ไม่ถูกดัมป์)
-local function isCoinAvailable(coin)
-    local visual = coin:FindFirstChild("CoinVisual")
+-- (visualSkipUntil / coinIsCollectible ประกาศไว้ด้านบนแล้ว ก่อน tweenOnce)
 
-    if visual then
-        if visual:GetAttribute("Collected") or visual:GetAttribute("Delete") then
-            return false
-        end
-        return true
+-- ฟังก์ชันหาเหรียญที่ใกล้ที่สุด (คืน CoinVisual ไม่ใช่ Coin_Server)
+local function findNearestCoin()
+    local hrp = humanoidRootPart
+    if not (hrp and hrp.Parent) then
+        return nil, math.huge
     end
 
-    if coin:IsA("BasePart") then
-        return coin.CanTouch
+    -- แหล่งหลัก: tag เดียวกับที่ CoinVisualizer ของเกมใช้
+    local candidates = {}
+    for _, visual in ipairs(CollectionService:GetTagged("CoinVisual")) do
+        candidates[#candidates + 1] = visual
     end
 
-    return false
-end
-
--- ฟังก์ชันหาเหรียญที่ใกล้ที่สุด
-local function findNearestCoin(coins)
-    local nearestCoin = nil
-    local shortestDistance = math.huge
-
-    for _, coin in ipairs(coins) do
-        if coin and coin.Parent and (coin:IsA("BasePart") or coin:IsA("Model")) then
-            if isCoinAvailable(coin) then
-                local coinPos = coin:IsA("Model")
-                    and coin:GetPivot().Position
-                    or coin.Position
-
-                local distance = (humanoidRootPart.Position - coinPos).Magnitude
-
-                if distance < shortestDistance then
-                    shortestDistance = distance
-                    nearestCoin = coin
+    -- fallback: ถ้า tag ยังไม่มา ให้สแกนจาก CoinContainer
+    --   (ต้องมีลูก CoinVisual อยู่จริง — ช่องที่ถูกเก็บแล้วไม่มีลูก = ข้าม)
+    if #candidates == 0 then
+        local coinContainer = findCoinContainer()
+        if coinContainer then
+            for _, coin in ipairs(coinContainer:GetChildren()) do
+                local visual = coin:FindFirstChild("CoinVisual")
+                if visual then
+                    candidates[#candidates + 1] = visual
                 end
             end
         end
     end
 
-    return nearestCoin, shortestDistance
+    local nearestVisual = nil
+    local shortestDistance = math.huge
+    local hrpPos = hrp.Position
+
+    for _, visual in ipairs(candidates) do
+        if coinIsCollectible(visual) then
+            local pos = visualPos(visual)
+            if pos then
+                local distance = (hrpPos - pos).Magnitude
+                if distance < shortestDistance then
+                    shortestDistance = distance
+                    nearestVisual = visual
+                end
+            end
+        end
+    end
+
+    return nearestVisual, shortestDistance
 end
 
 -- ฟังก์ชันเปิดกล่อง Halloween จนได้ Embersickle
@@ -1377,7 +1520,7 @@ local function openHalloweenBoxes()
         local ctx = getEventContext()
 
         local keyPrice = getBoxPrice(ctx.keyName, 1)
-        local candyPrice = getBoxPrice(ctx.currencyName, 1000)
+        local candyPrice = getBoxPrice(ctx.currencyName, 600)  -- Halloween Box '26 = 600 Candies
 
         -- จำกัดจำนวนต่อรอบ กันลูปฟาร์มค้างนาน
         local maxPerRun = 30
@@ -1407,7 +1550,42 @@ local function openHalloweenBoxes()
                 break
             end
 
-            if string.find(string.lower(tostring(reward)), "embersickle") then
+            -- reward ที่เซิร์ฟเวอร์คืนมาเป็น "array ของ entry" ({ {RewardedItemId=...}, ... })
+            -- หรือ string เดี่ยว — รองรับทั้งคู่ และต้องจับ Chroma Embersickle ด้วย
+            -- (ชื่อ chroma ใน Sync = ชื่อฐาน + "Chroma" หรือ "Chroma" + ชื่อฐาน)
+            local rewardIds = {}
+            if type(reward) == "table" then
+                if reward.RewardedItemId or reward.ItemId or reward.Name then
+                    rewardIds[1] = reward.RewardedItemId or reward.ItemId or reward.Name
+                else
+                    for _, entry in pairs(reward) do
+                        if type(entry) == "table" then
+                            rewardIds[#rewardIds + 1] = entry.RewardedItemId or entry.ItemId or entry.Name
+                        elseif type(entry) == "string" then
+                            rewardIds[#rewardIds + 1] = entry
+                        end
+                    end
+                end
+            else
+                rewardIds[1] = reward
+            end
+
+            local gotEmbersickle = false
+            for _, id in ipairs(rewardIds) do
+                if isEmbersickleName(tostring(id)) then
+                    gotEmbersickle = true
+                    print("[Embersickle] ได้รับจากกล่อง: " .. tostring(id))
+                    break
+                end
+            end
+
+            if gotEmbersickle then
+                -- รอให้ inventory อัปเดตจริงก่อน (ChangeInventoryItem มาจากเซิร์ฟเวอร์)
+                -- แล้วค่อยให้ maybeSendDone เห็นของจริงในลูปถัดไป
+                for _ = 1, 20 do
+                    if refreshEmbersickle() then break end
+                    task.wait(0.1)
+                end
                 break
             end
 
@@ -1580,23 +1758,19 @@ while true do
             return
         end
 
-        -- เช็คว่าอยู่ใน Lobby หรือแมพฟาร์ม - ดูจาก EarnedXP.Visible
+        -- เช็คว่าอยู่ใน Lobby หรือแมพฟาร์ม
+        -- Menu_GUI.client.lua: EarnedXP.Visible = true เฉพาะบทบาท Innocent
+        --   บทบาทอื่น (Murderer/Sheriff) ใช้ Timer.Visible = true แทน
+        --   → ต้องเช็คทั้งคู่ ไม่งั้นรอบที่ไม่ใช่ Innocent จะไม่ฟาร์มเลย
+        -- (ของเดิมอ่าน XPText + task.wait(0.05) ทุกรอบ = บวกดีเลย์ให้ทุกการเก็บ)
         local earnedXP = gameUI:WaitForChild("EarnedXP", 5)
         if not earnedXP then
             wait(1)
             return
         end
 
-        -- เช็คเพิ่มเติมจาก Timer.XPText ว่าเปลี่ยนแปลงหรือไม่
-        local timer = gameUI:FindFirstChild("Timer")
-        local xpText = timer and timer:FindFirstChild("XPText")
-        local lastXPText = xpText and xpText.Text or ""
-
-        task.wait(0.05)
-        local currentXPText = xpText and xpText.Text or ""
-        local xpTextChanged = (lastXPText ~= currentXPText)
-
-        local inGame = earnedXP.Visible or xpTextChanged
+        local timerFrame = gameUI:FindFirstChild("Timer")
+        local inGame = earnedXP.Visible or (timerFrame ~= nil and timerFrame.Visible)
 
         if not inGame then
             character = player.Character or player.CharacterAdded:Wait()
@@ -1652,29 +1826,42 @@ while true do
             end
         else
             bagWasFull = false
-                -- ยังไม่เต็ม - ฟาร์มตามปกติ
 
-                -- หา CoinContainer
-                local coinContainer = findCoinContainer()
+            -- ยังไม่เต็ม - ฟาร์มตามปกติ
+            -- หา CoinVisual ที่ยังเก็บได้ (ไม่ใช่ Coin_Server ที่อยู่ถาวร)
+            local targetVisual = findNearestCoin()
 
-                if coinContainer then
-                    local coins = coinContainer:GetChildren()
+            -- เดินตามเป้า; ถ้าระหว่างทางเจอชิ้นที่ใกล้กว่ามากจะเปลี่ยนเป้าให้ทันที
+            --   (สูงสุด 8 ครั้ง กันวนไม่จบ)
+            for _ = 1, 8 do
+                if not targetVisual then break end
 
-                    if #coins > 0 then
-                        local nearestCoin, distance = findNearestCoin(coins)
+                local targetPos = visualPos(targetVisual)
+                if not targetPos then break end
 
-                        if nearestCoin and nearestCoin.Parent then
-                            local coinPos = nearestCoin:IsA("Model")
-                                and nearestCoin:GetPivot().Position
-                                or nearestCoin.Position
+                local reached, retarget = tweenToPosition(targetPos, targetVisual)
 
-                            tweenToPosition(coinPos)
+                if retarget then
+                    targetVisual = retarget
+                else
+                    -- ถึงแล้ว: รอสั้นๆ ให้เกมเก็บของ (Collected/Delete)
+                    -- ถ้ายังเก็บได้อยู่ = เป้านี้เอาไม่ได้ (ติด/อยู่ไกลเกิน) → ข้ามชั่วคราว
+                    if reached then
+                        local waited = 0
+                        while waited < 0.25 and coinIsCollectible(targetVisual) do
+                            task.wait(0.05)
+                            waited = waited + 0.05
                         end
                     end
-                else
-                    task.wait(0.1)
+                    -- ถึงหรือไม่ถึง ก็ข้ามชิ้นนี้ชั่วคราวถ้ายังเก็บได้
+                    --   กันลูปจมอยู่กับเหรียญที่เอาไม่ได้ (ติดกำแพง/อยู่นอกระยะ)
+                    if targetVisual.Parent and coinIsCollectible(targetVisual) then
+                        visualSkipUntil[targetVisual] = nowReal() + 1
+                    end
+                    break
                 end
             end
+        end
     end)
 
     if not success then
