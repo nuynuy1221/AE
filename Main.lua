@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.8 (Halloween Event)")
+print("Version 1.0.7 (Halloween Event)")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -32,6 +32,16 @@ Config.CoinsBox = Config.CoinsBox or nil
 --                               • ติดลบได้ (สำหรับทดสอบ) แต่หัวจะหลุดจาก hitbox → เก็บไม่ได้
 Config.SinkDepth = tonumber(Config.SinkDepth) or 20
 Config.CollectPenetration = tonumber(Config.CollectPenetration) or 0
+
+-- ── โหมด "แตะแล้วมุด" (pulse) ─────────────────────────────────────────
+--   เซิร์ฟเวอร์เช็ก Touch บน Coin_Server เอง → ขยาย hitbox ฝั่ง client ไม่มีผล
+--   วิธีที่ใกล้เคียงที่สุด: ซ่อนตัวต่ำกว่าจุดแตะ แล้วยกหัวขึ้นไปแตะสั้น ๆ
+--   Config.CollectRestDrop = ระยะที่ซ่อนต่ำกว่าจุดแตะ (studs) — 0 = ปิดโหมดนี้
+--   Config.TouchHold       = เวลาที่หัวอยู่ใน hitbox ต่อครั้ง (วินาที)
+--   Config.TouchTries      = ลองกี่ครั้งต่อเหรียญถ้าเซิร์ฟเวอร์ยังไม่รับ
+Config.CollectRestDrop = tonumber(Config.CollectRestDrop) or 3
+Config.TouchHold = tonumber(Config.TouchHold) or 0.12
+Config.TouchTries = tonumber(Config.TouchTries) or 3
 
 -- ถ้าเปิด Horst ให้โหลด script
 -- ⚠ ต้องกรอง print ก่อนโหลด on_loaded.lua เพราะโค้ดอาจจับค่า print ไปตั้งแต่ตอนโหลด
@@ -89,12 +99,16 @@ local SINK_DEPTH = math.clamp(Config.SinkDepth, 5, 200)
 -- ต้องสูงตรงระดับเป๊ะ: คลาดได้ไม่เกินส่วนที่ยังทำให้หัวโดน hitbox
 --   (ถ้าตั้ง TOUCH_EPS = 0 ต้องไม่คลาดลงเลย ไม่งั้นหัวจะไม่แตะ)
 local TWEEN_ARRIVE_Y = math.min(0.04, math.max(0.01, TOUCH_EPS))
+-- โหมดแตะแล้วมุด: ซ่อนต่ำกว่าจุดแตะ REST_DROP studs, แตะครั้งละ TOUCH_HOLD วิ
+local REST_DROP = math.clamp(Config.CollectRestDrop, 0, 50)
+local TOUCH_HOLD = math.clamp(Config.TouchHold, 0.05, 1)
+local TOUCH_TRIES = math.clamp(math.floor(Config.TouchTries), 1, 10)
 local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
-local COLLECT_CHAIN_DELAY = 0.05 -- เว้นจังหวะก่อนออกไปเก็บเหรียญชิ้นถัดไป
+local COLLECT_CHAIN_DELAY = 0 -- เว้นจังหวะก่อนออกไปเก็บเหรียญชิ้นถัดไป
 
 -- ── สถานะการซ่อนตัว / ล็อคตำแหน่ง ──────────────────────────────────
---   เก็บเหรียญด้วย "หัว": วาง HRP ใต้เหรียญ ให้ "ขอบบนของหัว"
---   ชนกับ "ขอบล่างของ hitbox เหรียญ" พอดี (เว้น TOUCH_EPS) → ตัวจมใต้พื้น
+--   เก็บเหรียญด้วย "หัว": ไปซ่อนใต้เหรียญ (ต่ำกว่าจุดแตะ REST_DROP)
+--   แล้ว "pulse" ยกหัวขึ้นไปแตะขอบล่าง hitbox เหรียญ (เว้น TOUCH_EPS) สั้น ๆ
 --   กันตกด้วย hrp.Anchored (ไม่เขียน CFrame ทุกเฟรมแล้ว)
 local headLift = DEFAULT_HEAD_LIFT -- Head สูงกว่า HRP กี่ studs (วัดจากตัวจริง)
 local headHalf = DEFAULT_HEAD_HALF -- ครึ่งความสูงของหัว (วัดจากตัวจริง)
@@ -1408,12 +1422,17 @@ local function headTargetY(coinY)
     return coinY - COIN_TRIGGER_HALF + TOUCH_EPS - headHalf - headLift
 end
 
+-- จุด "ซ่อน" ระหว่างรอ/รอ ack — ต่ำกว่าจุดแตะ REST_DROP studs
+local function restTargetY(coinY)
+    return headTargetY(coinY) - REST_DROP
+end
+
 local function arrivedAt(target)
     local hrp = humanoidRootPart
     if not (hrp and hrp.Parent) then return false end
     local p = hrp.Position
     local dxz = Vector3.new(target.X - p.X, 0, target.Z - p.Z).Magnitude
-    local dy = math.abs(headTargetY(target.Y) - p.Y)
+    local dy = math.abs(restTargetY(target.Y) - p.Y)
     return (dxz <= TWEEN_ARRIVE_XZ and dy <= TWEEN_ARRIVE_Y), dxz, dy
 end
 
@@ -1507,8 +1526,8 @@ local function tweenOnce(target, currentVisual)
     local from = hrp.Position
 
     -- ── เก็บด้วย "หัว" (ตัวละครอยู่ใต้ดิน) ─────────────────────────────
-    -- ขอบบนหัวชนขอบล่าง hitbox เหรียญแค่ TOUCH_EPS → ตัวจมใต้พื้น
-    local goalY = headTargetY(target.Y)
+    -- ไปที่จุดซ่อน (ต่ำกว่าจุดแตะ REST_DROP) ก่อน แล้วค่อย "pulse" ขึ้นไปแตะ
+    local goalY = restTargetY(target.Y)
     local goal = Vector3.new(target.X, goalY, target.Z)
 
     local distance = (goal - from).Magnitude
@@ -1655,6 +1674,71 @@ local function tweenToPosition(targetPosition, currentVisual)
     end)
     setAnchor(true)
 
+    return false
+end
+
+-- ── Pulse: ยกหัวขึ้นไปแตะ hitbox แล้วกลับลงไปซ่อน ──────────────────────
+--   การเก็บเป็น Touch ฝั่งเซิร์ฟเวอร์บน Coin_Server (CanTouch=true, Anchored=true)
+--   → ขยาย hitbox ฝั่ง client ไม่ replicate ไปเซิร์ฟเวอร์ จึงไม่มีผล
+--   → ต้องให้หัวเข้าไปแตะจริงนานพอที่ position จะ replicate ถึงเซิร์ฟเวอร์
+--     แล้วค่อยกลับลงไปซ่อน ลดเวลาที่โผล่เหนือพื้นเหลือเฉพาะช่วงสั้น ๆ ต่อเหรียญ
+local function touchPulse(target)
+    local hrp = humanoidRootPart
+    if not (hrp and hrp.Parent) then return end
+
+    local touchY = headTargetY(target.Y)
+    local restY = touchY - REST_DROP
+
+    -- หันหน้าเดิม (yaw) และตั้งตัวตรง เหมือนตอน tween
+    local look = hrp.CFrame.LookVector
+    look = Vector3.new(look.X, 0, look.Z)
+    if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+    look = look.Unit
+
+    local upPos = Vector3.new(target.X, touchY, target.Z)
+    local downPos = Vector3.new(target.X, restY, target.Z)
+    local upCF = CFrame.lookAt(upPos, upPos + look)
+    local downCF = CFrame.lookAt(downPos, downPos + look)
+
+    pcall(function() hrp.Anchored = false end)
+
+    -- ปัก CFrame ทุก Heartbeat ระหว่าง hold กันแรงโน้มถ่วงดึงหัวหลุดจาก hitbox
+    local t0 = os.clock()
+    repeat
+        hrp.CFrame = upCF
+        RunService.Heartbeat:Wait()
+    until os.clock() - t0 >= TOUCH_HOLD
+
+    -- กลับลงไปจุดซ่อน แล้ว Anchor (1 เฟรมให้ตำแหน่ง replicate ก่อน)
+    hrp.CFrame = downCF
+    RunService.Heartbeat:Wait()
+    pcall(function() hrp.Anchored = true end)
+end
+
+-- รอ CoinCollected หรือสถานะ Collected สูงสุด COLLECT_ACK_WAIT
+local function waitForCollect(currentVisual, serialBefore)
+    local deadline = nowReal() + COLLECT_ACK_WAIT
+    while nowReal() < deadline do
+        if collectSerial ~= serialBefore then return true end
+        if not coinIsCollectible(currentVisual) then return true end
+        task.wait(0.02)
+    end
+    return (collectSerial ~= serialBefore) or not coinIsCollectible(currentVisual)
+end
+
+-- แตะแล้วมุด; ถ้าเซิร์ฟเวอร์ยังไม่รับ ลองซ้ำ (สูงสุด TOUCH_TRIES)
+local function collectWithPulse(target, currentVisual, serialBefore)
+    if REST_DROP < 0.01 then
+        -- ปิดโหมด pulse → อยู่ที่จุดแตะแล้วรอ ack เหมือนเดิม
+        return waitForCollect(currentVisual, serialBefore)
+    end
+
+    for _ = 1, TOUCH_TRIES do
+        if collectSerial ~= serialBefore then return true end
+        if not coinIsCollectible(currentVisual) then return true end
+        touchPulse(target)
+        if waitForCollect(currentVisual, serialBefore) then return true end
+    end
     return false
 end
 
@@ -2329,21 +2413,12 @@ while true do
                     -- เป้าหายกลางทาง (ถูกเก็บไปแล้ว ไม่ว่าใครเก็บ) → เลือกชิ้นถัดไปทันที
                     targetVisual = findNearestCoin()
                 else
-                    -- ถึงแล้ว: "เก็บปุ๊บ ไปปั๊บ"
+                    -- ถึงจุดซ่อนแล้ว: ยกหัวขึ้นไปแตะ hitbox สั้น ๆ (pulse) แล้วมุดกลับลงมา
                     --   รอ CoinCollected (สัญญาณจากเซิร์ฟเวอร์ว่าเก็บสำเร็จ) แค่สั้นๆ
                     --   ถ้าเกมทำเครื่องหมาย Collected/Delete แล้ว ก็ไปต่อได้ทันทีเช่นกัน
                     local gotIt = false
                     if reached then
-                        local deadline = nowReal() + COLLECT_ACK_WAIT
-                        while nowReal() < deadline do
-                            if collectSerial ~= serialBefore then break end
-                            if not coinIsCollectible(targetVisual) then break end
-                            task.wait(0.02)
-                        end
-
-                        -- สำเร็จเมื่อ: remote ยืนยัน (ของเข้ากระเป๋า) หรือเกมทำเครื่องหมายว่าเก็บแล้ว
-                        gotIt = (collectSerial ~= serialBefore)
-                            or not coinIsCollectible(targetVisual)
+                        gotIt = collectWithPulse(targetPos, targetVisual, serialBefore)
                     end
 
                     if gotIt then
