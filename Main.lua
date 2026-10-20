@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.7 (Halloween Event)")
+print("Version 1.0.7 (Halloween Event 1)")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -84,6 +84,7 @@ local headHalf = DEFAULT_HEAD_HALF -- ครึ่งความสูงขอ
 local lobbyLock = false            -- อยู่ใน Lobby = true → ล็อคตัวไว้ใต้พื้น
 local lobbyPin = nil               -- CFrame ที่ล็อคใน Lobby
 local lobbyPinChar = nil           -- character ที่ผูกกับ lobbyPin
+local farmSinkChar = nil           -- character ที่ "มุดใต้ดินเตรียมไว้" แล้วในแมพฟาร์ม
 local MAX_FAILED_COLLECTS = 10 -- ไปถึงแล้วของไม่เข้าติดกันกี่ครั้ง = ถือว่ากระเป๋าเต็ม (fallback)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
@@ -1468,31 +1469,13 @@ local function findBetterCoin(currentVisual, currentPos, hrpPos)
 end
 
 -- ── กันตกด้วย Anchored ───────────────────────────────────────────────
---   ระหว่าง tween = ปลด Anchor (ให้ตำแหน่งถูก replicate ตอนเดินทาง)
---   ถึงเป้า/หยุดรอ = Anchor ไว้ที่ตำแหน่งเดิม (ไม่ต้องเขียน CFrame ทุกเฟรม)
+--   ระหว่าง tween = ปลด Anchor ให้ TweenService คุม CFrame เอง
+--   ถึงเป้า/หยุดรอ = Anchor ทันที (ไม่มีการเขียน CFrame ปักตำแหน่งระหว่างรอ)
 local function setAnchor(on)
     local hrp = humanoidRootPart
     if hrp and hrp.Parent then
         pcall(function() hrp.Anchored = on end)
     end
-end
-
--- Anchor ทันทีหลัง tween อาจทำให้เซิร์ฟเวอร์ไม่เห็น CFrame สุดท้าย
---   (พอ Anchor ฝั่ง client จะหยุดส่งตำแหน่งให้เซิร์ฟเวอร์)
---   → ปัก CFrame ที่เป้าไว้ ~0.1 วิ ให้ตำแหน่ง replicate ไปถึงก่อน แล้วค่อย Anchor
-local function settleAndAnchor()
-    local hrp = humanoidRootPart
-    if not (hrp and hrp.Parent) then return end
-    pcall(function() hrp.Anchored = false end)
-    local cf = hrp.CFrame
-    local t0 = nowReal()
-    while nowReal() - t0 < 0.1 do
-        local hrpNow = humanoidRootPart
-        if not (hrpNow and hrpNow.Parent) then return end
-        hrpNow.CFrame = cf
-        RunService.Heartbeat:Wait()
-    end
-    setAnchor(true)
 end
 
 local function tweenOnce(target, currentVisual)
@@ -1511,9 +1494,14 @@ local function tweenOnce(target, currentVisual)
 
     local distance = (goal - from).Magnitude
 
-    -- เก็บทิศหันเดิม ไม่ให้ CFrame.new() รีเซ็ตการ rotation
-    local rot = hrp.CFrame - hrp.CFrame.Position
-    local goalCFrame = CFrame.new(goal) * rot
+    -- เก็บเฉพาะการหัน (yaw) และบังคับให้ตัวตั้งตรง —
+    --   ถ้าคัดลอก CFrame เดิมทั้งก้อน อาการเอียง/หมุนจากฟิสิกส์จะติดไปทุก tween
+    local look = hrp.CFrame.LookVector
+    look = Vector3.new(look.X, 0, look.Z)
+    if look.Magnitude < 0.01 then
+        look = Vector3.new(0, 0, -1)
+    end
+    local goalCFrame = CFrame.lookAt(goal, goal + look.Unit)
 
     if distance < 0.03 then
         pcall(function()
@@ -1605,8 +1593,8 @@ local function tweenToPosition(targetPosition, currentVisual)
         attempts = attempts + 1
 
         if arrivedAt(targetPosition) then
-            -- อยู่จุดเก็บแล้ว → ปักตำแหน่งให้เซิร์ฟเวอร์เห็น แล้ว Anchor ล็อค
-            settleAndAnchor()
+            -- อยู่จุดเก็บแล้ว → Anchor ล็อคทันที
+            setAnchor(true)
             return true
         end
 
@@ -1626,8 +1614,8 @@ local function tweenToPosition(targetPosition, currentVisual)
 
         -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
         if arrivedAt(targetPosition) then
-            -- ปัก CFrame ใต้ดินให้ replicate ถึงเซิร์ฟเวอร์ก่อน แล้ว Anchor
-            settleAndAnchor()
+            -- Anchor ทันที ไม่ต้องปัก CFrame ซ้ำ
+            setAnchor(true)
             return true
         end
 
@@ -1678,6 +1666,76 @@ local function updateLobbyAnchor()
             hrp.Anchored = true
         end)
     end
+end
+
+-- ── Noclip เฉพาะในแมพฟาร์ม ────────────────────────────────────────────
+--   ตัวละครถูกวางใต้พื้น → ถ้ายังชนพื้นอยู่ฟิสิกส์จะดัน/บิดตัว (อาการหมุน)
+--   ปิด CanCollide ทุกชิ้น (ฝั่ง client เท่านั้น ไม่ replicate) + หยุดการหมุน
+local noclipConn = nil
+local noclipSaved = setmetatable({}, { __mode = "k" }) -- part ที่เราเปลี่ยน CanCollide
+
+local function startNoclip()
+    if noclipConn then return end
+    noclipConn = RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        if not char then return end
+
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                noclipSaved[part] = true
+                pcall(function() part.CanCollide = false end)
+            end
+        end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.AutoRotate then
+            pcall(function() hum.AutoRotate = false end)
+        end
+
+        -- กันความเร็วเชิงมุมสะสมตอนปลด Anchor ระหว่าง tween
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp and not hrp.Anchored then
+            pcall(function()
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+    end)
+end
+
+local function stopNoclip()
+    if not noclipConn then return end
+    pcall(function() noclipConn:Disconnect() end)
+    noclipConn = nil
+
+    -- คืนค่า CanCollide เฉพาะชิ้นที่เราเปลี่ยนไป (ไม่แตะชิ้นที่ไม่เคยชน)
+    for part in pairs(noclipSaved) do
+        if part.Parent then
+            pcall(function() part.CanCollide = true end)
+        end
+    end
+    noclipSaved = setmetatable({}, { __mode = "k" })
+
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum.AutoRotate = true end)
+    end
+end
+
+-- ── มุดใต้ดินทันทีที่เริ่มเข้าแมพฟาร์ม ─────────────────────────────────
+--   TP ลงใต้ตัวเอง 10 studs แล้ว Anchor (ปัก CFrame 3 เฟรมให้ replicate ก่อน)
+local function sinkUnderFarm()
+    local hrp = humanoidRootPart
+    if not (hrp and hrp.Parent) then return end
+
+    local cf = hrp.CFrame - Vector3.new(0, 10, 0)
+    pcall(function() hrp.Anchored = false end)
+    for _ = 1, 3 do
+        if not (hrp and hrp.Parent) then return end
+        hrp.CFrame = cf
+        RunService.Heartbeat:Wait()
+    end
+    pcall(function() hrp.Anchored = true end)
 end
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
@@ -2027,6 +2085,8 @@ while true do
         if not inGame then
             -- อยู่ใน Lobby → TP ลงใต้ตัวเอง 10 studs แล้ว Anchor ไว้
             lobbyLock = true
+            farmSinkChar = nil
+            stopNoclip()
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
             updateLobbyAnchor()
@@ -2047,6 +2107,15 @@ while true do
 
         character = player.Character or player.CharacterAdded:Wait()
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+        -- Noclip ตลอดเวลาที่อยู่ในแมพฟาร์ม (กันพื้นดัน/บิดตัวจนหมุน)
+        startNoclip()
+
+        -- เพิ่งเข้าแมพ / respawn ในแมพฟาร์ม → มุดใต้ดินรอทันที
+        if farmSinkChar ~= character then
+            farmSinkChar = character
+            sinkUnderFarm()
+        end
 
         local coinBags = gameUI:FindFirstChild("CoinBags")
         if not coinBags then task.wait(0.1) return end
