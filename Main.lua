@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.8 (Halloween Event 2)")
+print("Version 1.0.8 (Halloween Event)")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -22,6 +22,16 @@ Config.Embersickle = Config.Embersickle == true
 --   KnifeBox1, KnifeBox2, KnifeBox3, KnifeBox4, KnifeBox5
 --   MLG Box, GunBox1, GunBox2, GunBox3
 Config.CoinsBox = Config.CoinsBox or nil
+
+-- ── ความต่ำของตัวละคร (ปรับเองได้) ────────────────────────────────────
+--   Config.SinkDepth          = ความลึกที่มุดใต้ดินตอนรอ/เข้าแมพ (studs, ค่าเริ่มต้น 20)
+--                               ใช้ทั้งในแมพฟาร์มและ Lobby — ยิ่งมากยิ่งจมลึก
+--   Config.CollectPenetration = ระยะที่ "ขอบบนหัว" จมเข้า "ขอบล่าง hitbox เหรียญ" ตอนเก็บ
+--                               ค่าเริ่มต้น 0.05 (แตะพอให้ Touched ทำงาน)
+--                               • ยิ่งน้อย = ตัวละครยิ่งต่ำ (ต่ำสุดที่ยังเก็บได้คือ 0)
+--                               • ติดลบได้ (สำหรับทดสอบ) แต่หัวจะหลุดจาก hitbox → เก็บไม่ได้
+Config.SinkDepth = tonumber(Config.SinkDepth) or 20
+Config.CollectPenetration = tonumber(Config.CollectPenetration) or 0
 
 -- ถ้าเปิด Horst ให้โหลด script
 -- ⚠ ต้องกรอง print ก่อนโหลด on_loaded.lua เพราะโค้ดอาจจับค่า print ไปตั้งแต่ตอนโหลด
@@ -67,11 +77,18 @@ local SPEED = Config.TweenSpeed or 25
 local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง tween ซ้ำถ้ายังไม่ถึงเป้า
 local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
 local TWEEN_ARRIVE_XZ = 0.6    -- ต้องอยู่เหนือเหรียญจริง (hitbox กว้าง 0.689 + ครึ่งหัว)
-local TWEEN_ARRIVE_Y = 0.04    -- ต้องสูงตรงระดับเป๊ะ: คลาดขึ้น/ลงได้ไม่เกิน TOUCH_EPS
 local DEFAULT_HEAD_LIFT = 1.2  -- ระยะ Head สูงกว่า HRP (ค่าเริ่มต้น — วัดจริงตอน respawn)
 local DEFAULT_HEAD_HALF = 0.59 -- ครึ่งความสูงหัว (ค่าเริ่มต้น — วัดจริงตอน respawn)
 local COIN_TRIGGER_HALF = 0.9395 -- ครึ่งความสูงกล่อง Coin_Server (1.879/2)
-local TOUCH_EPS = 0.05         -- ให้ขอบหัวจมเข้าขอบล่าง trigger แค่พอโดน (ไม่ใช่ตัวชนแคนดี้)
+-- ขอบหัวจมเข้าขอบล่าง trigger แค่พอโดน (ปรับได้จาก Config.CollectPenetration)
+--   0 = ตัวต่ำสุดที่ยังเก็บได้, มากกว่านั้น = ตัวสูงขึ้น
+--   ค่าติดลบ = ตัวต่ำลงอีก แต่หัวหลุดจาก hitbox → ใช้ทดสอบเท่านั้น
+local TOUCH_EPS = math.clamp(Config.CollectPenetration, -5, 1.5)
+-- ความลึกที่มุดใต้ดิน (ปรับได้จาก Config.SinkDepth)
+local SINK_DEPTH = math.clamp(Config.SinkDepth, 5, 200)
+-- ต้องสูงตรงระดับเป๊ะ: คลาดได้ไม่เกินส่วนที่ยังทำให้หัวโดน hitbox
+--   (ถ้าตั้ง TOUCH_EPS = 0 ต้องไม่คลาดลงเลย ไม่งั้นหัวจะไม่แตะ)
+local TWEEN_ARRIVE_Y = math.min(0.04, math.max(0.01, TOUCH_EPS))
 local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
 local COLLECT_CHAIN_DELAY = 0.05 -- เว้นจังหวะก่อนออกไปเก็บเหรียญชิ้นถัดไป
 
@@ -1643,7 +1660,7 @@ end
 
 -- ── ล็อคตำแหน่งใน Lobby ───────────────────────────────────────────────
 --   ระบุใน main loop (ทุกรอบ) — ไม่ใช้ Heartbeat เขียน CFrame ทุกเฟรมแล้ว
---   lobbyLock = อยู่ใน Lobby → TP ลงใต้ตัวเอง 10 studs แล้ว Anchor ไว้
+--   lobbyLock = อยู่ใน Lobby → TP ลงใต้ตัวเอง SINK_DEPTH studs แล้ว Anchor ไว้
 --   ปลด Anchor เมื่อเข้าแมพฟาร์ม (main loop จัดการ)
 local function updateLobbyAnchor()
     if not lobbyLock then return end
@@ -1652,9 +1669,9 @@ local function updateLobbyAnchor()
     if not hrp then return end
 
     if lobbyPinChar ~= char then
-        -- ตัวใหม่/respawn ใน Lobby → TP ลงใต้ตัวเอง 10 studs
+        -- ตัวใหม่/respawn ใน Lobby → TP ลงใต้ตัวเอง SINK_DEPTH studs
         lobbyPinChar = char
-        lobbyPin = hrp.CFrame - Vector3.new(0, 10, 0)
+        lobbyPin = hrp.CFrame - Vector3.new(0, SINK_DEPTH, 0)
         -- ปัก CFrame 2-3 เฟรมให้ตำแหน่ง replicate ก่อน แล้วค่อย Anchor
         for _ = 1, 3 do
             if not (hrp and hrp.Parent) then return end
@@ -1728,7 +1745,8 @@ local function stopNoclip()
 end
 
 -- ── มุดใต้ดินทันทีที่เริ่มเข้าแมพฟาร์ม ─────────────────────────────────
---   TP ลงใต้ตัวเอง 10 studs แล้ว Anchor (ปัก CFrame 3 เฟรมให้ replicate ก่อน)
+--   TP ลงใต้ตัวเอง SINK_DEPTH studs แล้ว Anchor (ปัก CFrame 3 เฟรมให้ replicate ก่อน)
+--   SINK_DEPTH ปรับได้จาก Config.SinkDepth (ยิ่งมาก = จมลึกขึ้น, tween เหรียญแรกไกลขึ้น)
 local function sinkUnderFarm()
     local hrp = humanoidRootPart
     if not (hrp and hrp.Parent) then return end
@@ -1739,7 +1757,7 @@ local function sinkUnderFarm()
         return
     end
 
-    local cf = hrp.CFrame - Vector3.new(0, 10, 0)
+    local cf = hrp.CFrame - Vector3.new(0, SINK_DEPTH, 0)
     pcall(function() hrp.Anchored = false end)
     for _ = 1, 3 do
         if not (hrp and hrp.Parent) then return end
@@ -2189,7 +2207,7 @@ while true do
                 -- แมพฟาร์มโหลดแล้ว แต่ยังไม่ได้รับ event (โหลดกลางรอบ) → มุดทันที
                 enterFarm()
             else
-                -- อยู่ใน Lobby จริงๆ → TP ลงใต้ตัวเอง 10 studs แล้ว Anchor ไว้
+                -- อยู่ใน Lobby จริงๆ → TP ลงใต้ตัวเอง SINK_DEPTH studs แล้ว Anchor ไว้
                 lobbyLock = true
                 farmSinkChar = nil
                 farmSinkCF = nil
