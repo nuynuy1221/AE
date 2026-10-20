@@ -1522,11 +1522,33 @@ local function tweenOnce(target, currentVisual)
     end
     local goalCFrame = CFrame.lookAt(goal, goal + look.Unit)
 
-    if distance < 0.03 then
+    local function zeroVel()
         pcall(function()
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
+            if hrp and hrp.Parent then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end
         end)
+    end
+
+    -- ── "วางเป๊ะ" ปิดท้าย tween ────────────────────────────────────────
+    --   TweenService วางตำแหน่งสุดท้ายเสร็จ แต่กว่าเราจะรู้จาก Completed
+    --   ตัวละครถูกฟิสิกส์ (แรงโน้มถ่วง) ดึงลงไปแล้ว 1 เฟรม — ที่ FPS ต่ำดิ่งมาก
+    --   → ที่ TOUCH_EPS = 0 หัวหลุดจาก hitbox ทั้งที่ tween "ถึงเป้าแล้ว"
+    --   → arrivedAt ล้มเหลว → retry 0.08 วิ x2 = อาการสะดุด 0.2–0.3 วิ
+    --   แก้: เขียน CFrame เป๊ะคืนทันที (ไม่ yield) แล้วปักค้างสั้นๆ ก่อน Anchor
+    local function snapGoal()
+        zeroVel()
+        pcall(function()
+            if hrp and hrp.Parent then
+                hrp.CFrame = goalCFrame
+            end
+        end)
+        zeroVel()
+    end
+
+    if distance < 0.03 then
+        snapGoal()
         return true
     end
 
@@ -1545,16 +1567,25 @@ local function tweenOnce(target, currentVisual)
     conn = tween.Completed:Connect(function() done = true end)
     tween:Play()
 
-    -- ตัวจับค้าง: ถ้าตำแหน่งจริงไม่เข้าใกล้เป้าเลยใน TWEEN_STUCK_SEC = ปล่อย
-    --   (เทียบกับ "จุดที่ควรอยู่ ณ เวลานี้" ไม่ใช่ตำแหน่งที่เราเพิ่งเขียนเอง)
+    -- ── ตัวจับค้าง / ตัวจับ "เซิร์ฟไม่รับตำแหน่ง" (แบบเดียวกับ Fishing Master) ──
+    --   เทียบกับ "จุดที่ควรอยู่ ณ เวลานี้" (from:Lerp(goal, alpha จากเวลาจริง))
+    --   ไม่ใช่ตำแหน่งที่เราเพิ่งเขียนเอง — ไม่งั้นตัวจับจะมองไม่เห็นการค้าง
+    --   frameElapsed = เวลาเฟรมสะสม (จำกัดเฟรมละ 0.1 วิ) ใช้ชดเชยตอน FPS ตก:
+    --     TweenService เดินตามเฟรม แต่ nowReal เดินตามเวลาจริง
+    --     → ยอมให้ตำแหน่งจริง "ตามหลังนาฬิกา" ได้เท่ากับที่ tween ล่าช้า
     local t0 = nowReal()
     local lastCheck = t0
     local lastRetargetCheck = t0
     local bestGap = math.huge
     local noGainAt = t0
+    local frameElapsed = 0
 
     while not done do
-        task.wait(0.05)
+        -- รอ "ทีละเฟรม" (ของเดิม task.wait(0.05) — ที่ FPS ต่ำคือรอหลายเฟรม
+        --   กว่าจะรู้ว่า tween จบ = ไปเก็บชิ้นถัดไปช้าโดยไม่จำเป็น)
+        local dt = RunService.Heartbeat:Wait()
+        frameElapsed = frameElapsed + math.min(tonumber(dt) or 0.1, 0.1)
+        if done then break end
 
         local hrpNow = humanoidRootPart
         if not (hrpNow and hrpNow.Parent) then
@@ -1562,6 +1593,9 @@ local function tweenOnce(target, currentVisual)
             if conn then pcall(function() conn:Disconnect() end) end
             return false
         end
+
+        -- กันแรงโน้มถ่วง/ความเร็วเชิงมุมสะสมระหว่างเดินทาง (เหมือน Fishing Master)
+        zeroVel()
 
         local now = nowReal()
 
@@ -1589,6 +1623,17 @@ local function tweenOnce(target, currentVisual)
             local want = from:Lerp(goal, alpha)
             local gap = (hrpNow.Position - want).Magnitude
 
+            -- ตำแหน่งจริงตามหลังนาฬิกาได้เท่าที่ tween ล่าช้า (FPS ตก) + เผื่อ 1 วิ
+            local lagSec = math.max(0, (now - t0) - frameElapsed)
+            local allow = SPEED * (1 + lagSec) + 2
+
+            if gap > allow then
+                -- ตัวละครไม่ขยับตามที่ tween สั่ง (ถูกดึงกลับ/ติดอะไร) = เลิก
+                pcall(function() tween:Cancel() end)
+                if conn then pcall(function() conn:Disconnect() end) end
+                return false
+            end
+
             if gap < bestGap - 0.5 then
                 bestGap = gap
                 noGainAt = now
@@ -1602,6 +1647,19 @@ local function tweenOnce(target, currentVisual)
     end
 
     if conn then pcall(function() conn:Disconnect() end) end
+    -- ── ปักตำแหน่งเป๊ะค้างไว้ ~50 ms (1 network tick) ก่อน Anchor ──────────
+    --   ทำไมต้องรอ: ตำแหน่งสุดท้ายของ tween ต้องถึงเซิร์ฟเวอร์ก่อนเราตรึงตัว
+    --     (Anchor ฝั่ง client = หยุดส่งตำแหน่ง) ไม่งั้นเซิร์ฟเวอร์เห็นจุดก่อนถึงเป้า
+    --     แล้วที่ TOUCH_EPS = 0 หัวจะไม่แตะ hitbox → เก็บไม่ติด
+    --   ทำไมต้องเขียนซ้ำทุกเฟรม: ถ้าปล่อยฟิสิกส์จะดึงตัวลง 1 เฟรม (ที่ FPS ต่ำดิ่งมาก)
+    --     หัวหลุด hitbox → arrivedAt ล้มเหลว → retry 0.08 วิ x2 = สะดุด 0.2–0.3 วิ
+    --   ใช้ "เวลาจริง" เป็นเพดาน (ไม่ใช่จำนวนเฟรม): FPS ต่ำ = จบใน 1 เฟรม ไม่ยืด
+    snapGoal()
+    local tDone = nowReal()
+    while nowReal() - tDone < 0.05 do
+        RunService.Heartbeat:Wait()
+        snapGoal()
+    end
     return true
 end
 
@@ -1640,9 +1698,10 @@ local function tweenToPosition(targetPosition, currentVisual)
 
         -- รอบนี้ "ไม่ถึงเป้า" (เส้นทางปกติจะไม่มาถึงตรงนี้) → พักสั้นๆ ก่อนยิงใหม่
         --   ยิง CFrame ซ้ำติดกันทุกเฟรมตอนไปไม่ถึง = ตัวสั่นรัว ไม่มีประโยชน์
+        --   พักแค่ 1 เฟรม (ของเดิม 0.08 วิ x2 = สะดุด 0.16 วิต่อชิ้น)
         if attempts < TWEEN_MAX_TRY then
             setAnchor(true)
-            task.wait(0.08)
+            RunService.Heartbeat:Wait()
         end
     end
 
@@ -2338,7 +2397,7 @@ while true do
                         while nowReal() < deadline do
                             if collectSerial ~= serialBefore then break end
                             if not coinIsCollectible(targetVisual) then break end
-                            task.wait(0.02)
+                            RunService.Heartbeat:Wait()
                         end
 
                         -- สำเร็จเมื่อ: remote ยืนยัน (ของเข้ากระเป๋า) หรือเกมทำเครื่องหมายว่าเก็บแล้ว
@@ -2355,8 +2414,10 @@ while true do
                         -- เก็บชิ้นนี้แล้วกระเป๋าเต็มพอดี → หยุดเก็บทันที (ไม่ไปชิ้นถัดไปให้เสียเวลา)
                         local _, nowFull = readBag()
                         if nowFull then break end
-                        -- เว้นจังหวะสั้นๆ ก่อนไปชิ้นถัดไป
-                        task.wait(COLLECT_CHAIN_DELAY)
+                        -- เว้นจังหวะสั้นๆ ก่อนไปชิ้นถัดไป (ถ้าตั้งไว้)
+                        if COLLECT_CHAIN_DELAY > 0 then
+                            task.wait(COLLECT_CHAIN_DELAY)
+                        end
                         -- ไปชิ้นถัดไปทันที (ไม่กลับไปเริ่มลูปหลัก)
                         targetVisual = findNearestCoin()
                     else
