@@ -67,10 +67,25 @@ local SPEED = Config.TweenSpeed or 25
 local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง tween ซ้ำถ้ายังไม่ถึงเป้า
 local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
 local TWEEN_ARRIVE_XZ = 1.5    -- ต้องแตะจริง (HRP 2 + กล่อง Coin_Server 1.378 → แตะได้ที่ระยะ ≤ 1.69)
-local TWEEN_ARRIVE_Y = 3       -- tolerance แนวตั้ง (ยืนปกติ HRP สูงกว่าจุดกึ่งกลางเหรียญ ~1.8)
-local STAND_LIFT = 1.8         -- ตอนยืน HRP อยู่สูงกว่าจุดกึ่งกลางเหรียญกี่ studs
-local LEVEL_BAND = 1.2         -- ต่างจากระดับยืนไม่เกินนี้ = พื้นระดับเดียวกัน
+local TWEEN_ARRIVE_Y = 1.5     -- หัวต้องอยู่ใกล้ระดับเหรียญจริง (ตัวจมใต้ดิน)
+local DEFAULT_HEAD_LIFT = 1.2  -- ระยะ Head สูงกว่า HRP (ค่าเริ่มต้น — วัดจริงตอน respawn)
+local DEFAULT_HEAD_HALF = 0.59 -- ครึ่งความสูงหัว (ค่าเริ่มต้น — วัดจริงตอน respawn)
+local COIN_TRIGGER_HALF = 0.9395 -- ครึ่งความสูงกล่อง Coin_Server (1.879/2)
+local TOUCH_MARGIN = 0.45      -- ให้หัวโผล่พ้นระดับ trigger แค่นิดเดียว (ยิ่งน้อย = ยิ่งซ่อน)
 local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
+local COLLECT_CHAIN_DELAY = 0.05 -- เว้นจังหวะก่อนออกไปเก็บเหรียญชิ้นถัดไป
+
+-- ── สถานะการซ่อนตัว / ล็อคตำแหน่ง ──────────────────────────────────
+--   เก็บเหรียญด้วย "หัว": วาง HRP ใต้เหรียญ โดยให้ยอดหัวโผล่พ้น
+--   ระดับ trigger แค่ TOUCH_MARGIN → ลำตัว/ขาอยู่ใต้พื้นทั้งหมด
+local headLift = DEFAULT_HEAD_LIFT -- Head สูงกว่า HRP กี่ studs (วัดจากตัวจริง)
+local headHalf = DEFAULT_HEAD_HALF -- ครึ่งความสูงของหัว (วัดจากตัวจริง)
+local sinkHold = nil               -- CFrame ล็อคใต้ดินระหว่างรอเก็บชิ้นถัดไป
+local lastGoalCFrame = nil         -- CFrame เป้าของ tween ล่าสุด
+local tweenRunning = false         -- กำลัง tween อยู่ → Heartbeat ห้ามเขียนทับ
+local lobbyLock = false            -- อยู่ใน Lobby = true → ล็อคตัวไว้ใต้พื้น
+local lobbyPin = nil               -- CFrame ที่ล็อคใน Lobby
+local lobbyPinChar = nil           -- character ที่ผูกกับ lobbyPin
 local MAX_FAILED_COLLECTS = 10 -- ไปถึงแล้วของไม่เข้าติดกันกี่ครั้ง = ถือว่ากระเป๋าเต็ม (fallback)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
@@ -1366,12 +1381,21 @@ end
 --     1) เก็บการหมุนเดิมไว้ (CFrame.new(pos) รีเซ็ตการหมุนทุกครั้ง)
 --     2) EasingStyle.Linear + เวลาจริง = ความเร็วคงที่ทุก FPS
 --     3) มีตัวจับค้าง/ไม่ถึงเป้า แล้วยิงซ้ำจากตำแหน่งจริง (ไม่ค้างรอ tween ที่ล้มเหลว)
+-- ── ตำแหน่ง HRP ที่ทำให้ "หัว" แตะเหรียญแค่นิดเดียว ────────────────────
+--   ระดับล่างสุดของ trigger = coinY - COIN_TRIGGER_HALF
+--   ต้องการให้ยอดหัวอยู่เหนือระดับนั้น TOUCH_MARGIN
+--   → HRP = ยอดหัว - ครึ่งหัว - ระยะหัวสูงกว่า HRP
+--   ผลลัพธ์: เฉพาะหัวโผล่พ้นพื้น (ไม่เกิน TOUCH_MARGIN) ส่วนตัวอยู่ใต้ดิน
+local function headTargetY(coinY)
+    return coinY - COIN_TRIGGER_HALF + TOUCH_MARGIN - headHalf - headLift
+end
+
 local function arrivedAt(target)
     local hrp = humanoidRootPart
     if not (hrp and hrp.Parent) then return false end
     local p = hrp.Position
     local dxz = Vector3.new(target.X - p.X, 0, target.Z - p.Z).Magnitude
-    local dy = math.abs(target.Y - p.Y)
+    local dy = math.abs(headTargetY(target.Y) - p.Y)
     return (dxz <= TWEEN_ARRIVE_XZ and dy <= TWEEN_ARRIVE_Y), dxz, dy
 end
 
@@ -1451,22 +1475,18 @@ local function tweenOnce(target, currentVisual)
 
     local from = hrp.Position
 
-    -- ── ห้าม tween ลงไปที่ Y ของเหรียญตรงๆ ─────────────────────────────
-    -- เหรียญอยู่ที่ระดับพื้น (จุดกึ่งกลางต่ำกว่า HRP ตอนยืน ~1.8 studs)
-    -- ถ้าดึง CFrame ลงไปหา Y เหรียญ ตัวจะจมพื้น แล้วฟิสิกส์ดันกลับขึ้น
-    --   → ทำซ้ำทุกชิ้น = อาการ "สั่นรัวๆ ขึ้นๆ ลงๆ" (ยิ่งเก็บติดกันเร็ว ยิ่งชัด)
-    -- ระดับเดียวกัน → คง Y ที่ยืนอยู่ (ไม่ขยับแนวตั้งเลย)
-    -- ต่างระดับ     → ไปยืนบนระดับของเหรียญ (Y เหรียญ + ส่วนสูงตอนยืน)
-    local goalY = from.Y
-    if math.abs(target.Y - (from.Y - STAND_LIFT)) > LEVEL_BAND then
-        goalY = target.Y + STAND_LIFT
-    end
+    -- ── เก็บด้วย "หัว" (ตัวละครอยู่ใต้ดิน) ─────────────────────────────
+    -- ยอดหัวอยู่พ้นระดับ trigger แค่ TOUCH_MARGIN → เห็นแค่หัวนิดเดียว
+    -- ส่วนลำตัว/ขาอยู่ใต้พื้นทั้งหมด
+    local goalY = headTargetY(target.Y)
     local goal = Vector3.new(target.X, goalY, target.Z)
 
     local distance = (goal - from).Magnitude
 
     -- เก็บทิศหันเดิม ไม่ให้ CFrame.new() รีเซ็ตการหมุน
     local rot = hrp.CFrame - hrp.CFrame.Position
+    local goalCFrame = CFrame.new(goal) * rot
+    lastGoalCFrame = goalCFrame
 
     if distance < 1 then
         pcall(function()
@@ -1481,7 +1501,7 @@ local function tweenOnce(target, currentVisual)
         return TweenService:Create(
             hrp,
             TweenInfo.new(duration, Enum.EasingStyle.Linear),
-            { CFrame = CFrame.new(goal) * rot }
+            { CFrame = goalCFrame }
         )
     end)
     if not ok or not tween then return false end
@@ -1558,23 +1578,47 @@ local function tweenToPosition(targetPosition, currentVisual)
         attempts = attempts + 1
 
         local reached = arrivedAt(targetPosition)
-        if reached then return true end
+        if reached then
+            -- อยู่จุดเก็บแล้ว → ล็อคตำแหน่งนี้ไว้
+            if humanoidRootPart and humanoidRootPart.Parent then
+                sinkHold = humanoidRootPart.CFrame
+            end
+            return true
+        end
 
         -- ตาย/เกิดใหม่กลางทาง = อ่าน hrp ใหม่ทุกครั้ง (ตัวแปรอัปเดตใน main loop)
         if not (humanoidRootPart and humanoidRootPart.Parent) then return false end
 
-        local _, better, lost = tweenOnce(targetPosition, currentVisual)
+        tweenRunning = true
+        local okCall, _, better, lost = pcall(tweenOnce, targetPosition, currentVisual)
+        tweenRunning = false
+        if not okCall then
+            better, lost = nil, nil
+        end
         if better or lost then
             -- เปลี่ยนเป้า/เป้าหาย — คืนทันที ให้ลูปหลักเลือกใหม่จากตำแหน่งจริง
+            --   ล็อคตำแหน่งปัจจุบันไว้ ไม่ให้เด้งกลับไปจุดเก็บเดิม
+            if humanoidRootPart and humanoidRootPart.Parent then
+                sinkHold = humanoidRootPart.CFrame
+            end
             return false, better
         end
 
         -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
-        if arrivedAt(targetPosition) then return true end
+        if arrivedAt(targetPosition) then
+            -- ล็อคตำแหน่งใต้ดินไว้ระหว่างรอ ack / เลือกชิ้นถัดไป
+            --   ไม่งั้นฟิสิกส์จะดันตัวขึ้นจากพื้นทันทีที่ tween จบ
+            sinkHold = lastGoalCFrame
+            return true
+        end
 
         -- รอบนี้ "ไม่ถึงเป้า" (เส้นทางปกติจะไม่มาถึงตรงนี้) → พักสั้นๆ ก่อนยิงใหม่
         --   ยิง CFrame ซ้ำติดกันทุกเฟรมตอนไปไม่ถึง = ตัวสั่นรัว ไม่มีประโยชน์
         if attempts < TWEEN_MAX_TRY then
+            -- ล็อคตำแหน่งปัจจุบันไว้ก่อนพัก (กันเด้งกลับจุดเก็บเดิม/ถูกดันขึ้น)
+            if humanoidRootPart and humanoidRootPart.Parent then
+                sinkHold = humanoidRootPart.CFrame
+            end
             task.wait(0.08)
         end
     end
@@ -1584,11 +1628,46 @@ local function tweenToPosition(targetPosition, currentVisual)
         if humanoidRootPart and humanoidRootPart.Parent then
             humanoidRootPart.AssemblyLinearVelocity = Vector3.zero
             humanoidRootPart.AssemblyAngularVelocity = Vector3.zero
+            -- ล็อคตำแหน่งปัจจุบันไว้ (ไม่ให้ฟิสิกส์ดันขึ้น/เด้งกลับ)
+            sinkHold = humanoidRootPart.CFrame
         end
     end)
 
     return false
 end
+
+-- ── ล็อคตำแหน่ง (กันฟิสิกส์ดันตัวขึ้น / ซ่อนตัว) ──────────────────────
+--   ระหว่าง tween ปล่อยให้ TweenService คุม CFrame
+--   พอ tween จบ (ช่วงรอ ack / เลือกชิ้นถัดไป) = เขียน CFrame ทุกเฟรมเอง
+--   เพราะตัวถูกวางไว้ใต้พื้น ฟิสิกส์จะดันขึ้นทันทีถ้าไม่ล็อค
+--
+--   lobbyLock = อยู่ใน Lobby → ล็อคไว้ 10 studs ใต้ตำแหน่งเดิม
+--   (ไม่ใช้ Anchored เพราะต้องการให้ตำแหน่งถูก replicate ให้คนอื่นเห็น)
+RunService.Heartbeat:Connect(function()
+    if tweenRunning then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local targetCFrame = nil
+    if lobbyLock then
+        if lobbyPinChar ~= char then
+            -- ตัวใหม่/respawn ใน Lobby → TP ลงใต้ตัวเอง 10 studs
+            lobbyPinChar = char
+            lobbyPin = hrp.CFrame - Vector3.new(0, 10, 0)
+        end
+        targetCFrame = lobbyPin
+    elseif sinkHold then
+        targetCFrame = sinkHold
+    end
+
+    if targetCFrame then
+        hrp.CFrame = targetCFrame
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
+end)
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
 local function findCoinContainer()
@@ -1887,6 +1966,21 @@ while true do
             lastCharacter = character
             bagWasFull = false
             collectAttempts = 0
+            -- ตัวใหม่ = CFrame ล็อคเดิมใช้ไม่ได้แล้ว
+            sinkHold = nil
+            -- วัดระยะหัวกับ HRP จากตัวจริง (R6/R15 คนละความสูง)
+            local newHrp = character:FindFirstChild("HumanoidRootPart")
+            local head = character:FindFirstChild("Head")
+            if newHrp and head then
+                local lift = head.Position.Y - newHrp.Position.Y
+                if lift > 0.2 and lift < 3 then
+                    headLift = lift
+                end
+                local half = head.Size.Y * 0.5
+                if half > 0.2 and half < 1.5 then
+                    headHalf = half
+                end
+            end
         end
 
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -1921,11 +2015,20 @@ while true do
         local inGame = earnedXP.Visible or (timerFrame ~= nil and timerFrame.Visible)
 
         if not inGame then
+            -- อยู่ใน Lobby → ล็อคตัวไว้ 10 studs ใต้ตำแหน่งเดิม
+            --   (Heartbeat จะคอยปัก CFrame ไว้เอง)
+            lobbyLock = true
+            sinkHold = nil
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
             task.wait(0.5)
             return
         end
+
+        -- เข้าแมพฟาร์มแล้ว = ปลดล็อค Lobby
+        lobbyLock = false
+        lobbyPinChar = nil
+        lobbyPin = nil
 
         character = player.Character or player.CharacterAdded:Wait()
         humanoidRootPart = character:WaitForChild("HumanoidRootPart")
@@ -1978,6 +2081,7 @@ while true do
             -- กัน BreakJoints ซ้ำตอน Full ค้างหลัง respawn
             if not bagWasFull then
                 bagWasFull = true
+                sinkHold = nil -- ปล่อยตัวก่อนตาย (กัน Heartbeat ปักศพเดิม)
                 character:BreakJoints()
                 task.wait(1)
                 if Config.HopBagFull then
@@ -2041,6 +2145,8 @@ while true do
                         -- เก็บชิ้นนี้แล้วกระเป๋าเต็มพอดี → หยุดเก็บทันที (ไม่ไปชิ้นถัดไปให้เสียเวลา)
                         local _, nowFull = readBag()
                         if nowFull then break end
+                        -- เว้นจังหวะสั้นๆ ก่อนไปชิ้นถัดไป
+                        task.wait(COLLECT_CHAIN_DELAY)
                         -- ไปชิ้นถัดไปทันที (ไม่กลับไปเริ่มลูปหลัก)
                         targetVisual = findNearestCoin()
                     else
