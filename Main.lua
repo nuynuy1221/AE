@@ -67,7 +67,9 @@ local SPEED = Config.TweenSpeed or 25
 local TWEEN_MAX_TRY = 3        -- จำนวนรอบที่ยิง tween ซ้ำถ้ายังไม่ถึงเป้า
 local TWEEN_STUCK_SEC = 5      -- ไม่เข้าใกล้ขึ้นกี่วินาที = ปล่อย
 local TWEEN_ARRIVE_XZ = 1.5    -- ต้องแตะจริง (HRP 2 + กล่อง Coin_Server 1.378 → แตะได้ที่ระยะ ≤ 1.69)
-local TWEEN_ARRIVE_Y = 6       -- tolerance แนวตั้ง (กันพื้นดันตัวขึ้นหลัง tween)
+local TWEEN_ARRIVE_Y = 3       -- tolerance แนวตั้ง (ยืนปกติ HRP สูงกว่าจุดกึ่งกลางเหรียญ ~1.8)
+local STAND_LIFT = 1.8         -- ตอนยืน HRP อยู่สูงกว่าจุดกึ่งกลางเหรียญกี่ studs
+local LEVEL_BAND = 1.2         -- ต่างจากระดับยืนไม่เกินนี้ = พื้นระดับเดียวกัน
 local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
 local MAX_FAILED_COLLECTS = 10 -- ไปถึงแล้วของไม่เข้าติดกันกี่ครั้ง = ถือว่ากระเป๋าเต็ม (fallback)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
@@ -419,6 +421,59 @@ local function applyLowGraphics(fullSweep)
 		end)
 	end
 end
+
+-- ── ตัดระบบรอยเท้า (Murderer Perk "Footsteps") ─────────────────────
+--   ตอนได้ Role Murder + perk Footsteps เกมจะวาง LocalScript ชื่อ
+--   FootstepsClient ไว้ในตัวละคร แล้วสคริปต์นั้นสร้าง Part + SurfaceGui
+--   + ImageLabel ทุก 0.25 วิ (อายุ 60 วิ) → รอยเท้าเต็มแมพ = แลคหนัก
+--
+--   Boost FPS เดิม (applyLowGraphics) ลบแค่เงา/วัสดุ/Decal
+--   แต่รอยเท้าเป็น SurfaceGui + ImageLabel → ไม่ถูกแตะ ยังแลคอยู่
+--   และถึงปิด 3D ก็ยังเปลือง CPU/แรมเพราะมันยังสร้าง object รัวๆ
+--
+--   แก้ที่ต้นเหตุ: ปิด LocalScript ตัวสร้างทันทีที่มันโผล่
+--   + ลบโฟลเดอร์รอยเท้าที่สร้างค้างไว้ (ทำทุกครั้ง ไม่ขึ้นกับ Low Mode)
+local footstepGuardInstalled = false
+
+local function installFootstepGuard()
+	if footstepGuardInstalled then return end
+	footstepGuardInstalled = true
+
+	local function killGenerator(scriptObj)
+		pcall(function()
+			scriptObj.Disabled = true
+			scriptObj:Destroy()
+		end)
+	end
+
+	local function killFolder(folder)
+		pcall(function() folder:Destroy() end)
+	end
+
+	-- 1) ล้างของที่ค้างอยู่ก่อน (รอยเท้าที่สร้างไปแล้ว + ตัวสร้าง)
+	local ws = workspace
+	for _, v in ipairs(ws:GetDescendants()) do
+		if v:IsA("BaseScript") and v.Name == "FootstepsClient" then
+			killGenerator(v)
+		elseif v:IsA("Folder") and v.Name == "Footsteps" then
+			-- โฟลเดอร์รอยเท้า: ทั้งของที่อยู่ในตัวละคร (มีตัวสร้าง)
+			-- และของที่สคริปต์สร้างไว้ใน workspace (เก็บ Part ที่วาดรอยเท้า)
+			killFolder(v)
+		end
+	end
+
+	-- 2) จับของใหม่: ทุกครั้งที่ได้ Role Murder / เริ่มรอบใหม่
+	ws.DescendantAdded:Connect(function(child)
+		if child:IsA("BaseScript") and child.Name == "FootstepsClient" then
+			-- ปิดทันทีในเฟรมที่โผล่ (ก่อนมันจะเริ่มลูปสร้างรอยเท้า)
+			killGenerator(child)
+		elseif child:IsA("Folder") and child.Name == "Footsteps" then
+			killFolder(child)
+		end
+	end)
+end
+
+installFootstepGuard()
 
 -- ── หน้าตาป้ายข้อความ ───────────────────────────────────────────────
 local function lowLabelSkin(lbl, color)
@@ -1395,7 +1450,20 @@ local function tweenOnce(target, currentVisual)
     if not (hrp and hrp.Parent) then return false end
 
     local from = hrp.Position
-    local distance = (target - from).Magnitude
+
+    -- ── ห้าม tween ลงไปที่ Y ของเหรียญตรงๆ ─────────────────────────────
+    -- เหรียญอยู่ที่ระดับพื้น (จุดกึ่งกลางต่ำกว่า HRP ตอนยืน ~1.8 studs)
+    -- ถ้าดึง CFrame ลงไปหา Y เหรียญ ตัวจะจมพื้น แล้วฟิสิกส์ดันกลับขึ้น
+    --   → ทำซ้ำทุกชิ้น = อาการ "สั่นรัวๆ ขึ้นๆ ลงๆ" (ยิ่งเก็บติดกันเร็ว ยิ่งชัด)
+    -- ระดับเดียวกัน → คง Y ที่ยืนอยู่ (ไม่ขยับแนวตั้งเลย)
+    -- ต่างระดับ     → ไปยืนบนระดับของเหรียญ (Y เหรียญ + ส่วนสูงตอนยืน)
+    local goalY = from.Y
+    if math.abs(target.Y - (from.Y - STAND_LIFT)) > LEVEL_BAND then
+        goalY = target.Y + STAND_LIFT
+    end
+    local goal = Vector3.new(target.X, goalY, target.Z)
+
+    local distance = (goal - from).Magnitude
 
     -- เก็บทิศหันเดิม ไม่ให้ CFrame.new() รีเซ็ตการหมุน
     local rot = hrp.CFrame - hrp.CFrame.Position
@@ -1413,7 +1481,7 @@ local function tweenOnce(target, currentVisual)
         return TweenService:Create(
             hrp,
             TweenInfo.new(duration, Enum.EasingStyle.Linear),
-            { CFrame = CFrame.new(target) * rot }
+            { CFrame = CFrame.new(goal) * rot }
         )
     end)
     if not ok or not tween then return false end
@@ -1464,7 +1532,7 @@ local function tweenOnce(target, currentVisual)
         if now - lastCheck >= 1 then
             lastCheck = now
             local alpha = math.clamp((now - t0) / duration, 0, 1)
-            local want = from:Lerp(target, alpha)
+            local want = from:Lerp(goal, alpha)
             local gap = (hrpNow.Position - want).Magnitude
 
             if gap < bestGap - 0.5 then
@@ -1501,11 +1569,14 @@ local function tweenToPosition(targetPosition, currentVisual)
             return false, better
         end
 
-        -- ไม่หน่วงระหว่างรอบ: ถึงแล้วเช็คต่อในรอบถัดไปทันที
-        --   (ของเดิม task.wait(0.15) ตรงนี้ = ดีเลย์เปล่าๆ ก่อนไปชิ้นถัดไป)
-
         -- ถึงเป้าจริงหรือยัง (เช็คจากตำแหน่งที่เกมรายงานกลับมา)
         if arrivedAt(targetPosition) then return true end
+
+        -- รอบนี้ "ไม่ถึงเป้า" (เส้นทางปกติจะไม่มาถึงตรงนี้) → พักสั้นๆ ก่อนยิงใหม่
+        --   ยิง CFrame ซ้ำติดกันทุกเฟรมตอนไปไม่ถึง = ตัวสั่นรัว ไม่มีประโยชน์
+        if attempts < TWEEN_MAX_TRY then
+            task.wait(0.08)
+        end
     end
 
     -- ถึงหรือไม่ก็หยุด velocity ไม่ให้ไถลต่อ
@@ -1567,7 +1638,11 @@ local function findNearestCoin()
         if coinIsCollectible(visual) then
             local pos = visualPos(visual)
             if pos then
-                local distance = (hrpPos - pos).Magnitude
+                -- ถ่วงระยะแนวตั้ง (x1.5) → เลือกเหรียญระดับเดียวกันก่อน
+                --   ลดการวิ่งขึ้น-ลงสลับชั้นรัวๆ ซึ่งทำให้ตัวดูกระตุกขึ้นลง
+                local dxz = Vector3.new(pos.X - hrpPos.X, 0, pos.Z - hrpPos.Z).Magnitude
+                local dy = (pos.Y - hrpPos.Y) * 1.5
+                local distance = math.sqrt(dxz * dxz + dy * dy)
                 if distance < shortestDistance then
                     shortestDistance = distance
                     nearestVisual = visual
