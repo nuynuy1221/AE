@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.7 (Halloween Event 1)")
+print("Version 1.0.8 (Halloween Event 2)")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -85,6 +85,8 @@ local lobbyLock = false            -- อยู่ใน Lobby = true → ล็
 local lobbyPin = nil               -- CFrame ที่ล็อคใน Lobby
 local lobbyPinChar = nil           -- character ที่ผูกกับ lobbyPin
 local farmSinkChar = nil           -- character ที่ "มุดใต้ดินเตรียมไว้" แล้วในแมพฟาร์ม
+local farmSinkCF = nil             -- CFrame จุดที่มุดล่าสุด (กันมุดซ้ำตอนได้ signal หลายตัวติดกัน)
+local farmActive = false           -- อยู่ในรอบ/แมพฟาร์ม (ตั้งจาก event ของเกมเอง ไม่รอ CoinContainer)
 local MAX_FAILED_COLLECTS = 10 -- ไปถึงแล้วของไม่เข้าติดกันกี่ครั้ง = ถือว่ากระเป๋าเต็ม (fallback)
 local DESCRIPTION_INTERVAL = 30 -- ส่ง Description ทุก 30 วิ
 local lastDescriptionTime = 0
@@ -1669,8 +1671,9 @@ local function updateLobbyAnchor()
 end
 
 -- ── Noclip เฉพาะในแมพฟาร์ม ────────────────────────────────────────────
---   ตัวละครถูกวางใต้พื้น → ถ้ายังชนพื้นอยู่ฟิสิกส์จะดัน/บิดตัว (อาการหมุน)
---   ปิด CanCollide ทุกชิ้น (ฝั่ง client เท่านั้น ไม่ replicate) + หยุดการหมุน
+--   ตัวละครถูกวางใต้พื้น → ถ้ายังชนพื้นอยู่ฟิสิกส์จะดัน/บิดตัว (อาการหมุน/สั่น)
+--   • ปิด CanCollide ทุกชิ้น (ฝั่ง client เท่านั้น ไม่ replicate)
+--   • Zero ความเร็วทุกเฟรมตอนปลด Anchor — กันแรงโน้มถ่วงสะสมจนตัวกระตุก
 local noclipConn = nil
 local noclipSaved = setmetatable({}, { __mode = "k" }) -- part ที่เราเปลี่ยน CanCollide
 
@@ -1692,10 +1695,12 @@ local function startNoclip()
             pcall(function() hum.AutoRotate = false end)
         end
 
-        -- กันความเร็วเชิงมุมสะสมตอนปลด Anchor ระหว่าง tween
+        -- กันแรงโน้มถ่วง/ความเร็วเชิงมุมสะสมตอนปลด Anchor ระหว่าง tween
+        --   (TweenService เขียน CFrame เองทุกเฟรม; velocity ต้องเป็น 0 ตลอด)
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if hrp and not hrp.Anchored then
             pcall(function()
+                hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
             end)
         end
@@ -1728,6 +1733,12 @@ local function sinkUnderFarm()
     local hrp = humanoidRootPart
     if not (hrp and hrp.Parent) then return end
 
+    -- มุดอยู่แล้ว (LoadingMap → RoundStart → TeleportToPart ยิงติดกัน) → ไม่ต้องมุดซ้ำ
+    --   ไม่งั้นยิ่งมุดลึกขึ้นเรื่อย ๆ ทำให้ tween ขึ้นไปหาเหรียญไกลขึ้นทุกรอบ
+    if farmSinkCF and (hrp.Position - farmSinkCF.Position).Magnitude < 3 then
+        return
+    end
+
     local cf = hrp.CFrame - Vector3.new(0, 10, 0)
     pcall(function() hrp.Anchored = false end)
     for _ = 1, 3 do
@@ -1736,6 +1747,7 @@ local function sinkUnderFarm()
         RunService.Heartbeat:Wait()
     end
     pcall(function() hrp.Anchored = true end)
+    farmSinkCF = cf
 end
 
 -- ฟังก์ชันค้นหา CoinContainer ใน workspace
@@ -1748,6 +1760,90 @@ local function findCoinContainer()
     end
     return nil
 end
+
+-- ── เข้าห้องฟาร์ม (มุด + noclip ทันที) ────────────────────────────────
+local function enterFarm()
+    farmActive = true
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (hrp and hrp.Parent) then return end
+
+    humanoidRootPart = hrp
+    lobbyLock = false
+    lobbyPinChar = nil
+    lobbyPin = nil
+
+    if farmSinkChar ~= char then
+        farmSinkChar = char
+        farmSinkCF = nil
+    end
+
+    startNoclip()
+    sinkUnderFarm()
+end
+
+-- ── ตรวจ "อยู่แมพฟาร์ม" ด้วย event ของเกมเอง ───────────────────────────
+--   ไม่ใช้ CoinContainer เป็นตัวหลัก เพราะเหรียญถูกสร้างหลังเข้าเกมไปแล้วหลายวินาที
+--   (กว่าจะเห็น ก็ยืนโชว์ตัวอยู่กลางแมพแล้ว)
+--   อ้างอิงจาก dump:
+--     • Game_RoleSelector.client.lua:98  → Remotes.Gameplay.LoadingMap  (เริ่มโหลดแมพ)
+--     • CharacterClient.client.lua:65    → Remotes.Gameplay.TeleportToPart (เกม PivotTo ตัวเข้าจุดเกิดในแมพ)
+--     • Menu_GUI.client.lua:193          → Remotes.Gameplay.RoundStart  (เซิร์ฟเวอร์ยืนยันเริ่มรอบ)
+--     • GameplayAnimations.client.lua:163 / Menu_GUI.client.lua:192 → RoundEndFade / VictoryScreen (จบรอบ)
+task.spawn(function()
+    local gameplay = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Gameplay")
+
+    -- เริ่มโหลดแมพ = จุดแรกสุดที่รู้ว่ากำลังเข้าห้องฟาร์ม
+    gameplay:WaitForChild("LoadingMap").OnClientEvent:Connect(function()
+        enterFarm()
+    end)
+
+    -- เกมย้ายตัวเข้าจุดเกิดในแมพ — handler ของเกมเรียก PivotTo()
+    --   → รอ 1 Heartbeat ให้ย้ายเสร็จก่อน แล้วค่อยมุด (ไม่ว่าใคร connect ก่อน/หลัง)
+    gameplay:WaitForChild("TeleportToPart").OnClientEvent:Connect(function()
+        if not farmActive then return end
+        task.defer(function()
+            RunService.Heartbeat:Wait()
+            if farmActive then enterFarm() end
+        end)
+    end)
+
+    -- เซิร์ฟเวอร์ยืนยันเริ่มรอบ (event เดียวกับที่ Menu_GUI ใช้เปิด EarnedXP/Timer)
+    gameplay:WaitForChild("RoundStart").OnClientEvent:Connect(function()
+        enterFarm()
+    end)
+
+    -- จบรอบ = กลับ Lobby → ปลดสถานะฟาร์ม ให้ลูปหลักจัดการ Lobby ต่อ
+    local function roundOver()
+        farmActive = false
+        farmSinkChar = nil
+        farmSinkCF = nil
+    end
+    for _, name in ipairs({ "RoundEndFade", "VictoryScreen", "GameOver" }) do
+        local ev = gameplay:FindFirstChild(name)
+        if ev then ev.OnClientEvent:Connect(roundOver) end
+    end
+end)
+
+-- ── Watcher (fallback): ตัวสำรองเมื่อไม่ได้รับ event ────────────────────
+--   • farmActive อยู่แล้ว + respawn/ตัวใหม่ → มุดทันที
+--   • โหลดกลางรอบ (พลาด event ไปแล้ว) → ใช้ CoinContainer ยืนยันแทน
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp and hrp.Parent then
+            if farmActive then
+                if farmSinkChar ~= char then enterFarm() end
+            elseif findCoinContainer() then
+                enterFarm()
+            end
+        end
+    end
+end)
 
 -- (visualSkipUntil / coinIsCollectible ประกาศไว้ด้านบนแล้ว ก่อน tweenOnce)
 
@@ -2037,10 +2133,11 @@ while true do
             collectAttempts = 0
             -- ตัวใหม่ = Anchor ของตัวเก่าไม่เกี่ยวแล้ว (ตัวใหม่เริ่มจากสถานะปกติ)
             -- วัดระยะหัวกับ HRP จากตัวจริง (R6/R15 คนละความสูง)
+            --   ใช้ dot กับ UpVector = ค่าไม่เพี้ยนตอนตัวเอียง/ล้ม (วัด Y ตรงๆ พลาดได้)
             local newHrp = character:FindFirstChild("HumanoidRootPart")
             local head = character:FindFirstChild("Head")
             if newHrp and head then
-                local lift = head.Position.Y - newHrp.Position.Y
+                local lift = (head.Position - newHrp.Position):Dot(newHrp.CFrame.UpVector)
                 if lift > 0.2 and lift < 3 then
                     headLift = lift
                 end
@@ -2082,14 +2179,24 @@ while true do
         local timerFrame = gameUI:FindFirstChild("Timer")
         local inGame = earnedXP.Visible or (timerFrame ~= nil and timerFrame.Visible)
 
-        if not inGame then
-            -- อยู่ใน Lobby → TP ลงใต้ตัวเอง 10 studs แล้ว Anchor ไว้
-            lobbyLock = true
-            farmSinkChar = nil
-            stopNoclip()
+        -- farmActive มาจาก event ของเกม (LoadingMap/TeleportToPart/RoundStart)
+        --   → ระหว่างรอ UI ขึ้น inGame ก็ถือว่าอยู่ในแมพฟาร์มแล้ว
+        if not inGame and not farmActive then
             character = player.Character or player.CharacterAdded:Wait()
             humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-            updateLobbyAnchor()
+
+            if findCoinContainer() then
+                -- แมพฟาร์มโหลดแล้ว แต่ยังไม่ได้รับ event (โหลดกลางรอบ) → มุดทันที
+                enterFarm()
+            else
+                -- อยู่ใน Lobby จริงๆ → TP ลงใต้ตัวเอง 10 studs แล้ว Anchor ไว้
+                lobbyLock = true
+                farmSinkChar = nil
+                farmSinkCF = nil
+                stopNoclip()
+                updateLobbyAnchor()
+            end
+
             task.wait(0.5)
             return
         end
@@ -2114,6 +2221,7 @@ while true do
         -- เพิ่งเข้าแมพ / respawn ในแมพฟาร์ม → มุดใต้ดินรอทันที
         if farmSinkChar ~= character then
             farmSinkChar = character
+            farmSinkCF = nil
             sinkUnderFarm()
         end
 
