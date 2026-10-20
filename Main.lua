@@ -4,7 +4,7 @@ if game.PlaceId ~= 142823291 then
     return
 end
 
-print("Version 1.0.7 (Halloween Event)")
+print("Version 1.0.7 (Halloween Event 1)")
 -- Config (ตั้งได้จากภายนอก)
 _G.Config = _G.Config or {}
 local Config = _G.Config
@@ -37,10 +37,10 @@ Config.CollectPenetration = tonumber(Config.CollectPenetration) or 0
 --   เซิร์ฟเวอร์เช็ก Touch บน Coin_Server เอง → ขยาย hitbox ฝั่ง client ไม่มีผล
 --   วิธีที่ใกล้เคียงที่สุด: ซ่อนตัวต่ำกว่าจุดแตะ แล้วยกหัวขึ้นไปแตะสั้น ๆ
 --   Config.CollectRestDrop = ระยะที่ซ่อนต่ำกว่าจุดแตะ (studs) — 0 = ปิดโหมดนี้
---   Config.TouchHold       = เวลาที่หัวอยู่ใน hitbox ต่อครั้ง (วินาที)
+--   Config.TouchHold       = เวลาที่หัวอยู่ใน hitbox ต่อครั้ง (วินาที) — 0.01 = แตะเฟรมเดียว
 --   Config.TouchTries      = ลองกี่ครั้งต่อเหรียญถ้าเซิร์ฟเวอร์ยังไม่รับ
 Config.CollectRestDrop = tonumber(Config.CollectRestDrop) or 3
-Config.TouchHold = tonumber(Config.TouchHold) or 0.12
+Config.TouchHold = tonumber(Config.TouchHold) or 0.01
 Config.TouchTries = tonumber(Config.TouchTries) or 3
 
 -- ถ้าเปิด Horst ให้โหลด script
@@ -100,8 +100,9 @@ local SINK_DEPTH = math.clamp(Config.SinkDepth, 5, 200)
 --   (ถ้าตั้ง TOUCH_EPS = 0 ต้องไม่คลาดลงเลย ไม่งั้นหัวจะไม่แตะ)
 local TWEEN_ARRIVE_Y = math.min(0.04, math.max(0.01, TOUCH_EPS))
 -- โหมดแตะแล้วมุด: ซ่อนต่ำกว่าจุดแตะ REST_DROP studs, แตะครั้งละ TOUCH_HOLD วิ
+--   (0.01 = แตะ ~1 เฟรมแล้ววาร์ปกลับทันที — ต้องพึ่ง retry ถ้า replicate ไม่ทัน)
 local REST_DROP = math.clamp(Config.CollectRestDrop, 0, 50)
-local TOUCH_HOLD = math.clamp(Config.TouchHold, 0.05, 1)
+local TOUCH_HOLD = math.clamp(Config.TouchHold, 0.01, 1)
 local TOUCH_TRIES = math.clamp(math.floor(Config.TouchTries), 1, 10)
 local COLLECT_ACK_WAIT = 0.25  -- รอ CoinCollected ยืนยัน (สูงสุด) — ออกทันทีที่ได้ ack/Collected
 local COLLECT_CHAIN_DELAY = 0 -- เว้นจังหวะก่อนออกไปเก็บเหรียญชิ้นถัดไป
