@@ -4502,11 +4502,13 @@ do
     end
 
     -- ลบทุกอย่างใต้ workspace.Characters (เก็บไว้สำหรับ Class ที่ยังทำ Quest)
+    -- Necromancer: ห้ามลบ Cultist (ตัวที่ทิ้งศพให้ชุบ) แม้ keepMap จะเป็น false
     if not keepMap and not keepWoodsmanResources then
         local chars = workspace:FindFirstChild("Characters")
         if chars then
             pcall(function()
                 for _, child in ipairs(chars:GetChildren()) do
+                    if isNecromancer and string.find(child.Name, "Cultist") then continue end
                     pcall(function() child:Destroy() end)
                 end
             end)
