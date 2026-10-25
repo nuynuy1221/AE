@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 1)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -4516,6 +4516,37 @@ do
     end
 
     print("[OK] FPS boost cleanup done")
+end
+
+-- พื้นล่องหนใต้ Stronghold 30 studs: หลังลบแมพแล้วไม่มีพื้นรองรับ ตัวละคร/มอนจะตกไม่สิ้นสุด
+-- Part ใหญ่สุดที่ engine ยอมให้ = 2048 ต่อแกน (ค่ามากกว่านี้ถูก clamp) -> ปู 3x3 = ครอบ 6144x6144
+-- CanQuery/CanTouch = false: เกม raycast/ระบบเดินไม่เห็น แต่ตัวละครกับมอนชนได้ (แบบเดียวกับ FallFloor)
+do
+    local shFloorPos = getFloorInfo()
+    if shFloorPos then
+        for gx = -1, 1 do
+            for gz = -1, 1 do
+                local p = Instance.new("Part")
+                p.Name = "StrongholdFallFloor"
+                p.Size = Vector3.new(2048, 1, 2048)
+                p.Anchored = true
+                p.CanCollide = true
+                p.CanTouch = false
+                p.CanQuery = false
+                p.Material = Enum.Material.SmoothPlastic
+                p.Transparency = 1
+                p.Position = Vector3.new(
+                    shFloorPos.X + gx * 2048,
+                    shFloorPos.Y - 30,
+                    shFloorPos.Z + gz * 2048
+                )
+                p.Parent = workspace
+            end
+        end
+        print("[OK] Stronghold fall floor created (30 studs below floor)")
+    else
+        warn("[WARN] Stronghold floor not found - fall floor skipped")
+    end
 end
 
 -- จับตำแหน่ง FinalGate ตอนเข้า Stronghold ครั้งแรก ถ้าค่าเปลี่ยน = เคลียร์แล้ว
