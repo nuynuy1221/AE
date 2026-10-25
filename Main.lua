@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 3)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 4)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1814,15 +1814,31 @@ local CHOPPABLE_TREE_NAMES = {
 -- พื้นจริงที่เกมวางไว้เป็นลูกของโมเดลสิ่งก่อสร้าง (ไม่ใช่พื้นล่องหน)
 -- Map.Ground (40x40 tile) ไม่ได้ปูใต้ landmark ทุกตัว เช่น Pitfall Trap / Water Hole /
 -- Snare Trap / Open Grave / Well -> ลบโมเดลทั้งชิ้น = พื้นเป็นรู ตัวละครกับมอนตกหลุม
-local function destroyKeepGround(child)
-	if child:IsA("Model") or child:IsA("Folder") then
-		for _, sub in ipairs(child:GetChildren()) do
-			if sub.Name ~= "GrassFolder" and sub.Name ~= "Ground" and sub.Name ~= "Mud" then
-				pcall(function() sub:Destroy() end)
-			end
+-- พื้นอยู่ได้หลายที่: GrassFolder/Ground/Mud (ส่วนใหญ่) แต่ Volcano / Castle Tower /
+-- Cave Entrance / Camp วางพื้นไว้ใน Models/Building/Tower/Tent/Model
+-- -> เก็บ BasePart ที่ทึบ + ชนได้ + กว้างพอ ด้วย ไม่ใช่ดูแค่ชื่อโฟลเดอร์
+local function destroyKeepGround(inst)
+	if inst:IsA("BasePart") then
+		-- เก็บเฉพาะแผ่นพื้น: ชนได้, ไม่โปร่งใส, กว้าง >= 12 ทั้ง 2 แกน
+		local size = inst.Size
+		if not (inst.CanCollide and inst.Transparency <= 0.85
+			and size.X >= 12 and size.Z >= 12) then
+			pcall(function() inst:Destroy() end)
 		end
-	else
-		pcall(function() child:Destroy() end)
+		return
+	end
+	if not (inst:IsA("Model") or inst:IsA("Folder")) then
+		pcall(function() inst:Destroy() end)  -- Decal/Sound/ฯลฯ
+		return
+	end
+	local n = inst.Name
+	if n == "GrassFolder" or n == "Ground" or n == "Mud" then return end
+	for _, sub in ipairs(inst:GetChildren()) do
+		destroyKeepGround(sub)
+	end
+	-- ลูกถูกลบหมดแล้ว = เก็บ Model/Folder เปล่าไว้ก็ไม่มีประโยชน์
+	if #inst:GetChildren() == 0 then
+		pcall(function() inst:Destroy() end)
 	end
 end
 
@@ -2151,12 +2167,14 @@ end
 -- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
 -- (Humanoid บางตัวอาจอยู่ลึกในโมเดล ใช้ recursive fallback) - คืน true ถ้าช่องทางไหนเป็น 0
 -- ข้อยกเว้น: Deer = ห้ามลดเลือดเด็ดขาด (จัดการด้วย Deer Watcher แทน)
--- ข้อยกเว้น: Necromancer ที่ตั้ง UpgradeClass ไว้และยังไม่ Lv.3 = ห้ามลดเลือด
--- (เลือด 0 = ไม่มีอะไรให้ pet ตี -> PetDamageDealt ไม่ขึ้น -> อัปเลเวลไม่ได้)
+-- ข้อยกเว้น: Necromancer ที่ตั้ง UpgradeClass ไว้และยังไม่ Lv.3
+--   มี pet อยู่  = ห้ามลดเลือด (ปล่อยให้ pet ตีเก็บ PetDamageDealt)
+--   ไม่มี pet    = ลดเลือดเป็น 0 ได้ตามปกติ (ไม่งั้น Stronghold ไม่จบ)
 local function zeroEnemyHealth(model)
     if model.Name == "Deer" then return false end
     if LocalPlayer:GetAttribute("Class") == "Necromancer"
         and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
+        and (LocalPlayer:GetAttribute("CurrentPets") or 0) > 0
         and type(Config.UpgradeClass) == "table" then
         for _, name in ipairs(Config.UpgradeClass) do
             if name == "Necromancer" then return false end
