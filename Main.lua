@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 2)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 3)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2151,8 +2151,17 @@ end
 -- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
 -- (Humanoid บางตัวอาจอยู่ลึกในโมเดล ใช้ recursive fallback) - คืน true ถ้าช่องทางไหนเป็น 0
 -- ข้อยกเว้น: Deer = ห้ามลดเลือดเด็ดขาด (จัดการด้วย Deer Watcher แทน)
+-- ข้อยกเว้น: Necromancer ที่ตั้ง UpgradeClass ไว้และยังไม่ Lv.3 = ห้ามลดเลือด
+-- (เลือด 0 = ไม่มีอะไรให้ pet ตี -> PetDamageDealt ไม่ขึ้น -> อัปเลเวลไม่ได้)
 local function zeroEnemyHealth(model)
     if model.Name == "Deer" then return false end
+    if LocalPlayer:GetAttribute("Class") == "Necromancer"
+        and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
+        and type(Config.UpgradeClass) == "table" then
+        for _, name in ipairs(Config.UpgradeClass) do
+            if name == "Necromancer" then return false end
+        end
+    end
     pcall(function() model:SetAttribute("Health", 0) end)
 
     local zeroed = model:GetAttribute("Health") == 0
