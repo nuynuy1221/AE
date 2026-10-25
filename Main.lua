@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 1)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 2)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1811,6 +1811,21 @@ local CHOPPABLE_TREE_NAMES = {
     "Dead Tree3",
 }
 
+-- พื้นจริงที่เกมวางไว้เป็นลูกของโมเดลสิ่งก่อสร้าง (ไม่ใช่พื้นล่องหน)
+-- Map.Ground (40x40 tile) ไม่ได้ปูใต้ landmark ทุกตัว เช่น Pitfall Trap / Water Hole /
+-- Snare Trap / Open Grave / Well -> ลบโมเดลทั้งชิ้น = พื้นเป็นรู ตัวละครกับมอนตกหลุม
+local function destroyKeepGround(child)
+	if child:IsA("Model") or child:IsA("Folder") then
+		for _, sub in ipairs(child:GetChildren()) do
+			if sub.Name ~= "GrassFolder" and sub.Name ~= "Ground" and sub.Name ~= "Mud" then
+				pcall(function() sub:Destroy() end)
+			end
+		end
+	else
+		pcall(function() child:Destroy() end)
+	end
+end
+
 do
 local PURGE_KEEP = {
 	-- ไม่มี "Map/Campground" = ไม่แตะโฟลเดอร์นั้นเลย (ดูเหตุผลด้านบน)
@@ -1863,7 +1878,12 @@ local function purgePrune(inst)
 	for _, child in ipairs(inst:GetChildren()) do
 		-- บ้านฮาโลวีนต้องอยู่: AutoCandy เคาะบ้าน + CostumeBoxSpawns อยู่ใต้บ้าน
 		if not keep[child.Name] and not CollectionService:HasTag(child, "HalloweenHouse") then
-			pcall(function() child:Destroy() end)
+			-- Landmarks: เก็บพื้นจริงของ landmark ไว้ (Ground/GrassFolder/Mud) กันพื้นเป็นรู
+			if inst == purgeMap:FindFirstChild("Landmarks") then
+				destroyKeepGround(child)
+			else
+				pcall(function() child:Destroy() end)
+			end
 		end
 	end
 end
@@ -4493,7 +4513,12 @@ do
                         -- ห้ามลบบ้านฮาโลวีน (AutoCandy ยังต้องเคาะหลังจบ Stronghold)
                         if not (folderName == "Landmarks" and child.Name == "Stronghold")
                             and not CollectionService:HasTag(child, "HalloweenHouse") then
-                            pcall(function() child:Destroy() end)
+                            -- Landmarks: เก็บพื้นจริงของ landmark ไว้ กันพื้นเป็นรูหลังลบแมพ
+                            if folderName == "Landmarks" then
+                                destroyKeepGround(child)
+                            else
+                                pcall(function() child:Destroy() end)
+                            end
                         end
                     end
                 end)
