@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 6)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 7)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2162,6 +2162,7 @@ local function isAttackableModel(model)
     return typeof(model) == "Instance"
         and model.Parent
         and model:GetAttribute("NotAttackable") ~= true
+        and model:GetAttribute("NotDamageable") ~= true
 end
 
 -- เคลียร์เลือดมอน 1 ตัว: เซ็ตทั้ง attribute "Health" บนโมเดลหลัก + Humanoid.Health
