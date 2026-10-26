@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 5)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 6)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2572,12 +2572,17 @@ if game.PlaceId ~= 79546208627805 then
         end
 
         local function knockHouses()
+            -- เช็คทุกครั้งก่อนเคาะ: ไม่มีชุดครบใส่อยู่ = ไม่เคาะ (เคาะตอนไม่มีชุด = Trick)
+            -- ชุดมีจำกัด (1 เซ็ต = 1 ประตู) -> เซ็ตหมด = หยุดเคาะเอง
+            if not wornSetId() then return false end
             local now = os.clock()
             for _, house in ipairs(CollectionService:GetTagged("HalloweenHouse")) do
                 if now >= (nextKnock[house] or 0)
                     and not house:GetAttribute("Visited_" .. LocalPlayer.UserId) then
                     local kn = findKnocker(house)
                     if kn then
+                        -- เช็คซ้ำอีกครั้งก่อนยิงจริง (ระหว่างหา knocker อาจมีอะไรเปลี่ยน)
+                        if not wornSetId() then return false end
                         local ok, res = pcall2(function() return KNOCK:InvokeServer(kn) end)
                         if ok and type(res) == "table" and res.Success then
                             local promised = res.Candy or 0
