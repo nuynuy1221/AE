@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 9)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 10)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -1963,11 +1963,25 @@ task.spawn(function()
         return nil
     end
 
+    -- เนื้อ/ปลาดิบ = กินแล้วเสียเลือด -> ห้ามกินถ้ามีของสุก
+    -- รายชื่อดิบมาจาก Recipes.Types (index 1 ของแต่ละกลุ่ม คือของดิบ, index 2 = "Cooked ...")
+    local function isRawFood(name)
+        if name == "Morsel" or name == "Turkey Leg" then return true end
+        local recipes = Client.Databases and Client.Databases.Recipes
+        local types = recipes and recipes.Types
+        if not types then return false end
+        for _, group in pairs(types) do
+            if group[1] == name then return true end
+        end
+        return false
+    end
+
     local function findClosestFood()
         local hrp = getHRP()
         if not hrp then return nil end
 
         local closest, closestDist = nil, math.huge
+        local rawFood, rawDist = nil, math.huge   -- ใช้เฉพาะเมื่อไม่มีของสุกเลย
 
         for _, item in ipairs(workspace.Items:GetChildren()) do
             local restore = item:GetAttribute("RestoreHunger")
@@ -1984,7 +1998,12 @@ task.spawn(function()
                     local pos = getItemPos(item)
                     if pos then
                         local dist = (pos - hrp.Position).Magnitude
-                        if dist < closestDist then
+                        if isRawFood(item.Name) then
+                            if dist < rawDist then
+                                rawDist = dist
+                                rawFood = item
+                            end
+                        elseif dist < closestDist then
                             closestDist = dist
                             closest = item
                         end
@@ -1992,7 +2011,7 @@ task.spawn(function()
                 end
             end
         end
-        return closest, closestDist
+        return closest or rawFood, closest and closestDist or rawDist
     end
 
     local function pullItem(item)
@@ -2562,12 +2581,18 @@ if game.PlaceId ~= 79546208627805 then
 
         local nextKnock = {}
         local lastNoCostumeLog = 0
+        local lastTrickLog = 0
+        -- ชุดที่เพิ่งใช้เคาะ + เวลาที่เคาะ: ยังใส่อยู่ = server ยังไม่กินชุด -> ห้ามเคาะซ้ำ
+        -- ลำดับที่ต้องการ: เคาะ -> รอชุดหาย -> ใส่ชุดใหม่ -> เคาะใหม่
+        -- shortcut: ถ้าชุดเดิมค้างเกิน 10 วิ (server ไม่กิน) จะปลดให้เคาะต่อได้ กันค้างถาวร
+        local lastKnockSet, lastKnockAt = nil, 0
+        local COSTUME_WAIT = 10
 
-        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ตทันที
-        -- ต้องรอให้ชุดหลุดจากตัวก่อน ไม่งั้นรอบถัดไปยังเห็นชุดครบ -> เคาะซ้ำทั้งที่ไม่มีชุด
+        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ต (ไม่ทันที)
+        -- รอให้ชุดหลุดจากตัวก่อน ไม่งั้น tick ถัดไปยังเห็นชุดครบ -> เคาะซ้ำทั้งที่ไม่มีชุด
         local function waitCostumeConsumed()
             local t0 = os.clock()
-            while wornSetId() and os.clock() - t0 < 2 do
+            while wornSetId() and os.clock() - t0 < COSTUME_WAIT do
                 task.wait(0.1)
             end
         end
@@ -2575,7 +2600,13 @@ if game.PlaceId ~= 79546208627805 then
         local function knockHouses()
             -- เช็คทุกครั้งก่อนเคาะ: ไม่มีชุดครบใส่อยู่ = ไม่เคาะ (เคาะตอนไม่มีชุด = Trick)
             -- ชุดมีจำกัด (1 เซ็ต = 1 ประตู) -> เซ็ตหมด = หยุดเคาะเอง
-            if not wornSetId() then return false end
+            local setId = wornSetId()
+            if not setId then return false end
+            -- ชุดเซ็ตเดิมที่เพิ่งใช้เคาะยังไม่ถูก server กิน -> รอต่อ ห้ามเคาะซ้ำ
+            if lastKnockSet == setId then
+                if os.clock() - lastKnockAt < COSTUME_WAIT then return false end
+                lastKnockSet = nil   -- ค้างนานผิดปกติ: ปลด ไม่งั้นหยุดเคาะถาวร
+            end
             local now = os.clock()
             for _, house in ipairs(CollectionService:GetTagged("HalloweenHouse")) do
                 if now >= (nextKnock[house] or 0)
@@ -2583,7 +2614,8 @@ if game.PlaceId ~= 79546208627805 then
                     local kn = findKnocker(house)
                     if kn then
                         -- เช็คซ้ำอีกครั้งก่อนยิงจริง (ระหว่างหา knocker อาจมีอะไรเปลี่ยน)
-                        if not wornSetId() then return false end
+                        local idNow = wornSetId()
+                        if not idNow or idNow == lastKnockSet then return false end
                         local ok, res = pcall2(function() return KNOCK:InvokeServer(kn) end)
                         if ok and type(res) == "table" and res.Success then
                             local promised = res.Candy or 0
@@ -2591,8 +2623,17 @@ if game.PlaceId ~= 79546208627805 then
                                 pcall2(function() Collect:FireServer(999, "TrickOrTreating") end)
                                 task.wait(0.7)
                             end
+                            lastKnockSet, lastKnockAt = idNow, os.clock()
                             waitCostumeConsumed()
+                            -- ชุดหลุดแล้ว = server กินชุดนี้ไปแล้ว -> ปลด guard ให้ใส่ชุดใหม่ได้ทันที
+                            -- (ถ้ายังไม่หลุด เก็บ guard ไว้ กันเคาะซ้ำด้วยชุดเดิม)
+                            if wornSetId() ~= idNow then lastKnockSet = nil end
                             nextKnock[house] = os.clock() + 120   -- ใช้แล้ว รอรอบถัดไป
+                            if res.TrickOrTreat ~= "Treat" and os.clock() - lastTrickLog > 15 then
+                                lastTrickLog = os.clock()
+                                print(string.format("[AutoCandy] Trick (candy=%d) - costume not consumed",
+                                    promised))
+                            end
                         else
                             nextKnock[house] = os.clock() + COOLDOWN  -- rejected = cooldown -> ลองใหม่
                         end
