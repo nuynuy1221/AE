@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 4)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 5)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2422,6 +2422,7 @@ if game.PlaceId ~= 79546208627805 then
         end
 
         local Wear   = Client.Events.RequestWearCostumePieces
+        local Store  = Client.Events.RequestStoreWornCostumePiece
         local Equip  = Client.Events.RequestEquipCostume
         local Open   = Client.Events.RequestOpenItemChest
         local KNOCK  = Client.Events.RequestKnockOnDoor
@@ -2430,21 +2431,10 @@ if game.PlaceId ~= 79546208627805 then
         ------------------------------------------------------------
         -- ชุด
         ------------------------------------------------------------
-        local function piecesOf(folder)
-            local n = 0
-            if folder then
-                for _, p in ipairs(folder:GetChildren()) do
-                    if p:GetAttribute("CostumeId") and p:GetAttribute("CostumeSlot") then n = n + 1 end
-                end
-            end
-            return n
-        end
-
-        -- คืน CostumeId ของชุดที่ครบ 4 slot, nil ถ้ายังไม่มี
-        local function completeSet()
+        -- รวมชิ้นส่วนทุกชิ้น (ที่สวมอยู่ + ใน Closet) แยกตาม CostumeId/slot
+        local function ownedBySet()
             local owned = {}
-            local function scan(folder)
-                if not folder then return end
+            for _, folder in ipairs({ Costume, Closet }) do
                 for _, p in ipairs(folder:GetChildren()) do
                     local id, slot = p:GetAttribute("CostumeId"), p:GetAttribute("CostumeSlot")
                     if id and slot then
@@ -2453,26 +2443,63 @@ if game.PlaceId ~= 79546208627805 then
                     end
                 end
             end
-            scan(Closet); scan(Costume)
-            for id, slots in pairs(owned) do
+            return owned
+        end
+
+        -- สวมชุดครบเซ็ตเดียวอยู่ไหม (4 ชิ้น 4 slot ชุดเดียวกัน) -> คืน CostumeId
+        -- ชุดไม่ครบ = nil: เคาะตอนชุดไม่ครบ = Trick ไม่ได้ candy
+        -- shortcut: ไม่รองรับชุดผสมแบบ Head=X + อีก 3 ชิ้น=Y ที่เกมให้ Boost
+        --           (โค้ดเราสวมแต่ชุดเดียวกันเสมอ จึงไม่เกิด; อัปเกรดถ้าอยากรองรับ)
+        local function wornSetId()
+            local id, n = nil, 0
+            local slots = {}
+            for _, p in ipairs(Costume:GetChildren()) do
+                local pid, slot = p:GetAttribute("CostumeId"), p:GetAttribute("CostumeSlot")
+                if pid and slot then
+                    n = n + 1
+                    slots[slot] = true
+                    if id == nil then
+                        id = pid
+                    elseif id ~= pid then
+                        return nil
+                    end
+                end
+            end
+            if n ~= 4 then return nil end
+            for _, slot in ipairs(SLOTS) do
+                if not slots[slot] then return nil end
+            end
+            return id
+        end
+
+        -- true = สวมชุดครบเซ็ตอยู่ (หรือเพิ่งสวมให้ครบ), false = ชุดไม่พอ -> ห้ามเคาะ
+        -- ใช้ชุดจาก Closet เท่าที่มี: ของหมด = หยุดเคาะ ไม่เคาะทั้งที่ไม่มีชุด
+        local function ensureCostume()
+            local id = wornSetId()
+            if id then return true end
+            for setId, slots in pairs(ownedBySet()) do
                 local set = {}
                 for _, slot in ipairs(SLOTS) do
                     if slots[slot] then table.insert(set, slots[slot]) end
                 end
-                if #set == 4 then return id, set end
-            end
-            return nil
-        end
-
-        -- true = ใส่ชุดครบแล้ว (หรือใส่อยู่แล้ว)
-        local function ensureCostume()
-            if piecesOf(Costume) >= 4 then return true end
-            local id, set = completeSet()
-            if not id then return false end
-            pcall2(function() Wear:InvokeServer(set) end)
-            task.wait(0.6)
-            if piecesOf(Costume) >= 4 then
-                return true
+                if #set == 4 then
+                    -- ชิ้นที่สวมอยู่แต่คนละชุด = ถอดกลับเข้า Closet ก่อน (แบบ ApplyPreview)
+                    for _, p in ipairs(Costume:GetChildren()) do
+                        if p:GetAttribute("CostumeId") ~= setId then
+                            pcall2(function() Store:InvokeServer(p) end)
+                        end
+                    end
+                    task.wait(0.1)
+                    local missing = {}
+                    for _, p in ipairs(set) do
+                        if p.Parent == Closet then table.insert(missing, p) end
+                    end
+                    if #missing > 0 then
+                        pcall2(function() Wear:InvokeServer(missing) end)
+                        task.wait(0.6)
+                    end
+                    if wornSetId() == setId then return true end
+                end
             end
             return false
         end
@@ -2533,6 +2560,16 @@ if game.PlaceId ~= 79546208627805 then
         end
 
         local nextKnock = {}
+        local lastNoCostumeLog = 0
+
+        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ตทันที
+        -- ต้องรอให้ชุดหลุดจากตัวก่อน ไม่งั้นรอบถัดไปยังเห็นชุดครบ -> เคาะซ้ำทั้งที่ไม่มีชุด
+        local function waitCostumeConsumed()
+            local t0 = os.clock()
+            while wornSetId() and os.clock() - t0 < 2 do
+                task.wait(0.1)
+            end
+        end
 
         local function knockHouses()
             local now = os.clock()
@@ -2548,6 +2585,7 @@ if game.PlaceId ~= 79546208627805 then
                                 pcall2(function() Collect:FireServer(999, "TrickOrTreating") end)
                                 task.wait(0.7)
                             end
+                            waitCostumeConsumed()
                             nextKnock[house] = os.clock() + 120   -- ใช้แล้ว รอรอบถัดไป
                         else
                             nextKnock[house] = os.clock() + COOLDOWN  -- rejected = cooldown -> ลองใหม่
@@ -2578,7 +2616,11 @@ if game.PlaceId ~= 79546208627805 then
                     if ensureCostume() then
                         if not knockHouses() then task.wait(1) end
                     else
-                        -- ยังไม่ครบเซ็ต -> หาชุดต่อ ไม่เคาะ
+                        -- ชุดไม่ครบ/ชุดหมด -> ห้ามเคาะ (เคาะตอนไม่มีชุด = Trick)
+                        if os.clock() - lastNoCostumeLog > 60 then
+                            lastNoCostumeLog = os.clock()
+                            print("[AutoCandy] No full costume set - knock skipped")
+                        end
                         if openBoxes() == 0 then task.wait(3) end
                     end
                 end
@@ -2722,10 +2764,13 @@ local function findNightMonsters()
         -- ข้ามชื่อที่ห้ามตี (exact + keywords)
         if isAttackableModel(model)
             and ((_G.shouldSkipName and not _G.shouldSkipName(model.Name)) or (not _G.shouldSkipName and true)) then
-            -- ข้าม Cultist (StrongholdEnemy)
+            -- ข้าม Cultist (StrongholdEnemy) / ก้อนน้ำแข็ง (Resource = IceBlock:
+            -- ต้องใช้ที่เจาะ/ค้อนตีถึงแตก ตีด้วยขวาน = เสียเวลา)
             if model:GetAttribute("StrongholdEnemy") ~= true
                 and model:GetAttribute("NotAttackable") ~= true
-                and model:GetAttribute("Resurrected") ~= true then
+                and model:GetAttribute("Resurrected") ~= true
+                and model:GetAttribute("Resource") ~= "IceBlock"
+                and not model:HasTag("IceBlock") then
                 -- ข้าม Friendly/Pet tag
                 local hasFactionTag = model:HasTag("Friendly")
                     or model:HasTag("Pet")
