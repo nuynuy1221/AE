@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer 10)")
+print("Version - 1.2.16 (UpgradeClass : Necromancer 11)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2584,17 +2584,21 @@ if game.PlaceId ~= 79546208627805 then
         local lastTrickLog = 0
         -- ชุดที่เพิ่งใช้เคาะ + เวลาที่เคาะ: ยังใส่อยู่ = server ยังไม่กินชุด -> ห้ามเคาะซ้ำ
         -- ลำดับที่ต้องการ: เคาะ -> รอชุดหาย -> ใส่ชุดใหม่ -> เคาะใหม่
-        -- shortcut: ถ้าชุดเดิมค้างเกิน 10 วิ (server ไม่กิน) จะปลดให้เคาะต่อได้ กันค้างถาวร
+        -- server ไม่ได้หักชุดตอนตอบ แต่หักตอนจบ cutscene (~13 วิหลังเคาะ) -> เพดานต้องเกินนั้น
+        -- 10 วิเดิมสั้นเกิน: ปลด guard ก่อนชุดหลุด = เคาะซ้ำด้วยชุดเดิม = Trick
         local lastKnockSet, lastKnockAt = nil, 0
-        local COSTUME_WAIT = 10
+        local COSTUME_WAIT = 20
+        local stripTime = 0     -- วัดจริงรอบแรก แล้วใช้เป็นเพดานรอบถัดไป
 
-        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ต (ไม่ทันที)
+        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ต (ตอนจบ cutscene ไม่ใช่ตอนตอบ)
         -- รอให้ชุดหลุดจากตัวก่อน ไม่งั้น tick ถัดไปยังเห็นชุดครบ -> เคาะซ้ำทั้งที่ไม่มีชุด
-        local function waitCostumeConsumed()
+        local function waitCostumeConsumed(setId)
             local t0 = os.clock()
-            while wornSetId() and os.clock() - t0 < COSTUME_WAIT do
+            local limit = math.max(COSTUME_WAIT, stripTime * 2)
+            while wornSetId() == setId and os.clock() - t0 < limit do
                 task.wait(0.1)
             end
+            if wornSetId() ~= setId then stripTime = os.clock() - t0 end
         end
 
         local function knockHouses()
@@ -2620,11 +2624,12 @@ if game.PlaceId ~= 79546208627805 then
                         if ok and type(res) == "table" and res.Success then
                             local promised = res.Candy or 0
                             if promised > 0 then
+                                -- FireServer คิวทันที ไม่ต้องรอ: allowance ถูกตั้งตอน Knock ตอบแล้ว
+                                -- (เดิมรอ 0.7 วิ = ตายเปล่าทุกประตู)
                                 pcall2(function() Collect:FireServer(999, "TrickOrTreating") end)
-                                task.wait(0.7)
                             end
                             lastKnockSet, lastKnockAt = idNow, os.clock()
-                            waitCostumeConsumed()
+                            waitCostumeConsumed(idNow, house)
                             -- ชุดหลุดแล้ว = server กินชุดนี้ไปแล้ว -> ปลด guard ให้ใส่ชุดใหม่ได้ทันที
                             -- (ถ้ายังไม่หลุด เก็บ guard ไว้ กันเคาะซ้ำด้วยชุดเดิม)
                             if wornSetId() ~= idNow then lastKnockSet = nil end
