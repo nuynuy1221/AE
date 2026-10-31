@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.17 (รองรับการ BuyClass ใน HalloweenShop)")
+print("Version - 1.2.18 (Auto Buy Gems)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -89,6 +89,8 @@ Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"
 -- ถ้าไม่ตั้ง = ฟาร์มปกติ (ตีต้นไม้ด้วยขวาน)
 Config.UpgradeClass = Config.UpgradeClass or {}  -- Table เช่น {"Cyborg"} - ตอนนี้ใช้แค่ตัวแรก
 -- Config.Diamonds: no default (if not set externally = nil = never send DONE)
+-- Config.BuyGems: default on. In the Lobby, buy the Halloween "Gem Pack" with HalloweenCandy until it is sold out.
+--   Gems are bought first, before BuyClass. Set false to disable.
 -- Config.AutoReturnLobby: default on. In a farm map, teleport back to Lobby when a class level-up is ready
 --   or all goals are met (so the Lobby can upgrade the class / send DONE). Set false to disable.
 
@@ -430,6 +432,14 @@ local CLASS_QUESTS = {
     ["Fancy Dressed"] = {
         [2] = { CollectCostumePiece = 40, TrickOrTreat = 50 },
         [3] = { CollectCostumePiece = 120, TrickOrTreat = 100 },
+    },
+    ["Ghost Ranger"] = {
+        [2] = { GhostCrossbowHits = 100 },
+        [3] = { GhostCrossbowHits = 300 },
+    },
+    Witch = {
+        [2] = { HitPotion = 100 },
+        [3] = { HitPotion = 300 },
     },
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
@@ -1299,6 +1309,83 @@ if isLobby() then
     -- ============================================
     updateStatus("Upgrading Classes...")
     lobbyAutoLevelUp()
+
+    -- ============================================
+    -- Auto-Buy Halloween Gems (Lobby only)
+    -- "GemPack1" is bought with HalloweenCandy. Price and purchase limit come from the HalloweenShop database.
+    -- Runs before the class auto-buy, so Gems get the candy first. Skips when sold out.
+    -- Config.BuyGems = false disables it.
+    -- ============================================
+    if Config.BuyGems ~= false then
+        local okGems, errGems = pcall(function()
+            local RS = game:GetService("ReplicatedStorage")
+            local dbFolder = RS:FindFirstChild("Databases")
+            local dbModule = dbFolder and dbFolder:FindFirstChild("HalloweenShop")
+            local remotes = RS:FindFirstChild("RemoteEvents")
+            local buyRemote = remotes and remotes:FindFirstChild("RequestPurchaseHalloweenItem")
+            if not (dbModule and buyRemote) then return end
+            local db = require(dbModule)
+            if type(db) ~= "table" then return end
+
+            local GEM_NAME = "GemPack1"
+            local item
+            for _, it in ipairs(db) do
+                if type(it) == "table" and it.Name == GEM_NAME then item = it break end
+            end
+            if not item then return end
+            local price, maxQty = item.Price or 0, item.Quantity or 1
+
+            -- cheap checks first (no waiting when there is nothing to spend)
+            local candy0 = LocalPlayer:GetAttribute("HalloweenCandy") or 0
+            if candy0 < price then
+                print(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy0))
+                return
+            end
+
+            -- the server keeps LocalPlayer.HalloweenShop.<item> with attribute Quantity = times bought
+            local function bought()
+                local hs = LocalPlayer:FindFirstChild("HalloweenShop")
+                local f = hs and hs:FindFirstChild(GEM_NAME)
+                return f and (f:GetAttribute("Quantity") or 1) or 0
+            end
+            LocalPlayer:WaitForChild("HalloweenShop", 5)
+            if bought() >= maxQty then return end -- sold out: skip
+
+            -- not released yet?
+            local Shop = RS:FindFirstChild("Shop")
+            local hall = Shop and Shop:FindFirstChild("Halloween")
+            local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. GEM_NAME)
+            local now = workspace:GetServerTimeNow()
+            if type(release) == "number" and now < release then
+                print(string.format("[Auto-Buy] Gems not released yet (%.1f hours left)", (release - now) / 3600))
+                return
+            end
+
+            while bought() < maxQty do
+                local candy = LocalPlayer:GetAttribute("HalloweenCandy") or 0
+                if candy < price then
+                    print(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy))
+                    break
+                end
+                local before = bought()
+                updateStatus(string.format("Buying Gems (%d/%d)", before + 1, maxQty))
+                buyRemote:FireServer(GEM_NAME)
+                local confirmed = false
+                for _ = 1, 10 do
+                    task.wait(0.5)
+                    if bought() > before then confirmed = true break end
+                end
+                if not confirmed then
+                    warn("[Auto-Buy] Gems purchase not confirmed by the server, stopping")
+                    break
+                end
+                print(string.format("[Auto-Buy] Gems bought %d/%d", bought(), maxQty))
+            end
+        end)
+        if not okGems then
+            warn("[Auto-Buy] Gems error: " .. tostring(errGems))
+        end
+    end
 
     -- ============================================
     -- Auto-Buy Class (ก่อนสร้างห้อง)
