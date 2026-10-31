@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.16 (UpgradeClass : Necromancer)")
+print("Version - 1.2.17 (รองรับการ BuyClass ใน HalloweenShop)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -426,6 +426,10 @@ local CLASS_QUESTS = {
     Cyborg = {
         [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
         [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
+    },
+    ["Fancy Dressed"] = {
+        [2] = { CollectCostumePiece = 40, TrickOrTreat = 50 },
+        [3] = { CollectCostumePiece = 120, TrickOrTreat = 100 },
     },
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
@@ -1319,6 +1323,58 @@ if isLobby() then
                         return s == true
                     end
 
+                    -- Halloween Shop classes (e.g. "Fancy Dressed"): HiddenFromShop in the normal class shop.
+                    -- Bought with HalloweenCandy via RequestPurchaseHalloweenItem(name), same call as the shop UI.
+                    local function halloweenClassItem(name)
+                        local dbFolder = ReplicatedStorage:FindFirstChild("Databases")
+                        local dbModule = dbFolder and dbFolder:FindFirstChild("HalloweenShop")
+                        if not dbModule then return nil end
+                        local ok, db = pcall(require, dbModule)
+                        if not ok or type(db) ~= "table" then return nil end
+                        local best
+                        for _, it in ipairs(db) do
+                            if type(it) == "table" and it.Type == "Class" and it.Name == name and not it.Placeholder then
+                                -- the shop lists the same class several times; an entry without ReleaseTime is on sale now
+                                if not best then
+                                    best = it
+                                else
+                                    local a, b = it.ReleaseTime and 1 or 0, best.ReleaseTime and 1 or 0
+                                    if a < b or (a == b and (it.Price or 0) < (best.Price or 0)) then best = it end
+                                end
+                            end
+                        end
+                        return best
+                    end
+
+                    local function buyHalloweenClass(name, item)
+                        local price = item.Price or 0
+                        local candy = LocalPlayer:GetAttribute("HalloweenCandy") or 0
+                        -- the server publishes the release time as Shop.Halloween attribute Release_<Name_with_underscores>
+                        local hall = Shop:FindFirstChild("Halloween")
+                        local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. (string.gsub(name, " ", "_")))
+                        local now = workspace:GetServerTimeNow()
+                        if type(release) == "number" and now < release then
+                            print(string.format("[Auto-Buy] %s not released yet (%.1f hours left)", name, (release - now) / 3600))
+                            return false
+                        end
+                        if candy < price then
+                            print(string.format("[Auto-Buy] %s needs %d HalloweenCandy (have %d)", name, price, candy))
+                            return false
+                        end
+                        print(string.format("[Auto-Buy] Buying (Halloween Shop): %s for %d candy", name, price))
+                        updateStatus(string.format("Buying: %s", name))
+                        Client.Events.RequestPurchaseHalloweenItem:FireServer(name)
+                        for _ = 1, 10 do
+                            task.wait(0.5)
+                            if ClassProgress:FindFirstChild(name) then
+                                print(string.format("[Auto-Buy] Bought: %s", name))
+                                return true
+                            end
+                        end
+                        warn(string.format("[Auto-Buy] Buy %s failed (server did not grant the class)", name))
+                        return false
+                    end
+
                     updateStatus("Buying Classes...")
 
                     local totalClasses = #Config.BuyClass
@@ -1327,8 +1383,13 @@ if isLobby() then
 
                     for _, className in ipairs(Config.BuyClass) do
                         if not ClassProgress:FindFirstChild(className) then
+                            local hItem = halloweenClassItem(className)
                             local classFolder = Classes:FindFirstChild(className)
-                            if classFolder then
+                            if hItem then
+                                if not buyHalloweenClass(className, hItem) then
+                                    table.insert(outOfStock, className)
+                                end
+                            elseif classFolder then
                                 local inStock = isInStock(classFolder)
                                 if inStock then
                                     print(string.format("[Auto-Buy] Buying: %s", className))
