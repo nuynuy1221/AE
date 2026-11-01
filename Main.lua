@@ -7,7 +7,7 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
-print("Version - 1.2.18 (Auto Buy Gems)")
+print("Version - 1.2.19 (UpgradeClass : Witch)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -765,7 +765,9 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                     local cpf = LocalPlayer:FindFirstChild("ClassProgress")
                     local folder = cpf and cpf:FindFirstChild(equipped)
                     if lvl < 3 then
-                        if folder and folder:GetAttribute("CanLevelUp") == true then
+                        if equipped == "Witch" and _G.WSM_Witch and _G.WSM_Witch.isWitch then
+                            -- Module_Witch decides when to leave (it waits for the Stronghold round to finish)
+                        elseif folder and folder:GetAttribute("CanLevelUp") == true then
                             reason = equipped .. " can level up (Lv." .. lvl .. ")"
                         else
                             local reqs = CLASS_QUESTS[equipped] and CLASS_QUESTS[equipped][lvl + 1]
@@ -2341,6 +2343,9 @@ end
 --     (ถึงเกณฑ์แล้ว pet ตีไปก็ไม่นับ ขาดแค่ soul -> ต้องรีบฆ่าให้เร็ว)
 local function zeroEnemyHealth(model)
     if model.Name == "Deer" then return false end
+    -- Witch with an unfinished HitPotion quest: potion only, never zero the cultists' HP
+    local witchModule = _G.WSM_Witch
+    if witchModule and witchModule.potionOnly and witchModule.potionOnly() then return false end
     if LocalPlayer:GetAttribute("Class") == "Necromancer"
         and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
         and (LocalPlayer:GetAttribute("CurrentPets") or 0) > 0
@@ -2861,6 +2866,7 @@ local ATTACK_INTERVAL = 0.1
 
 -- Expose functions ให้ Module (local functions ไม่อยู่ใน _G โดย default)
 _G.zeroEnemyHealth = zeroEnemyHealth
+_G.forceTeleportLobby = forceTeleportLobby
 _G.shouldSkipName = shouldSkipName
 -- ponytail: basic skip names (Cultist + Deer) if real def missed; upgrade when full skip list available
 if type(shouldSkipName) ~= "function" then
@@ -2928,6 +2934,7 @@ local Alien = loadClassModule("Module_Alien.lua", "isAlienScientist")
 local BGH = loadClassModule("Module_BGH.lua", "isBigGameHunter")
 local BGH_Module = BGH
 local Necromancer = loadClassModule("Module_Necromancer.lua", "isNecromancer")
+_G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
 
 -- Vampire state and helpers are owned by Module_Vampire.lua.
@@ -4911,6 +4918,9 @@ elseif Woodsman.isWoodsman and not Woodsman.isAllQuestDone() then
 elseif Necromancer.isNecromancer and not Necromancer.isAllQuestDone() then
     -- Necromancer: เก็บ soul + ชุบศพ (ทำงานคู่กับ Stronghold fight loop)
     Necromancer.runBackground()
+elseif _G.WSM_Witch.isWitch and not _G.WSM_Witch.isAllQuestDone() then
+    -- Witch: throw the Witch Potion for the HitPotion quest (outside farm + Stronghold fight)
+    _G.WSM_Witch.runBackground()
 end
 
 print("\n[Step 4] Waiting for Stronghold to open...")
@@ -5093,3 +5103,4 @@ local ok, err = pcall(function() Stronghold.run(strongholdContext) end)
 if not ok then
     warn("[Stronghold] Module failed: " .. tostring(err))
 end
+_G.WSM_StrongholdRound = false -- never leave Module_Witch waiting for a round that is over
