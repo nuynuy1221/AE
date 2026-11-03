@@ -7,6 +7,30 @@ end
 -- Main Script - Auto Farm Manager
 -- Sugar Hub - Auto Farm System
 
+-- ============================================
+-- LOGGING
+--   Log.dev(...)          debug output. Silent by default; shown when DEV_PRINT below is true
+--                         or when DevPrint = true is set in _G.Config.
+--   Log.err(reason, next) always shown, format: "Error : <what happened> / <what happens next>"
+-- Always shown (plain print): Version, Sugar Hub Started/Complete, current map, [Quest] Done, [Teleport]
+-- Class modules get the same logger through _G.WSM_Log.
+-- ============================================
+do
+    local DEV_PRINT = false -- set true here to see every debug print
+    local Log = {}
+    function Log.dev(...)
+        local cfg = _G.Config
+        if DEV_PRINT or (type(cfg) == "table" and cfg.DevPrint == true) then
+            print(...)
+        end
+    end
+    function Log.err(reason, nextStep)
+        warn("Error : " .. tostring(reason) .. " / " .. tostring(nextStep))
+    end
+    _G.WSM_Log = Log
+end
+local Log = _G.WSM_Log
+
 print("Version - 1.2.19 (UpgradeClass : Witch)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,6 +40,7 @@ local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
 print("=== Sugar Hub Started ===")
+print("[Map] " .. (game.PlaceId == 79546208627805 and "Lobby" or "Farm map"))
 
 -- ============================================
 -- RETRY: ถ้าสคริปต์บูตไม่จบใน BOOT_TIMEOUT วิ = TP กลับ Lobby (79546208627805) แล้วลองใหม่
@@ -31,7 +56,8 @@ task.spawn(function()
     while not _G.KaitunExecuted do
         if (tick() - started) > BOOT_TIMEOUT then
             attempt += 1
-            print(("[Retry] Boot not finished in %ds - teleport to Lobby (try #%d)"):format(BOOT_TIMEOUT, attempt))
+            Log.err(("[Retry] boot not finished in %ds"):format(BOOT_TIMEOUT),
+                ("teleporting to Lobby and retrying (try #%d)"):format(attempt))
             pcall(function()
                 game:GetService("TeleportService"):Teleport(79546208627805, LocalPlayer)
             end)
@@ -82,6 +108,8 @@ local Config = _G.Config
 -- Defaults: if not set externally, use false / leave unset
 Config.Horst = Config.Horst == true
 Config.ToggleRender3D = Config.ToggleRender3D == true
+-- Config.DevPrint: default off. true = show every debug print (errors are always shown).
+Config.DevPrint = Config.DevPrint == true
 Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"Camper", "Medic"}
 -- UpgradeClass: class หลักที่จะใช้ฟาร์ม (ตอนนี้รอบรับ Cyborg — ใช้ Laser Cannon ยิงแทนตี)
 -- ตอนอยู่ lobby: equip class นี้ทันที + อัปเกรดถ้า CanLevelUp
@@ -487,10 +515,37 @@ local function horstClassText()
     return string.format("%s (Lv.%d)", cls, lvl)
 end
 
+-- Candy amount for Horst. The Lobby shop uses the "HalloweenCandy" attribute while the farm-map HUD uses "Candy",
+-- so each place reads its own attribute first and falls back to the other one, then to any numeric attribute or
+-- leaderstats value whose name contains "candy". Stored in _G (no free top-level local left).
+do
+    local function num(v) return type(v) == "number" and v or nil end
+    _G.WSM_GetCandy = function()
+        local lobby = game.PlaceId == 79546208627805
+        local names = lobby and { "HalloweenCandy", "Candy" } or { "Candy", "HalloweenCandy" }
+        for _, n in ipairs(names) do
+            local v = num(LocalPlayer:GetAttribute(n))
+            if v then return v end
+        end
+        local ok, found = pcall(function()
+            for k, v in pairs(LocalPlayer:GetAttributes()) do
+                if num(v) and tostring(k):lower():find("candy", 1, true) then return v end
+            end
+            local ls = LocalPlayer:FindFirstChild("leaderstats")
+            if ls then
+                for _, c in ipairs(ls:GetChildren()) do
+                    if c.Name:lower():find("candy", 1, true) and num(c.Value) then return c.Value end
+                end
+            end
+        end)
+        return ok and found or 0
+    end
+end
+
 local function horstJson()
     local data = {
         Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
-        Candy = LocalPlayer:GetAttribute("Candy") or 0,
+        Candy = _G.WSM_GetCandy(),
         Class = horstClassText(),
     }
     local ok, json = pcall(function() return HttpService:JSONEncode(data) end)
@@ -507,7 +562,7 @@ local function sendHorstDescription(force)
     if not horstThrottle(force) then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local candy = LocalPlayer:GetAttribute("Candy") or 0
+    local candy = _G.WSM_GetCandy()
 
     local isLobby = game.PlaceId == 79546208627805
     local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
@@ -556,12 +611,12 @@ local function sendHorstDescription(force)
                                     local avgPct = math.floor(totalPct / count)
                                     classStr = classStr .. " (" .. avgPct .. "%)"
                                     -- Dev Logs: แสดงแต่ละ stat แยก
-                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
+                                    Log.dev(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
                                         className, targetLevel, avgPct))
                                     for statKey, goal in pairs(reqs) do
                                         local have = folder:GetAttribute(statKey) or 0
                                         if type(have) == "number" and goal > 0 then
-                                            print(string.format("  - %s: %d / %d",
+                                            Log.dev(string.format("  - %s: %d / %d",
                                                 statKey, have, goal))
                                         end
                                     end
@@ -630,7 +685,36 @@ updateDiamondsLabel()
 -- ClassStatUpdated Remote watcher: ดัก event จาก server → อัปเดต quest % real-time
 -- signature: ClassStatUpdated:FireClient(player, className, statKey, value, delta)
 local classStatCache = {}  -- [className] = { [statKey] = value }
-local lastFarmReport = 0    -- cooldown log
+local questDoneReported = {} -- ["Class:Lv"] = true once the quest-complete line was printed
+
+-- Shared quest-complete message, the same format for every class (called by each class module):
+--   [Quest] Done : <Class> Lv.<level to reach> - <Stat> have/goal, <Stat> have/goal
+-- Printed once per class and level, and only when every stat has reached its goal.
+-- Returns true when the quest of that class is complete.
+_G.WSM_QuestDone = function(className)
+    local lvl = (LocalPlayer:GetAttribute("ClassLevel") or 1) + 1
+    local key = className .. ":" .. lvl
+    if questDoneReported[key] then return true end
+
+    local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][lvl]
+    local stats = classStatCache[className]
+    if not (reqs and stats) then return false end
+
+    local names = {}
+    for stat in pairs(reqs) do names[#names + 1] = stat end
+    table.sort(names)
+
+    local parts = {}
+    for _, stat in ipairs(names) do
+        local have, goal = stats[stat] or 0, reqs[stat]
+        if type(have) ~= "number" or type(goal) ~= "number" or have < goal then return false end
+        parts[#parts + 1] = string.format("%s %d/%d", stat, have, goal)
+    end
+
+    questDoneReported[key] = true
+    print(string.format("[Quest] Done : %s Lv.%d - %s", className, lvl, table.concat(parts, ", ")))
+    return true
+end
 
 pcall(function()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -639,7 +723,7 @@ pcall(function()
         local ReplicatedStorage = game:GetService("ReplicatedStorage")
         local Remotes = ReplicatedStorage:WaitForChild("RemoteEvents", 300)  -- รอ 5 นาที
         if not Remotes then
-            warn("[ClassStat] RemoteEvents not found after 5 min")
+            Log.err("[ClassStat] RemoteEvents not found after 5 min", "quest progress tracking from ClassStatUpdated is disabled")
             return
         end
         -- ตอนนี้รอ ClassStatUpdated แบบ indefinite (กัน hook ก่อน remote replicate)
@@ -680,27 +764,13 @@ pcall(function()
                             end
                             if count > 0 then
                                 local avgPct = math.floor(totalPct / count)
-                                if tick() - lastFarmReport >= 1 then
-                                    lastFarmReport = tick()
-                                    print(string.format("[Quest] %s -> Lv.%d: %d%% (via ClassStatUpdated)",
-                                        mainClass, lvl + 1, avgPct))
-                                    -- Dev Logs: แสดง stat แต่ละอัน
-                                    for sk, goal in pairs(reqs) do
-                                        local have = classStatCache[mainClass][sk]
-                                            or (cpc and cpc:GetAttribute(sk))
-                                            or 0
-                                        if type(have) == "number" and goal > 0 then
-                                            print(string.format("  - %s: %d / %d", sk, have, goal))
-                                        end
-                                    end
-                                end
                                 local equipped = LocalPlayer:GetAttribute("Class")
                                 local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
                                 local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
                                     or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
                                 if horstThrottle() then
                                     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-                                    local candy = LocalPlayer:GetAttribute("Candy") or 0
+                                    local candy = _G.WSM_GetCandy()
                                     horstSend(string.format(
                                         "🌲 99 Nights • Diamonds: %d • Candy: %d • Class: %s [Can't check classes during farming]",
                                         diamonds, candy, classTextPart))
@@ -711,7 +781,7 @@ pcall(function()
                 end
             end
         end)
-        print("[ClassStat] watching ClassStatUpdated")
+        Log.dev("[ClassStat] watching ClassStatUpdated")
     end)
 end)
 
@@ -891,15 +961,15 @@ local function retryUntil(label, fn, interval)
         local ok, result = pcall(fn)
         if ok and result then
             if attempt > 1 then
-                print(("  [OK] %s succeeded on attempt %d"):format(label, attempt))
+                Log.dev(("  [OK] %s succeeded on attempt %d"):format(label, attempt))
             end
             return result
         end
         if not ok then
-            warn(("  [WARN] %s error on attempt %d: %s"):format(label, attempt, tostring(result)))
+            Log.err(("[retry] %s failed on attempt %d: %s"):format(label, attempt, tostring(result)), "retrying")
         end
         if attempt % 20 == 0 then
-            print(("  ...%s not yet (attempt %d)"):format(label, attempt))
+            Log.dev(("  ...%s not yet (attempt %d)"):format(label, attempt))
         end
         pcall(updateStatus, ("%s... (%d)"):format(label, attempt))
         task.wait(interval)
@@ -982,7 +1052,7 @@ local function setShieldSolid(enabled)
     if shieldSolid == enabled then return end
     shieldSolid = enabled
     if shieldFolder then
-        print("[Shield] Switch mode -> " .. (enabled and "SOLID (block monsters)" or "PHASE (no collision)"))
+        Log.dev("[Shield] Switch mode -> " .. (enabled and "SOLID (block monsters)" or "PHASE (no collision)"))
         buildShield()
     end
 end
@@ -996,7 +1066,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("✅ GUI Loaded")
+Log.dev("✅ GUI Loaded")
 
 -- ============================================
 -- STEP 1: Check Map and Enter Solo if needed
@@ -1024,13 +1094,13 @@ local function lobbyAutoLevelUp()
     if Config.UpgradeClass == nil then
         -- ไม่ได้ตั้ง → silent skip
     elseif type(Config.UpgradeClass) ~= "table" then
-        warn(string.format("[ClassUpgrade] Config.UpgradeClass is %s (expected table) - skip",
-            type(Config.UpgradeClass)))
+        Log.err(string.format("[ClassUpgrade] Config.UpgradeClass is %s (expected table)", type(Config.UpgradeClass)),
+            "ignoring UpgradeClass")
     else
         for i, v in ipairs(Config.UpgradeClass) do
             if type(v) ~= "string" then
-                warn(string.format("[ClassUpgrade] UpgradeClass[%d] is %s (expected string) - skip",
-                    i, type(v)))
+                Log.err(string.format("[ClassUpgrade] UpgradeClass[%d] is %s (expected string)", i, type(v)),
+                    "skipping this entry")
             else
                 table.insert(validClasses, v)
             end
@@ -1046,7 +1116,7 @@ local function lobbyAutoLevelUp()
     for _, mainClass in ipairs(validClasses) do
         local folder = ClassProgress:FindFirstChild(mainClass)
         if not folder then
-            warn("[ClassUpgrade] " .. mainClass .. " not owned")
+            Log.err("[ClassUpgrade] " .. mainClass .. " is in UpgradeClass but not owned", "trying the next class in UpgradeClass")
         else
             local curLvl = folder:GetAttribute("Level") or 1
             if curLvl >= 3 then
@@ -1060,7 +1130,7 @@ local function lobbyAutoLevelUp()
                         t = t + 0.1
                     end
                     if folder:GetAttribute("Equipped") ~= true then
-                        warn("[ClassUpgrade] equip " .. mainClass .. " timed out (server may not have responded)")
+                        Log.err("[ClassUpgrade] equip " .. mainClass .. " timed out (server did not respond)", "continuing without confirmation")
                     end
                 end
                 break  -- เจอ class ที่ยังไม่ Lv.3 → หยุด
@@ -1078,31 +1148,31 @@ local function lobbyAutoLevelUp()
                 Client.Events.RequestLevelUpClass:FireServer(cn)
             end)
             if not ok then
-                warn("[ClassUpgrade] FireServer(" .. cn .. ") failed")
+                Log.err("[ClassUpgrade] RequestLevelUpClass(" .. cn .. ") call failed", "will retry on the next Lobby visit")
             end
             task.wait(0.5)
             local toLv = folder:GetAttribute("Level") or 1
             if toLv > fromLv then
                 table.insert(upgrades, cn .. " Lv" .. fromLv .. "->Lv" .. toLv)
             else
-                warn("[ClassUpgrade] " .. cn .. " still Lv." .. toLv .. " after request (server may not have processed)")
+                Log.err("[ClassUpgrade] " .. cn .. " is still Lv." .. toLv .. " after the level-up request (server did not process it)", "will retry on the next Lobby visit")
             end
         end
     end
 
     if #upgrades > 0 then
         local msg = "[ClassUpgrade] " .. table.concat(upgrades, ", ")
-        print(msg)
+        Log.dev(msg)
         updateStatus(msg)
     end
 end
 
 
-print("\n[Step 1] Checking current map...")
+Log.dev("\n[Step 1] Checking current map...")
 updateStatus("Checking Map...")
 
 if isLobby() then
-    print("Currently in Lobby - Entering Solo map...")
+    Log.dev("Currently in Lobby - Entering Solo map...")
     updateStatus("Entering Solo Map...")
 
     local Client = require(LocalPlayer.PlayerScripts.Client)
@@ -1196,16 +1266,16 @@ if isLobby() then
         local standPos = pivot.Position + Vector3.new(0, 3, 5)
         hrp.CFrame = CFrame.lookAt(standPos, pivot.Position)
         task.wait(0.1)
-        print("Teleported to lever")
+        Log.dev("Teleported to lever")
     end
 
     local function rollDailyQuest()
         if not needsRoll() then
-            print("Daily quests already rolled for today")
+            Log.dev("Daily quests already rolled for today")
             return
         end
 
-        print("Rolling daily quests...")
+        Log.dev("Rolling daily quests...")
         teleportToLever()
 
         -- lever กับ prompt อยู่คนละ path เตือนถ้าหลุดระยะกด
@@ -1214,7 +1284,7 @@ if isLobby() then
         if prompt and hrp and promptPart and promptPart:IsA("BasePart") then
             local dist = (promptPart.Position - hrp.Position).Magnitude
             if dist > prompt.MaxActivationDistance then
-                warn(("Prompt out of range after teleport: %.1f > %d"):format(dist, prompt.MaxActivationDistance))
+                Log.err(("[DailyQuest] roll prompt out of range after teleport (%.1f > %d)"):format(dist, prompt.MaxActivationDistance), "trying to roll anyway")
             end
         end
 
@@ -1226,11 +1296,11 @@ if isLobby() then
             return not needsRoll()
         end, 0.25)
 
-        print("Roll complete")
+        Log.dev("Roll complete")
     end
 
     local function claimAllDailyQuestRewards()
-        print("Claiming Daily Quest rewards...")
+        Log.dev("Claiming Daily Quest rewards...")
         local DailyQuests = LocalPlayer:FindFirstChild("DailyQuests")
         if not DailyQuests then return end
         for _, quest in ipairs(DailyQuests:GetChildren()) do
@@ -1245,7 +1315,7 @@ if isLobby() then
     end
 
     local function claimAllBadges()
-        print("Claiming Badges...")
+        Log.dev("Claiming Badges...")
         local Unclaimed = LocalPlayer:FindFirstChild("UnclaimedBadges")
         if not Unclaimed then return end
         local BadgeDB = Client.Databases and Client.Databases.BadgeDatabase
@@ -1267,7 +1337,7 @@ if isLobby() then
     updateStatus("Claiming Badges...")
     claimAllBadges()
 
-    print("Daily Quests & Badges done")
+    Log.dev("Daily Quests & Badges done")
 
     -- ============================================
     -- Redeem Codes (Config.Code = {"CODE1", "CODE2", ...} - ตั้งจากภายนอกได้หลายอัน)
@@ -1278,7 +1348,7 @@ if isLobby() then
         if type(redeemCodes) == "table" and #redeemCodes > 0 then
             local RequestInputCode = Client.Events.RequestInputCode
             if not RequestInputCode then
-                warn("[CodeRedeem] RequestInputCode not found")
+                Log.err("[CodeRedeem] RequestInputCode remote not found", "skipping code redemption")
             else
                 local redeemed = 0
                 for _, code in ipairs(redeemCodes) do
@@ -1289,16 +1359,16 @@ if isLobby() then
                     if ok then
                         local msg = tostring(result == nil and "Something went wrong" or result)
                         local kind = tostring(status or "Error")
-                        print(string.format("[CodeRedeem] %s -> %s (%s)", code, msg, kind))
+                        Log.dev(string.format("[CodeRedeem] %s -> %s (%s)", code, msg, kind))
                         updateStatus("Redeem: " .. msg)
                         if kind == "Success" then redeemed += 1 end
                     else
-                        warn("[CodeRedeem] " .. tostring(code) .. " failed: " .. tostring(result))
+                        Log.err("[CodeRedeem] redeeming " .. tostring(code) .. " failed: " .. tostring(result), "moving on to the next code")
                     end
                     task.wait(2) -- cooldown ระหว่างโค้ด เท่ากับ UI EnterCode ในเกม (DiamondsClient: wait(2) ก่อนปลดล็อกกรอกใหม่)
                 end
                 if redeemed > 0 then
-                    print("[CodeRedeem] Successfully redeemed " .. redeemed .. " code(s)")
+                    Log.dev("[CodeRedeem] Successfully redeemed " .. redeemed .. " code(s)")
                 end
             end
         end
@@ -1340,7 +1410,7 @@ if isLobby() then
             -- cheap checks first (no waiting when there is nothing to spend)
             local candy0 = LocalPlayer:GetAttribute("HalloweenCandy") or 0
             if candy0 < price then
-                print(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy0))
+                Log.dev(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy0))
                 return
             end
 
@@ -1359,14 +1429,14 @@ if isLobby() then
             local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. GEM_NAME)
             local now = workspace:GetServerTimeNow()
             if type(release) == "number" and now < release then
-                print(string.format("[Auto-Buy] Gems not released yet (%.1f hours left)", (release - now) / 3600))
+                Log.dev(string.format("[Auto-Buy] Gems not released yet (%.1f hours left)", (release - now) / 3600))
                 return
             end
 
             while bought() < maxQty do
                 local candy = LocalPlayer:GetAttribute("HalloweenCandy") or 0
                 if candy < price then
-                    print(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy))
+                    Log.dev(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy))
                     break
                 end
                 local before = bought()
@@ -1378,14 +1448,14 @@ if isLobby() then
                     if bought() > before then confirmed = true break end
                 end
                 if not confirmed then
-                    warn("[Auto-Buy] Gems purchase not confirmed by the server, stopping")
+                    Log.err("[Auto-Buy] Gem Pack purchase was not confirmed by the server", "stopping Gem purchases for this Lobby visit")
                     break
                 end
-                print(string.format("[Auto-Buy] Gems bought %d/%d", bought(), maxQty))
+                Log.dev(string.format("[Auto-Buy] Gems bought %d/%d", bought(), maxQty))
             end
         end)
         if not okGems then
-            warn("[Auto-Buy] Gems error: " .. tostring(errGems))
+            Log.err("[Auto-Buy] Gem Pack purchase crashed: " .. tostring(errGems), "skipping Gem purchases and continuing")
         end
     end
 
@@ -1443,24 +1513,24 @@ if isLobby() then
                         local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. (string.gsub(name, " ", "_")))
                         local now = workspace:GetServerTimeNow()
                         if type(release) == "number" and now < release then
-                            print(string.format("[Auto-Buy] %s not released yet (%.1f hours left)", name, (release - now) / 3600))
+                            Log.dev(string.format("[Auto-Buy] %s not released yet (%.1f hours left)", name, (release - now) / 3600))
                             return false
                         end
                         if candy < price then
-                            print(string.format("[Auto-Buy] %s needs %d HalloweenCandy (have %d)", name, price, candy))
+                            Log.dev(string.format("[Auto-Buy] %s needs %d HalloweenCandy (have %d)", name, price, candy))
                             return false
                         end
-                        print(string.format("[Auto-Buy] Buying (Halloween Shop): %s for %d candy", name, price))
+                        Log.dev(string.format("[Auto-Buy] Buying (Halloween Shop): %s for %d candy", name, price))
                         updateStatus(string.format("Buying: %s", name))
                         Client.Events.RequestPurchaseHalloweenItem:FireServer(name)
                         for _ = 1, 10 do
                             task.wait(0.5)
                             if ClassProgress:FindFirstChild(name) then
-                                print(string.format("[Auto-Buy] Bought: %s", name))
+                                Log.dev(string.format("[Auto-Buy] Bought: %s", name))
                                 return true
                             end
                         end
-                        warn(string.format("[Auto-Buy] Buy %s failed (server did not grant the class)", name))
+                        Log.err(string.format("[Auto-Buy] buying %s from the Halloween shop was not granted by the server", name), "treating it as out of stock, retrying on the next Lobby visit")
                         return false
                     end
 
@@ -1481,21 +1551,21 @@ if isLobby() then
                             elseif classFolder then
                                 local inStock = isInStock(classFolder)
                                 if inStock then
-                                    print(string.format("[Auto-Buy] Buying: %s", className))
+                                    Log.dev(string.format("[Auto-Buy] Buying: %s", className))
                                     updateStatus(string.format("Buying: %s", className))
                                     Client.Events.RequestPurchaseClass:FireServer(className)
                                     task.wait(0.5)
                                     if ClassProgress:FindFirstChild(className) then
-                                        print(string.format("[Auto-Buy] Bought: %s", className))
+                                        Log.dev(string.format("[Auto-Buy] Bought: %s", className))
                                     else
-                                        warn(string.format("[Auto-Buy] Buy %s failed (server may not have processed)", className))
+                                        Log.err(string.format("[Auto-Buy] buying %s was not confirmed by the server", className), "continuing, ownership is checked again afterwards")
                                     end
                                 else
-                                    print(string.format("[Auto-Buy] %s out of stock", className))
+                                    Log.dev(string.format("[Auto-Buy] %s out of stock", className))
                                     table.insert(outOfStock, className)
                                 end
                             else
-                                warn(string.format("[Auto-Buy] Class folder not found: %s", className))
+                                Log.err(string.format("[Auto-Buy] shop entry for %s not found", className), "skipping this class")
                             end
                         else
                             ownedCount = ownedCount + 1
@@ -1527,13 +1597,13 @@ if isLobby() then
                         task.wait(2)
                     end
                 else
-                    warn("Auto-Buy: Classes folder not found")
+                    Log.err("[Auto-Buy] ReplicatedStorage.Shop.Classes not found", "skipping class purchases")
                 end
             else
-                warn("Auto-Buy: Shop not found")
+                Log.err("[Auto-Buy] ReplicatedStorage.Shop not found", "skipping class purchases")
             end
         else
-            warn("Auto-Buy: ClassProgress not found")
+            Log.err("[Auto-Buy] LocalPlayer.ClassProgress not found", "skipping class purchases")
         end
     end
 
@@ -1591,12 +1661,12 @@ if isLobby() then
             for _, tp in ipairs(teleporters) do
                 if tp.obj and countPlayersInBeam(tp.num) == 0 then
                     selectedTeleporter = tp.num
-                    print("Found empty Teleporter:", selectedTeleporter)
+                    Log.dev("Found empty Teleporter:", selectedTeleporter)
                     break
                 end
             end
             if not selectedTeleporter then
-                print("All teleporters busy - waiting...")
+                Log.dev("All teleporters busy - waiting...")
                 updateStatus("Waiting for Empty Teleporter...")
                 task.wait(1)
             end
@@ -1607,7 +1677,7 @@ if isLobby() then
         Client.Events.TeleportEvent:FireServer("Add", selectedTeleporter)
         task.wait(0.1)
         Client.Events.TeleportEvent:FireServer("Chosen", nil, 1, nil)
-        print("Entering Solo map...")
+        Log.dev("Entering Solo map...")
         updateStatus("Loading Map...")
 
         -- รอสูงสุด 20 วิ - เฝ้าตลอดว่ามีคนอื่นเดินเข้าวง Teleporter ที่เราจองไหม
@@ -1622,28 +1692,28 @@ if isLobby() then
                 break
             end
             if math.floor(waited) % 5 == 0 and math.abs(waited - math.floor(waited)) < 0.05 then
-                print(("Still in Lobby... (%ds)"):format(math.floor(waited)))
+                Log.dev(("Still in Lobby... (%ds)"):format(math.floor(waited)))
             end
             updateStatus(("Loading Map... (%.0fs)"):format(waited))
             task.wait(0.1)
         end
 
         if someoneJoined and isLobby() then
-            print(string.format("Someone entered OUR Teleporter%d (%d player) - re-picking",
+            Log.dev(string.format("Someone entered OUR Teleporter%d (%d player) - re-picking",
                 selectedTeleporter, countPlayersInBeam(selectedTeleporter)))
             updateStatus("Teleporter Occupied - Re-picking...")
             Client.Events.TeleportEvent:FireServer("Remove")
             task.wait(1)
         elseif isLobby() then
-            warn("Teleport failed or room was taken - retrying...")
+            Log.err("[Lobby] teleport failed or the room was taken", "retrying")
             updateStatus("Retrying Teleport...")
             task.wait(0.5)
         end
     end
-    print("Successfully entered Farm map!")
+    Log.dev("Successfully entered Farm map!")
     updateStatus("Map Loaded!")
 else
-    print("Already in Farm map - continuing...")
+    Log.dev("Already in Farm map - continuing...")
     updateStatus("Already in Map")
 end
 
@@ -1668,7 +1738,7 @@ if game.PlaceId ~= 79546208627805 then
             end
 
             if others > 0 then
-                print("[Anti-Share] " .. others .. " other player(s) in farm map - hopping back to lobby")
+                Log.dev("[Anti-Share] " .. others .. " other player(s) in farm map - hopping back to lobby")
                 updateStatus("Player Detected - Hopping...")
                 pcall(function()
                     TeleportService:Teleport(79546208627805, LocalPlayer)
@@ -1685,7 +1755,7 @@ end
 -- STEP 2: Start Auto-Eat Food (Continuous Background)
 -- ============================================
 
-print("\n[Step 2] Starting auto-func")
+Log.dev("\n[Step 2] Starting auto-func")
 
 -- ============================================
 -- FLAT FPS BOOSTER (รวมจาก FlatFPS.lua)
@@ -1907,7 +1977,7 @@ if CFG.killScripts then
 end
 
 killFX()
-print("✅ FPS Booster applied")
+Log.dev("✅ FPS Booster applied")
 
 --=== ตัวละครที่ respawn มาใหม่ =============================================
 -- หมายเหตุ: ตอน skipCharacters = true (ค่าเริ่มต้น) ทั้งบล็อกนี้ไม่ทำอะไรเลย
@@ -2001,7 +2071,7 @@ local PURGE_KEEP = {
 
 local purgeMap = workspace:FindFirstChild("Map")
 if not purgeMap then
-	warn("[Purge] no workspace.Map - skipped")
+	Log.err("[Purge] workspace.Map not found", "skipping the map cleanup")
 	return
 end
 
@@ -2222,8 +2292,8 @@ task.spawn(function()
     end
 end)
 
-print("✅ God Mode Running")
-print("✅ Auto-Eat Running")
+Log.dev("✅ God Mode Running")
+Log.dev("✅ Auto-Eat Running")
 
 -- ============================================
 -- DEATH WATCHER: ตายแล้วรอ 5 วิ กดเล่นใหม่
@@ -2264,17 +2334,17 @@ task.spawn(function()
     local function clickPlayAgain()
         if handling then return end
         handling = true
-        print("[DEATH] Character died - waiting 5s then respawning")
+        Log.dev("[DEATH] Character died - waiting 5s then respawning")
         pcall(updateStatus, "Died - Play Again in 5s...")
         task.wait(5)
 
         -- กดซ้ำจนกว่าจะเกิดใหม่จริง (กันกดครั้งเดียวแล้วหลุด)
-        print("Clicking Play Again...")
+        Log.dev("Clicking Play Again...")
         for _ = 1, 15 do
             local char = LocalPlayer.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             if char and char.Parent and hum and hum.Health > 0 then
-                print("[DEATH] Respawned!")
+                Log.dev("[DEATH] Respawned!")
                 break
             end
             pcall(updateStatus, "Died - Clicking Play Again...")
@@ -2298,7 +2368,7 @@ task.spawn(function()
             missingSince = missingSince or os.clock()
             if not handling and os.clock() - missingSince >= 2 then
                 missingSince = nil
-                print("[DEATH] Character missing in farm map - treating as death")
+                Log.dev("[DEATH] Character missing in farm map - treating as death")
                 clickPlayAgain()
             end
         end
@@ -2306,7 +2376,7 @@ task.spawn(function()
     end
 end)
 
-print("✅ Death Watcher Running")
+Log.dev("✅ Death Watcher Running")
 
 -- ============================================
 -- HP ZERO WATCHER: เซ็ตเลือดเป็น 0 เฉพาะ "มอน StrongholdEnemy" ตลอดเวลา
@@ -2397,7 +2467,7 @@ task.spawn(function()
     end
 end)
 
-print("✅ HP Zero Watcher Running")
+Log.dev("✅ HP Zero Watcher Running")
 
 -- ============================================
 -- DEER WATCHER: เจอ workspace.Characters.Deer = วาร์ปมันไปไกลๆ แล้วลบโมเดลทิ้งทันที
@@ -2426,19 +2496,19 @@ task.spawn(function()
             end)
             task.wait(0.1)
             pcall(function() deer:Destroy() end)
-            print("[Deer] Found Deer - warped far away & destroyed")
+            Log.dev("[Deer] Found Deer - warped far away & destroyed")
         end
         task.wait(0.2)
     end
 end)
 
-print("✅ Deer Watcher Running")
+Log.dev("✅ Deer Watcher Running")
 
 -- ============================================
 -- STEP 3: Farm Trees and Upgrade Fire
 -- ============================================
 
-print("\n[Step 3] Starting tree farming and fire upgrade...")
+Log.dev("\n[Step 3] Starting tree farming and fire upgrade...")
 updateStatus("Finding Fire...")
 
 local player = LocalPlayer
@@ -2470,7 +2540,7 @@ while not mainFire do
 
     if not mainFire then
         if waitedFire % 10 == 0 then
-            print(("  ...find MainFire not yet (%.0fs)"):format(waitedFire))
+            Log.dev(("  ...find MainFire not yet (%.0fs)"):format(waitedFire))
         end
         updateStatus(("find MainFire... (%.0fs)"):format(waitedFire))
         task.wait(0.5)
@@ -2801,7 +2871,7 @@ if game.PlaceId ~= 79546208627805 then
                             nextKnock[house] = os.clock() + 120   -- ใช้แล้ว รอรอบถัดไป
                             if res.TrickOrTreat ~= "Treat" and os.clock() - lastTrickLog > 15 then
                                 lastTrickLog = os.clock()
-                                print(string.format("[AutoCandy] Trick (candy=%d) - costume not consumed",
+                                Log.dev(string.format("[AutoCandy] Trick (candy=%d) - costume not consumed",
                                     promised))
                             end
                         else
@@ -2836,7 +2906,7 @@ if game.PlaceId ~= 79546208627805 then
                         -- ชุดไม่ครบ/ชุดหมด -> ห้ามเคาะ (เคาะตอนไม่มีชุด = Trick)
                         if os.clock() - lastNoCostumeLog > 60 then
                             lastNoCostumeLog = os.clock()
-                            print("[AutoCandy] No full costume set - knock skipped")
+                            Log.dev("[AutoCandy] No full costume set - knock skipped")
                         end
                         if openBoxes() == 0 then task.wait(3) end
                     end
@@ -2911,9 +2981,9 @@ local function loadClassModule(name, flagName)
             result[flagName] = (LocalPlayer:GetAttribute("Class") or "Unknown")
                 == (classNames[flagName] or name:match("Module_(.+)%.lua"))
             mod = result
-            print("[" .. name:match("Module_(.+)%.lua") .. "] Module loaded")
+            Log.dev("[" .. name:match("Module_(.+)%.lua") .. "] Module loaded")
         else
-            warn("[" .. name:match("Module_(.+)%.lua") .. "] Module unavailable")
+            Log.err("[" .. name:match("Module_(.+)%.lua") .. "] module could not be loaded (GitHub unreachable or script error)", "continuing without that class logic")
             mod = { [flagName] = false }
         end
     end
@@ -2962,7 +3032,7 @@ local axe = bestAxeCombat
 
 local currentClass = LocalPlayer:GetAttribute("Class")
 local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
-print(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
+Log.dev(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
 local myChar = workspace:WaitForChild(LocalPlayer.Name)
 
 -- ============================================
@@ -3079,16 +3149,9 @@ local function getCraftingTouchZone()
     return bench and bench:FindFirstChild("TouchZone")
 end
 
--- จำกัดจำนวนที่ลากพร้อมกัน: เดิม task.spawn ทุกชิ้นที่เจอในเฟรมเดียว
--- มี Log 300 ชิ้น = ยิง RequestStartDraggingItem 300 ครั้งในเฟรมเดียว แล้วอีก 300 ครั้งที่ +0.2 วิ
--- remote flood แบบนี้ทำให้ FPS กระตกเป็นจังหวะตอนบิน (เจอของเยอะตรงไหนพังตรงนั้น)
--- ที่ยังไม่ลากครบจะถูกหยิบได้ใน step ถัดไปของลูปบิน เพราะ warpedItems[item] ยังไม่ถูก set
-local WARP_CONCURRENCY = 8
-local warpInFlight = 0
-
+-- No cap on simultaneous drags (the old limit of 8 was removed): every item found is dragged at once.
 local function warpItemToTarget(item, targetPos)
-    if warpedItems[item] or warpInFlight >= WARP_CONCURRENCY then return end
-    warpInFlight += 1
+    if warpedItems[item] then return end
     warpedItems[item] = true
 
     task.spawn(function()
@@ -3108,7 +3171,6 @@ local function warpItemToTarget(item, targetPos)
             task.wait(0.1)
             StopDrag:FireServer(item)
         end)
-        warpInFlight -= 1   -- นอก pcall: ต้องคืนสล็อตแม้ตัว pcall เองพัง
     end)
 end
 
@@ -3139,6 +3201,67 @@ end
 local function warpItemToFire(item)
     warpItemToTarget(item, firePos + Vector3.new(0, 10, 0))
 end
+
+-- Resource goals (moved up from Step 3.5: the auto-pull loop below needs them)
+local NEED_WOOD  = 50
+local NEED_SCRAP = 26
+
+-- AUTO PULL: scan workspace.Items every 0.5s (0.1s right after a pull) and drag a matching item the moment it
+-- shows up, same idea as the auto-pull slots in Item.lua. Same rules as the flight pull: whitelist only
+-- (the Slept attribute is NOT checked any more, items are pulled as soon as they appear). A goal that is reached is latched and its items are not pulled any more:
+--   fire level 7   -> Fuel Canister / Oil Barrel / Coal / Log stop going to the fire
+--   wood >= 50     -> Log / Chair stop going to the crafting bench (Log goes to the bench only once the fire is full)
+--   scrap >= 26    -> Scrappable items stop going to the crafting bench
+-- The loop ends when all three goals are reached. Names are matched without the _2, _3 suffix (Log_2 = Log).
+task.spawn(function()
+    local fireDone, woodDone, scrapDone = false, false, false
+    while not (fireDone and woodDone and scrapDone) do
+        local pulled = 0
+        pcall(function()
+            local items = workspace:FindFirstChild("Items")
+            local map = workspace:FindFirstChild("Map")
+            local camp = map and map:FindFirstChild("Campground")
+            if not (items and camp) then return end
+
+            if not fireDone and getCurrentLevel() >= maxLevel then fireDone = true end
+            if not woodDone and (camp:GetAttribute("TotalWood") or 0) >= NEED_WOOD then woodDone = true end
+            if not scrapDone and (camp:GetAttribute("TotalScrap") or 0) >= NEED_SCRAP then scrapDone = true end
+            if fireDone and woodDone and scrapDone then return end
+
+            local function toBench(item)
+                local tz = getCraftingTouchZone()
+                local tzPos = tz and tz:IsA("BasePart") and tz.Position
+                    or (tz and tz:IsA("Model") and tz:GetPivot().Position)
+                if tzPos then
+                    warpItemToTarget(item, tzPos + Vector3.new(0, 2, 0))
+                    pulled += 1
+                end
+            end
+
+            for _, item in ipairs(items:GetChildren()) do
+                if not warpedItems[item] then
+                    local name = (item.Name:gsub("_%d+$", ""))
+                    if name ~= "Sapling" then
+                        if CRAFTING_BENCH_ITEMS[name] then
+                            if not woodDone then toBench(item) end
+                        elseif FIRE_FUEL_ITEMS[name] then
+                            if not fireDone then
+                                warpItemToFire(item)
+                                pulled += 1
+                            elseif name == "Log" and not woodDone then
+                                toBench(item)
+                            end
+                        elseif item:GetAttribute("Scrappable")
+                            and name ~= "Part" and name ~= "Cabin" and name ~= "Model" and name ~= "woodplanks" then
+                            if not scrapDone then toBench(item) end
+                        end
+                    end
+                end
+            end
+        end)
+        task.wait(pulled > 0 and 0.1 or 0.5)
+    end
+end)
 
 local LOST_CHILD_NAMES = {
     "Lost Child",
@@ -3207,7 +3330,7 @@ local function collectLostChildren()
                             collectedChildren[name] = true
                             local count = 0
                             for _ in pairs(collectedChildren) do count += 1 end
-                            print(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
+                            Log.dev(string.format("[LostChild] Collected %d/%d (%s)", count, LOST_CHILD_TOTAL, name))
                             updateStatus(string.format("Lost Children: %d/%d", count, LOST_CHILD_TOTAL))
                         end
                     end
@@ -3233,7 +3356,7 @@ local function dropAllLostChildren(retryDepth)
         local inv = LocalPlayer:FindFirstChild("Inventory")
         local oldSack = inv and inv:FindFirstChild("Old Sack")
         if not oldSack then
-            warn("Cannot drop children: Old Sack not found in inventory")
+            Log.err("[LostChild] Old Sack not found in inventory, cannot drop children", "skipping this drop round")
             return 0, {}
         end
 
@@ -3262,7 +3385,7 @@ local function dropAllLostChildren(retryDepth)
         end
 
         if not warped then
-            warn("Failed to warp close to campfire - last distance:", (humanoidRootPart.Position - firePos).Magnitude)
+            Log.err(string.format("[LostChild] could not get close to the campfire (distance %.1f)", (humanoidRootPart.Position - firePos).Magnitude), "skipping this drop round")
             return 0, {}
         end
 
@@ -3274,7 +3397,7 @@ local function dropAllLostChildren(retryDepth)
         inv = LocalPlayer:FindFirstChild("Inventory")
         oldSack = inv and inv:FindFirstChild("Old Sack")
         if not oldSack then
-            warn("Old Sack disappeared after equip attempt")
+            Log.err("[LostChild] Old Sack disappeared after the equip attempt", "skipping this drop round")
             return 0, {}
         end
 
@@ -3314,7 +3437,7 @@ local function dropAllLostChildren(retryDepth)
         if remainingChildren == 0 then
             collectedChildren = {}
         else
-            warn("Some children failed to drop! Remaining:", remainingChildren, "/ Attempted:", droppedCount)
+            Log.err("[LostChild] " .. tostring(remainingChildren) .. " of " .. tostring(droppedCount) .. " children failed to drop", "checking Lost status and re-dropping")
         end
 
         return droppedCount, droppedNames
@@ -3342,13 +3465,13 @@ local function dropAllLostChildren(retryDepth)
 
             if #stillLost == 0 then
                 if attempt > 1 then
-                    print("[LostChild] All dropped children saved (Lost cleared)")
+                    Log.dev("[LostChild] All dropped children saved (Lost cleared)")
                 end
                 break
             end
 
-            warn("[LostChild] Still Lost after 5s: " .. table.concat(stillLost, ", ")
-                .. " - recollecting & re-dropping (attempt " .. attempt .. "/5)")
+            Log.err("[LostChild] children still Lost after 5s: " .. table.concat(stillLost, ", "),
+                "recollecting and re-dropping (attempt " .. attempt .. "/5)")
             updateStatus("Lost Child still Lost - recollecting...")
 
             -- เคลียร์รายชื่อที่ยัง Lost ออกจากตาราง เพื่อให้ collectLostChildren เก็บใหม่ได้
@@ -3358,7 +3481,7 @@ local function dropAllLostChildren(retryDepth)
 
             -- เช็ค retryDepth ก่อนวนรอบใหม่
             if retryDepth >= 5 then
-                warn("[LostChild] Retry depth limit (5) reached - giving up for this round")
+                Log.err("[LostChild] retry limit (5) reached", "giving up for this round")
                 break
             end
 
@@ -3368,7 +3491,7 @@ local function dropAllLostChildren(retryDepth)
             -- ปล่อยอีกรอบ (อยู่ใน loop เดิม ไม่ recursive)
             local redroppedCount, redroppedNames = dropOneRound()
             if redroppedCount == 0 or #redroppedNames == 0 then
-                warn("[LostChild] Re-drop failed, will try again next iteration")
+                Log.err("[LostChild] re-drop failed", "trying again next iteration")
                 -- ใช้ droppedNames เดิมสำหรับเช็ครอบหน้า
             else
                 droppedNames = redroppedNames
@@ -3464,8 +3587,8 @@ local function flyAndWarpItems()
                         or (item:GetAttribute("Scrappable")
                             and name ~= "Part" and name ~= "Cabin" and name ~= "Model"
                             and name ~= "woodplanks")
-                    -- Slept == true เท่านั้นที่ดึงได้ ยกเว้น Log (Log ดึงได้เลยไม่ต้องเช็ค)
-                    local canPull = isAllowed and (name == "Log" or item:GetAttribute("Slept") == true)
+                    -- ไม่เช็ค Slept แล้ว: ของที่อยู่ใน whitelist ดึงได้เลย
+                    local canPull = isAllowed
                     if canPull then
                         -- CraftingBench
                         if CRAFTING_BENCH_ITEMS[name] then
@@ -3512,8 +3635,8 @@ local function flyAndWarpItems()
                 or (item:GetAttribute("Scrappable")
                     and name ~= "Part" and name ~= "Cabin" and name ~= "Model"
                     and name ~= "woodplanks")
-            -- Slept == true เท่านั้นที่ดึงได้ ยกเว้น Log (Log ดึงได้เลยไม่ต้องเช็ค)
-            local canPull = isAllowed and (name == "Log" or item:GetAttribute("Slept") == true)
+            -- ไม่เช็ค Slept แล้ว: ของที่อยู่ใน whitelist ดึงได้เลย
+            local canPull = isAllowed
             if canPull then
                 -- CraftingBench
                 if CRAFTING_BENCH_ITEMS[name] then
@@ -3541,7 +3664,7 @@ local function flyAndWarpItems()
 
     -- ถ้าเก็บเด็กไม่ครบ ให้บินวนหาใหม่อีกรอบก่อน drop
     if not allChildrenCollected() then
-        print("[LostChild] Not all found (" .. LOST_CHILD_TOTAL .. " needed) - searching again with extended range...")
+        Log.dev("[LostChild] Not all found (" .. LOST_CHILD_TOTAL .. " needed) - searching again with extended range...")
         updateStatus("Searching Lost Children (extended)...")
         for radius = 20, 1500, 40 do
             -- ต้องบินครบรอบก่อน ไม่หยุดกลางคัน
@@ -3660,7 +3783,7 @@ LocalPlayer.CharacterRemoving:Connect(disableFloating)
 
 local currentLevel = getCurrentLevel()
 task.wait(0.3)
-print(string.format("📊 Current Level: %d — flying to gather more items", currentLevel))
+Log.dev(string.format("📊 Current Level: %d — flying to gather more items", currentLevel))
 updateStatus("Upgrading Fire...")
 
 local levelChanged = false
@@ -3673,10 +3796,10 @@ task.spawn(function()
             levelChanged = true
 
             if currentLevel >= maxLevel then
-                print("🎉 Max level reached!")
+                Log.dev("🎉 Max level reached!")
                 updateStatus("🎉 Fire Complete!")
             else
-                print(string.format("🎉 Level changed to %d!", currentLevel))
+                Log.dev(string.format("🎉 Level changed to %d!", currentLevel))
                 updateStatus("Upgrading Fire...")
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                 platform.Position = firePos + Vector3.new(5, 0, 0)
@@ -3699,7 +3822,7 @@ local treesSinceFlight = 0
 while currentLevel < maxLevel do
     currentLevel = getCurrentLevel()
     if currentLevel >= maxLevel then
-        print("✅ Max level reached")
+        Log.dev("✅ Max level reached")
         updateStatus("✅ Fire Complete!")
         humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
         break
@@ -3713,19 +3836,19 @@ while currentLevel < maxLevel do
 
         currentLevel = getCurrentLevel()
         if currentLevel >= maxLevel then
-            print("✅ Max level reached")
+            Log.dev("✅ Max level reached")
             updateStatus("✅ Fire Complete!")
             humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
             break
         end
 
-        print(string.format("🎉 Level increased to %d!", currentLevel))
+        Log.dev(string.format("🎉 Level increased to %d!", currentLevel))
         updateStatus("Upgrading Fire...")
 
         flyAndWarpItems()
 
         if getCurrentLevel() >= maxLevel then
-            print("✅ Max level reached")
+            Log.dev("✅ Max level reached")
             updateStatus("✅ Fire Complete!")
             humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
             break
@@ -3734,19 +3857,19 @@ while currentLevel < maxLevel do
         updateStatus("Cutting Trees...")
 
         if treeIndex > #trees then
-            print("⚠️ No more trees, flying...")
+            Log.dev("⚠️ No more trees, flying...")
             updateStatus("Finding Trees...")
             flyAndWarpItems()
 
             if getCurrentLevel() >= maxLevel then
-                print("✅ Max level reached")
+                Log.dev("✅ Max level reached")
                 updateStatus("✅ Fire Complete!")
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                 break
             end
         else
             if getCurrentLevel() >= maxLevel then
-                print("✅ Max level reached")
+                Log.dev("✅ Max level reached")
                 updateStatus("✅ Fire Complete!")
                 humanoidRootPart.CFrame = CFrame.new(firePos + Vector3.new(5, 3, 0))
                 break
@@ -3793,7 +3916,7 @@ while currentLevel < maxLevel do
                     local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
 
                     if not currentAxe then
-                        warn("Axe lost, re-equipping...")
+                        Log.err("[Chop] axe lost while chopping", "re-equipping the axe")
                         Client.InventoryHandler.RequestEquipItem(bestAxeChop)
                         task.wait(0.3)
                         char = LocalPlayer.Character
@@ -3829,10 +3952,10 @@ while currentLevel < maxLevel do
                     else
                         failStreak = failStreak + 1
                         if hitCount == 0 then
-                            warn("First hit failed:", err)
+                            Log.err("[Chop] first tree hit failed: " .. tostring(err), "retrying the hit")
                         end
                         if failStreak >= 5 then
-                            warn("Tree not taking damage after 5 consecutive failed hits - skipping")
+                            Log.err("[Chop] tree is not taking damage after 5 consecutive failed hits", "skipping this tree")
                             break
                         end
                     end
@@ -3842,7 +3965,7 @@ while currentLevel < maxLevel do
                 end
 
                 if tree.Parent and hitCount >= 500 then
-                    warn("Hit cap (500) reached on one tree - skipping")
+                    Log.err("[Chop] hit cap (500) reached on one tree", "skipping this tree")
                 end
 
                 -- รอให้ Log โผล่จริงก่อนแล้วค่อยดึง
@@ -3880,7 +4003,7 @@ end
 
 disableFloating()  -- cleanup floating หลังตัดต้นไม้เสร็จ
 
-print("🎉 Fire reached max level!")
+Log.dev("🎉 Fire reached max level!")
 updateStatus("✅ Fire Complete!")
 
 -- ปล่อยเด็กทั้งหมดก่อนไป Stronghold (กรณีบินรอบสุดท้ายไม่ได้ drop)
@@ -3890,7 +4013,7 @@ dropAllLostChildren()
 -- STEP 3.5: Check Wood/Scrap, craft bench upgrade + beds
 -- ============================================
 
-print("\n[Step 3.5] Checking resources for crafting...")
+Log.dev("\n[Step 3.5] Checking resources for crafting...")
 
 local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
 local campground = workspace.Map.Campground
@@ -3898,12 +4021,9 @@ local campground = workspace.Map.Campground
 local function getTotalScrap() return campground:GetAttribute("TotalScrap") or 0 end
 local function getTotalWood()  return campground:GetAttribute("TotalWood")  or 0 end
 
-local NEED_WOOD  = 50
-local NEED_SCRAP = 26
-
 -- หา Wood ที่ขาด: ตัดต้นไม้แล้วดึงไม้ไปโต๊ะคราฟ
 if getTotalWood() < NEED_WOOD then
-    print("[Step 3.5] Wood insufficient - chopping trees...")
+    Log.dev("[Step 3.5] Wood insufficient - chopping trees...")
     updateStatus("Chopping trees for Wood...")
     Client.InventoryHandler.RequestEquipItem(bestAxeChop)
     task.wait(0.3)
@@ -3923,7 +4043,7 @@ if getTotalWood() < NEED_WOOD then
 
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then
-            warn("[Step 3.5] HumanoidRootPart not found - waiting...")
+            Log.err("[Step 3.5] HumanoidRootPart not found", "waiting 1s and retrying")
             task.wait(1)
             continue
         end
@@ -3952,7 +4072,7 @@ if getTotalWood() < NEED_WOOD then
             local th = char and char:FindFirstChild("ToolHandle")
             local currentAxe = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
             if not currentAxe then
-                print("[Step 3.5] Axe lost - re-equipping...")
+                Log.dev("[Step 3.5] Axe lost - re-equipping...")
                 Client.InventoryHandler.RequestEquipItem(bestAxeChop)
                 task.wait(0.3)
                 char = LocalPlayer.Character
@@ -3984,7 +4104,7 @@ if getTotalWood() < NEED_WOOD then
             end)
 
             if not success then
-                warn("[Step 3.5] Hit failed - tree may be invalid")
+                Log.err("[Step 3.5] tree hit failed (tree may be invalid)", "continuing with the next hit")
             end
 
             pcall(updateStatus, string.format("Chopping Wood: %d/%d", getTotalWood(), NEED_WOOD))
@@ -4028,7 +4148,7 @@ end
 
 -- หา Scrap ที่ขาด: บินวนหา items แล้วดึงไปโต๊ะคราฟ
 if getTotalScrap() < NEED_SCRAP then
-    print("[Step 3.5] Scrap insufficient - searching items...")
+    Log.dev("[Step 3.5] Scrap insufficient - searching items...")
     updateStatus("Searching Scrap items...")
     local craftTZ2 = getCraftingTouchZone()
     local craftPos2 = craftTZ2 and (craftTZ2:IsA("BasePart") and craftTZ2.Position or craftTZ2:GetPivot().Position)
@@ -4083,7 +4203,7 @@ while (getTotalWood() < NEED_WOOD or getTotalScrap() < NEED_SCRAP) and waitCraft
     task.wait(1)
     waitCraft += 1
 end
-print(string.format("[Step 3.5] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
+Log.dev(string.format("[Step 3.5] Resources ready: Wood=%d Scrap=%d", getTotalWood(), getTotalScrap()))
 
 -- อัพโต๊ะคราฟ 2 และ 3
 updateStatus("Upgrading Crafting Bench 2...")
@@ -4145,7 +4265,7 @@ for _, bedName in ipairs(BED_ITEMS) do
             local inv2 = LocalPlayer:FindFirstChild("Inventory")
             if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
                 placed = true
-                print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
+                Log.dev("[Step 3.5] Placed " .. bedName .. " (BP gone)")
                 break
             end
 
@@ -4178,28 +4298,28 @@ for _, bedName in ipairs(BED_ITEMS) do
                     if not (inv2 and inv2:FindFirstChild(bedName .. " Blueprint")) then
                         table.insert(usedPositions, pos)
                         placed = true
-                        print("[Step 3.5] Placed " .. bedName .. " (BP gone)")
+                        Log.dev("[Step 3.5] Placed " .. bedName .. " (BP gone)")
                         break
                     end
                 end
             end
 
             if not placed then
-                print(string.format("[Step 3.5] Attempt %d failed for %s - retrying...", attempts, bedName))
+                Log.dev(string.format("[Step 3.5] Attempt %d failed for %s - retrying...", attempts, bedName))
                 task.wait(0.2)
             end
         end
 
         if not placed then
-            warn("[Step 3.5] Could not place " .. bedName .. " after " .. attempts .. " attempts - skipping")
+            Log.err("[Step 3.5] could not place " .. bedName .. " after " .. attempts .. " attempts", "skipping it")
         end
     else
-        warn("[Step 3.5] Blueprint not found for " .. bedName)
+        Log.err("[Step 3.5] blueprint not found for " .. bedName, "skipping it")
     end
     task.wait(0.3)
 end
 
-print("[Step 3.5] Crafting complete!")
+Log.dev("[Step 3.5] Crafting complete!")
 updateStatus("Crafting done!")
 
 -- platform ต้องอยู่ต่อ เพราะ STEP 3.6/4/5/6 ยังบินและต้องมีแท่นรองใต้เท้า
@@ -4271,12 +4391,12 @@ local function warpToStrongholdFloor(holdSeconds)
     if not center then
         local building = getStrongholdBuilding()
         if not building then
-            warn("[WARN] Stronghold Building not found - skipping warp")
+            Log.err("[Stronghold] Building not found", "skipping the warp to the floor")
             return false
         end
-        warn("⚠️ Floor not found. Children of Building:")
+        Log.err("[Stronghold] floor not found", "warping to the Building pivot instead")
         for _, child in ipairs(building:GetChildren()) do
-            print("   -", child.Name, "(" .. child.ClassName .. ")")
+            Log.dev("   -", child.Name, "(" .. child.ClassName .. ")")
         end
         center, size = building:GetPivot().Position, Vector3.new(0, 0, 0)
     end
@@ -4295,7 +4415,7 @@ local function warpToStrongholdFloor(holdSeconds)
         task.wait(0.1)
     end
 
-    print(string.format("✅ Warped to Stronghold Floor: %.1f, %.1f, %.1f", target.X, target.Y, target.Z))
+    Log.dev(string.format("✅ Warped to Stronghold Floor: %.1f, %.1f, %.1f", target.X, target.Y, target.Z))
     return true
 end
 
@@ -4315,7 +4435,7 @@ end
 -- STEP 3.6: Warp to Stronghold Floor ทันที (ไม่ต้องรอ Stronghold เปิด)
 -- ============================================
 
-print("\n[Step 3.6] Warping to Stronghold Floor...")
+Log.dev("\n[Step 3.6] Warping to Stronghold Floor...")
 updateStatus("Warping to Stronghold Floor...")
 
 -- เข้า Stronghold แล้ว = สลับโล่เป็นโหมดโปร่ง (ไม่ชนมอน/พื้น) กันโล่ติดพื้นห้อง/ขวาง TriggerZone
@@ -4531,7 +4651,7 @@ if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "str
         -- เช็ค level: ถ้า Lv.3 แล้ว = เควสครบแล้ว → ฟาร์มปกติด้วยขวาน (no cannon)
         local equippedLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
         if equippedLevel >= 3 then
-            print(string.format("[Cannon] %s Lv.%d done, using axe", equippedClass, equippedLevel))
+            Log.dev(string.format("[Cannon] %s Lv.%d done, using axe", equippedClass, equippedLevel))
         else
             local inv = LocalPlayer:FindFirstChild("Inventory")
             if inv then
@@ -4547,14 +4667,14 @@ if type(Config.UpgradeClass) == "table" and type(Config.UpgradeClass[1]) == "str
                     local th = char and char:FindFirstChild("ToolHandle")
                     local origItem = th and th:FindFirstChild("OriginalItem") and th.OriginalItem.Value
                     if origItem and origItem.Name == "Laser Cannon" then
-                        print("[Cannon] equipped")
+                        Log.dev("[Cannon] equipped")
                         cannonTool = origItem
                     else
-                        warn("[Cannon] equip failed (got " .. tostring(origItem and origItem.Name) .. ")")
+                        Log.err("[Cannon] Laser Cannon equip failed (got " .. tostring(origItem and origItem.Name) .. ")", "falling back to the axe")
                         useCannon = false
                     end
                 else
-                    warn("[Cannon] Laser Cannon not in Inventory, fallback to axe")
+                    Log.err("[Cannon] Laser Cannon not found in Inventory", "falling back to the axe")
                 end
             end
         end
@@ -4664,7 +4784,7 @@ local function cannonTryShoot(energyThreshold)
         local ExplosiveDamage = Remotes and Remotes:FindFirstChild("ExplosiveProjectileDamageEnemy")
 
         if not (RegisterProjectile and ReplicateBullet and ExplosiveDamage) then
-            warn("[Cannon] missing remote(s)")
+            Log.err("[Cannon] cannon remote(s) missing", "skipping this shot")
             return
         end
 
@@ -4701,7 +4821,7 @@ local function cannonTryShoot(energyThreshold)
         return result
     end)
     if not pcallOk then
-        warn("[Cannon] shoot failed: " .. tostring(pcallErr))
+        Log.err("[Cannon] shot failed: " .. tostring(pcallErr), "skipping this shot")
         return false
     end
 
@@ -4709,7 +4829,7 @@ local function cannonTryShoot(energyThreshold)
     local result = serverResult
     if type(result) == "table" then
         if result.Success == false then
-            warn("[Cannon] server refused damage")
+            Log.err("[Cannon] the server refused the cannon damage", "skipping this shot")
             return false
         end
         -- สำเร็จ → นับ enemy ที่ตาย (HP <= 0 หรือ Destroyed)
@@ -4726,7 +4846,7 @@ local function cannonTryShoot(energyThreshold)
             end
         end
         if killed > 0 then
-            print(string.format("[Cannon] killed %d/%d", killed, #enemies))
+            Log.dev(string.format("[Cannon] killed %d/%d", killed, #enemies))
         end
         return true
     end
@@ -4751,7 +4871,7 @@ end
 -- ============================================
 -- STEP 3.7: FPS Boost - ลบของที่ไม่ใช้แล้วทิ้ง หลัง Teleport มา Stronghold
 -- ============================================
-print("\n[Step 3.7] Boosting FPS (cleaning up map/lighting)...")
+Log.dev("\n[Step 3.7] Boosting FPS (cleaning up map/lighting)...")
 updateStatus("Boosting FPS...")
 
 do
@@ -4831,7 +4951,7 @@ do
         end
     end
 
-    print("[OK] FPS boost cleanup done")
+    Log.dev("[OK] FPS boost cleanup done")
 end
 
 -- พื้นล่องหนใต้ Stronghold 30 studs: หลังลบแมพแล้วไม่มีพื้นรองรับ ตัวละคร/มอนจะตกไม่สิ้นสุด
@@ -4859,9 +4979,9 @@ do
                 p.Parent = workspace
             end
         end
-        print("[OK] Stronghold fall floor created (30 studs below floor)")
+        Log.dev("[OK] Stronghold fall floor created (30 studs below floor)")
     else
-        warn("[WARN] Stronghold floor not found - fall floor skipped")
+        Log.err("[Stronghold] floor not found", "skipping the fall-floor platform")
     end
 end
 
@@ -4888,7 +5008,7 @@ local finalGateBasePos = retryUntil("find FinalGate", getFinalGatePos, 0.2)
 _G.airHeight = airHeight
 _G.finalGateBasePos = finalGateBasePos
 
-print(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
+Log.dev(string.format("📌 FinalGate base pos: %.2f, %.2f, %.2f",
     finalGateBasePos.X, finalGateBasePos.Y, finalGateBasePos.Z))
 
 -- ============================================
@@ -4923,7 +5043,7 @@ elseif _G.WSM_Witch.isWitch and not _G.WSM_Witch.isAllQuestDone() then
     _G.WSM_Witch.runBackground()
 end
 
-print("\n[Step 4] Waiting for Stronghold to open...")
+Log.dev("\n[Step 4] Waiting for Stronghold to open...")
 updateStatus("Waiting for Stronghold...")
 
 while true do
@@ -4933,7 +5053,7 @@ while true do
         updateStatus("Stronghold Timer Not Found...")
         task.wait(1)
     elseif remaining <= 0 then
-        print("✅ Stronghold is OPEN!")
+        Log.dev("✅ Stronghold is OPEN!")
         updateStatus("✅ Stronghold Open!")
         break
     else
@@ -4952,7 +5072,7 @@ end
 -- STEP 5: Warp to Wave1 TriggerZone
 -- ============================================
 
-print("\n[Step 5] Warping to Wave1 TriggerZone...")
+Log.dev("\n[Step 5] Warping to Wave1 TriggerZone...")
 updateStatus("Warping to TriggerZone...")
 
 -- (โล่ Stronghold แบบเดิมถูกยกเลิก - ใช้ GLOBAL SHIELD แบบ weld ติดตัว
@@ -4994,7 +5114,7 @@ end
 
 warpToTriggerZone()
 task.wait(0.3)
-print(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
+Log.dev(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
 
 -- Equip Old Sack เพื่อ trigger TriggerZone แล้วกลับไปใช้ axe เดิม
 do
@@ -5034,7 +5154,7 @@ do
         waited += WAIT_STEP
 
         if waited >= SPAWN_TIMEOUT then
-            print("[Step 5] Cultist not spawned - warping to Floor then back to TriggerZone")
+            Log.dev("[Step 5] Cultist not spawned - warping to Floor then back to TriggerZone")
             updateStatus("Re-warp waiting for spawn...")
 
             if floorPos then
@@ -5050,7 +5170,7 @@ do
         end
     end
 
-    print("✅ Cultist spawned!")
+    Log.dev("✅ Cultist spawned!")
 end
 
 -- ============================================
@@ -5101,6 +5221,6 @@ local strongholdContext = {
 
 local ok, err = pcall(function() Stronghold.run(strongholdContext) end)
 if not ok then
-    warn("[Stronghold] Module failed: " .. tostring(err))
+    Log.err("[Stronghold] module failed: " .. tostring(err), "the Stronghold flow is stopped")
 end
 _G.WSM_StrongholdRound = false -- never leave Module_Witch waiting for a round that is over
