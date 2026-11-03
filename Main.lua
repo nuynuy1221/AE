@@ -3063,6 +3063,12 @@ local function findNightMonsters()
             -- ข้าม Cultist (StrongholdEnemy) / ก้อนน้ำแข็ง (Resource = IceBlock:
             -- ต้องใช้ที่เจาะ/ค้อนตีถึงแตก ตีด้วยขวาน = เสียเวลา)
             if model:GetAttribute("StrongholdEnemy") ~= true
+                -- never hit tamed pets, lost children / bag-able NPCs or other players' characters
+                and model:GetAttribute("Tamed") ~= true
+                and model:GetAttribute("Lost") == nil
+                and model:GetAttribute("Interaction") ~= "CanBeBagged"
+                and not string.find(model.Name, "Lost Child", 1, true)
+                and not Players:GetPlayerFromCharacter(model)
                 and model:GetAttribute("NotAttackable") ~= true
                 and model:GetAttribute("Resurrected") ~= true
                 and model:GetAttribute("Resource") ~= "IceBlock"
