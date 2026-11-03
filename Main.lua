@@ -14,6 +14,7 @@ end
 --   Log.err(reason, next) always shown, format: "Error : <what happened> / <what happens next>"
 -- Always shown (plain print): Version, Sugar Hub Started/Complete, current map, [Quest] Done, [Teleport]
 -- Class modules get the same logger through _G.WSM_Log.
+-- The game debug line "is player, return yes? false" is hidden by the hook block right below (shown + traced when DevPrint = true).
 -- ============================================
 do
     local DEV_PRINT = false -- set true here to see every debug print
@@ -29,6 +30,52 @@ do
     end
     _G.WSM_Log = Log
 end
+
+-- ============================================
+-- HIDE "is player, return yes?" (game debug line)
+-- The game prints this line once per shot. Only a message whose FIRST argument contains both
+-- "is player" and "return yes" is dropped; every other print/warn passes through untouched.
+-- With DevPrint = true the line is NOT hidden: it passes through and the first 3 callers are traced,
+-- so the source can be found. Needs hookfunction + newcclosure; without them nothing is hooked.
+-- Only reaches print/warn calls made from this Lua VM (another VM/Actor is not covered).
+-- ============================================
+do
+    if hookfunction and newcclosure and not _G.WSM_IsPlayerHook then
+        _G.WSM_IsPlayerHook = true
+        local traced = 0
+        local function install(fn)
+            local old
+            old = hookfunction(fn, newcclosure(function(...)
+                local first = ...
+                if type(first) == "string" then
+                    local low = first:lower()
+                    if low:find("is player", 1, true) and low:find("return yes", 1, true) then
+                        local cfg = _G.Config
+                        if type(cfg) == "table" and cfg.DevPrint == true then
+                            if traced < 3 then
+                                traced += 1
+                                local lines = { "[Trace] is-player message #" .. traced .. ", callers:" }
+                                for level = 2, 8 do
+                                    local src, line, name = debug.info(level, "sln")
+                                    if not src then break end
+                                    lines[#lines + 1] = string.format("  level %d: %s : line %s : %s",
+                                        level, tostring(src), tostring(line), tostring(name))
+                                end
+                                old(table.concat(lines, "\n"))
+                            end
+                            return old(...)
+                        end
+                        return -- hidden
+                    end
+                end
+                return old(...)
+            end))
+        end
+        pcall(install, print)
+        pcall(install, warn)
+    end
+end
+
 local Log = _G.WSM_Log
 
 print("Version - 1.2.19 (UpgradeClass : Witch + Ghost Ranger)")
