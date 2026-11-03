@@ -31,7 +31,7 @@ do
 end
 local Log = _G.WSM_Log
 
-print("Version - 1.2.19 (UpgradeClass : Witch)")
+print("Version - 1.2.19 (UpgradeClass : Witch + Ghost Ranger)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -837,6 +837,8 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                     if lvl < 3 then
                         if equipped == "Witch" and _G.WSM_Witch and _G.WSM_Witch.isWitch then
                             -- Module_Witch decides when to leave (it waits for the Stronghold round to finish)
+                        elseif equipped == "Ghost Ranger" and _G.WSM_GhostRanger and _G.WSM_GhostRanger.isGhostRanger then
+                            -- Module_GhostRanger decides when to leave (it waits for the Stronghold round to finish)
                         elseif folder and folder:GetAttribute("CanLevelUp") == true then
                             reason = equipped .. " can level up (Lv." .. lvl .. ")"
                         else
@@ -2415,7 +2417,10 @@ local function zeroEnemyHealth(model)
     if model.Name == "Deer" then return false end
     -- Witch with an unfinished HitPotion quest: potion only, never zero the cultists' HP
     local witchModule = _G.WSM_Witch
-    if witchModule and witchModule.potionOnly and witchModule.potionOnly() then return false end
+    if witchModule and witchModule.specialWeaponOnly and witchModule.specialWeaponOnly() then return false end
+    -- Ghost Ranger with an unfinished GhostCrossbowHits quest: crossbow only, never zero the cultists' HP
+    local ghostModule = _G.WSM_GhostRanger
+    if ghostModule and ghostModule.specialWeaponOnly and ghostModule.specialWeaponOnly() then return false end
     if LocalPlayer:GetAttribute("Class") == "Necromancer"
         and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
         and (LocalPlayer:GetAttribute("CurrentPets") or 0) > 0
@@ -2977,6 +2982,7 @@ local function loadClassModule(name, flagName)
                 isVampire = "Vampire",
                 isAlienScientist = "Alien Scientist",
                 isBigGameHunter = "Big Game Hunter",
+                isGhostRanger = "Ghost Ranger",
             }
             result[flagName] = (LocalPlayer:GetAttribute("Class") or "Unknown")
                 == (classNames[flagName] or name:match("Module_(.+)%.lua"))
@@ -3005,6 +3011,7 @@ local BGH = loadClassModule("Module_BGH.lua", "isBigGameHunter")
 local BGH_Module = BGH
 local Necromancer = loadClassModule("Module_Necromancer.lua", "isNecromancer")
 _G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purpose: no free local slots left
+_G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
 
 -- Vampire state and helpers are owned by Module_Vampire.lua.
@@ -5041,6 +5048,9 @@ elseif Necromancer.isNecromancer and not Necromancer.isAllQuestDone() then
 elseif _G.WSM_Witch.isWitch and not _G.WSM_Witch.isAllQuestDone() then
     -- Witch: throw the Witch Potion for the HitPotion quest (outside farm + Stronghold fight)
     _G.WSM_Witch.runBackground()
+elseif _G.WSM_GhostRanger.isGhostRanger and not _G.WSM_GhostRanger.isAllQuestDone() then
+    -- Ghost Ranger: shoot the Ghost Crossbow for the GhostCrossbowHits quest (outside farm + Stronghold fight)
+    _G.WSM_GhostRanger.runBackground()
 end
 
 Log.dev("\n[Step 4] Waiting for Stronghold to open...")
