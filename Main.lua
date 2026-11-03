@@ -4890,6 +4890,7 @@ do
     -- ลบของในโฟลเดอร์แมพที่ไม่จำเป็นแล้ว (ยกเว้น Landmarks.Stronghold)
     -- ถ้าเป็น Vampire + Quest LifestealHealing ยังไม่เสร็จ → ไม่ลบ "Ground" + "Characters" (ต้องวาร์ปตีมอนตอนกลางคืน)
     -- ถ้าเป็น Alien Scientist + Quest Dissolves ยังไม่เสร็จ → เช่นเดียวกัน (NightLoop ต้อง scan monsters ใน Characters)
+    -- ถ้าเป็น Witch/Ghost Ranger ที่อยู่ใน UpgradeClass และยังไม่ Lv.3 → ไม่ลบ Landmarks + Characters (ต้องยิง/ขว้างใส่มอน)
     -- ถ้าเป็น Big Game Hunter + Quest ConsumePelt/WolfKills ยังไม่เสร็จ → เก็บ Campground + Ground + Landmarks (MainFire/CraftingBench/Items)
     local keepWoodsmanResources = Woodsman.isWoodsman
         and not Woodsman.isAllQuestDone()
@@ -4897,6 +4898,11 @@ do
         or (isAlienScientist and not isAlienScientistAllQuestDone())
         or (BGH.isBigGameHunter and not BGH.isBigGameHunterAllQuestDone())
         or (isNecromancer and not Necromancer.isAllQuestDone())
+        -- Witch / Ghost Ranger in UpgradeClass and not Lv.3 yet: keep monsters + Landmarks (they shoot / throw at monsters)
+        or (type(Config.UpgradeClass) == "table"
+            and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
+            and ((_G.WSM_Witch.isWitch and table.find(Config.UpgradeClass, "Witch") ~= nil)
+                or (_G.WSM_GhostRanger.isGhostRanger and table.find(Config.UpgradeClass, "Ghost Ranger") ~= nil)))
         or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
