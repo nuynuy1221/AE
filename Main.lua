@@ -78,7 +78,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.19 (UpgradeClass : Witch + Ghost Ranger)")
+print("Version - 1.2.20 (UpgradeClass : Assassin)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -516,6 +516,10 @@ local CLASS_QUESTS = {
         [2] = { HitPotion = 100 },
         [3] = { HitPotion = 300 },
     },
+    Assassin = {
+        [2] = { TravelStuds = 2500, PerfectKills = 100 },
+        [3] = { TravelStuds = 10000, PerfectKills = 250 },
+    },
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
 
@@ -886,6 +890,8 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                             -- Module_Witch decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Ghost Ranger" and _G.WSM_GhostRanger and _G.WSM_GhostRanger.isGhostRanger then
                             -- Module_GhostRanger decides when to leave (it waits for the Stronghold round to finish)
+                        elseif equipped == "Assassin" and _G.WSM_Assassin and _G.WSM_Assassin.isAssassin then
+                            -- Module_Assassin decides when to leave (it waits for the Stronghold round to finish)
                         elseif folder and folder:GetAttribute("CanLevelUp") == true then
                             reason = equipped .. " can level up (Lv." .. lvl .. ")"
                         else
@@ -3059,6 +3065,7 @@ local BGH_Module = BGH
 local Necromancer = loadClassModule("Module_Necromancer.lua", "isNecromancer")
 _G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purpose: no free local slots left
 _G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger")  -- global on purpose: no free local slots left
+_G.WSM_Assassin = loadClassModule("Module_Assassin.lua", "isAssassin")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
 
 -- Vampire state and helpers are owned by Module_Vampire.lua.
@@ -4955,7 +4962,8 @@ do
         or (type(Config.UpgradeClass) == "table"
             and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
             and ((_G.WSM_Witch.isWitch and table.find(Config.UpgradeClass, "Witch") ~= nil)
-                or (_G.WSM_GhostRanger.isGhostRanger and table.find(Config.UpgradeClass, "Ghost Ranger") ~= nil)))
+                or (_G.WSM_GhostRanger.isGhostRanger and table.find(Config.UpgradeClass, "Ghost Ranger") ~= nil)
+                or (_G.WSM_Assassin.isAssassin and table.find(Config.UpgradeClass, "Assassin") ~= nil)))
         or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
@@ -5110,6 +5118,9 @@ elseif _G.WSM_Witch.isWitch and not _G.WSM_Witch.isAllQuestDone() then
 elseif _G.WSM_GhostRanger.isGhostRanger and not _G.WSM_GhostRanger.isAllQuestDone() then
     -- Ghost Ranger: shoot the Ghost Crossbow for the GhostCrossbowHits quest (outside farm + Stronghold fight)
     _G.WSM_GhostRanger.runBackground()
+elseif _G.WSM_Assassin.isAssassin and not _G.WSM_Assassin.isAllQuestDone() then
+    -- Assassin: hunt with the Katana and fly circles while waiting for the Stronghold
+    _G.WSM_Assassin.runBackground()
 end
 
 Log.dev("\n[Step 4] Waiting for Stronghold to open...")
