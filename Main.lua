@@ -1678,19 +1678,21 @@ if isLobby() then
         local beamPart = tp and tp:FindFirstChild("BeamPart")
         if not beamPart then return math.huge end
 
-        -- รัศมีวงจากขนาด part (เทียบเฉพาะแกน X, Z - ไม่สนความสูง)
-        local radius = math.max(beamPart.Size.X, beamPart.Size.Z) / 2
+        -- วงจริงเป็นสี่เหลี่ยม: เช็คเป็นกล่อง X, Z (ไม่สนความสูง) ย่นจากขอบเข้ามาด้านละ 1 stud
+        -- ใช้พิกัดใน space ของ part เผื่อ part ถูกหมุน
+        local BEAM_EDGE_INSET = 1
+        local halfX = math.max(beamPart.Size.X / 2 - BEAM_EDGE_INSET, 0)
+        local halfZ = math.max(beamPart.Size.Z / 2 - BEAM_EDGE_INSET, 0)
 
         local count = 0
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 local hrp = player.Character:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    local distance = math.sqrt(
-                        (hrp.Position.X - beamPart.Position.X)^2 +
-                        (hrp.Position.Z - beamPart.Position.Z)^2
-                    )
-                    if distance <= radius then count += 1 end
+                    local localPos = beamPart.CFrame:PointToObjectSpace(hrp.Position)
+                    if math.abs(localPos.X) <= halfX and math.abs(localPos.Z) <= halfZ then
+                        count += 1
+                    end
                 end
             end
         end
