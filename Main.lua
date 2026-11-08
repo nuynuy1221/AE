@@ -5192,6 +5192,17 @@ local triggerZone = retryUntil("find Wave1 TriggerZone", function()
         and functional.EnemyWaves12:FindFirstChild("Wave1")
         and functional.EnemyWaves12.Wave1:FindFirstChild("TriggerZone")
     if tz and tz:IsA("BasePart") then return tz end
+
+    -- Not found: the Stronghold is probably not streamed in because the player is far away
+    -- (Witch / Ghost Ranger / Assassin farm outside while waiting). Go back so it loads again.
+    local hrp = getLiveParts()
+    if hrp and finalGateBasePos and (hrp.Position - finalGateBasePos).Magnitude > 150 then
+        Log.dev("[Step 5] TriggerZone not loaded - returning to the Stronghold")
+        hrp.CFrame = CFrame.new(finalGateBasePos + Vector3.new(0, airHeight, 0))
+        if platform and platform.Parent then
+            platform.Position = hrp.Position - Vector3.new(0, 3, 0)
+        end
+    end
     return nil
 end, 0.5)
 
