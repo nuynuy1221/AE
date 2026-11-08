@@ -1169,7 +1169,10 @@ local function lobbyAutoLevelUp()
         return
     end
 
-    -- 1) Equip class ตามลำดับ UpgradeClass - ข้าม class ที่ Lv.3 แล้ว
+    -- Equip the first UpgradeClass that is still below Lv.3 (skips finished classes).
+    -- Called AFTER the level-ups below: if it ran first, the class that just reached Lv.3 would still be
+    -- equipped when entering the farm map and the next class in UpgradeClass would never be picked.
+    local function equipNextClass()
     for _, mainClass in ipairs(validClasses) do
         local folder = ClassProgress:FindFirstChild(mainClass)
         if not folder then
@@ -1194,6 +1197,7 @@ local function lobbyAutoLevelUp()
             end
         end
     end
+    end
 
     -- 2) อัปเกรดทุก class ที่ CanLevelUp → รวมเป็นบรรทัดเดียว
     local upgrades = {}
@@ -1207,7 +1211,11 @@ local function lobbyAutoLevelUp()
             if not ok then
                 Log.err("[ClassUpgrade] RequestLevelUpClass(" .. cn .. ") call failed", "will retry on the next Lobby visit")
             end
-            task.wait(0.5)
+            -- wait up to 3s for the server to raise the level (equipNextClass below reads it)
+            for _ = 1, 30 do
+                task.wait(0.1)
+                if (folder:GetAttribute("Level") or 1) > fromLv then break end
+            end
             local toLv = folder:GetAttribute("Level") or 1
             if toLv > fromLv then
                 table.insert(upgrades, cn .. " Lv" .. fromLv .. "->Lv" .. toLv)
@@ -1222,6 +1230,9 @@ local function lobbyAutoLevelUp()
         Log.dev(msg)
         updateStatus(msg)
     end
+
+    -- 3) pick the class to farm with, now that the levels are up to date
+    equipNextClass()
 end
 
 
