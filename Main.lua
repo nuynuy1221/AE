@@ -78,7 +78,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.21 (UpgradeClass : Fancy Dressed)")
+print("Version - 1.2.22 (UpgradeClass : Pyromaniac)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -520,6 +520,10 @@ local CLASS_QUESTS = {
         [2] = { TravelStuds = 2500, PerfectKills = 100 },
         [3] = { TravelStuds = 10000, PerfectKills = 250 },
     },
+    Pyromaniac = {
+        [2] = { EnemyKillsWithFire = 150 },
+        [3] = { EnemyKillsWithFire = 400 },
+    },
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
 
@@ -892,6 +896,8 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                             -- Module_GhostRanger decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Assassin" and _G.WSM_Assassin and _G.WSM_Assassin.isAssassin then
                             -- Module_Assassin decides when to leave (it waits for the Stronghold round to finish)
+                        elseif equipped == "Pyromaniac" and _G.WSM_Pyromaniac and _G.WSM_Pyromaniac.isPyromaniac then
+                            -- Module_Pyromaniac decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Fancy Dressed" and _G.WSM_FancyDressed and _G.WSM_FancyDressed.isFancyDressed then
                             -- Module_FancyDressed decides when to leave (it waits for the Stronghold round to finish)
                         elseif folder and folder:GetAttribute("CanLevelUp") == true then
@@ -3083,6 +3089,7 @@ _G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purp
 _G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger")  -- global on purpose: no free local slots left
 _G.WSM_Assassin = loadClassModule("Module_Assassin.lua", "isAssassin")  -- global on purpose: no free local slots left
 _G.WSM_FancyDressed = loadClassModule("Module_FancyDressed.lua", "isFancyDressed")  -- global on purpose: no free local slots left
+_G.WSM_Pyromaniac = loadClassModule("Module_Pyromaniac.lua", "isPyromaniac")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
 
 -- Vampire state and helpers are owned by Module_Vampire.lua.
@@ -3224,6 +3231,16 @@ local FIRE_FUEL_ITEMS = {
     ["Coal"] = true,
     ["Log"] = true,  -- Log ดึงไปกองไฟ (ไม่ใช่ CraftingBench)
 }
+-- Pyromaniac (UpgradeClass, not Lv.3 yet): keep Fuel Canister / Oil Barrel for the Flamethrower, do not burn them
+do
+    if _G.WSM_Pyromaniac and _G.WSM_Pyromaniac.isPyromaniac
+        and type(Config.UpgradeClass) == "table" and table.find(Config.UpgradeClass, "Pyromaniac") ~= nil
+        and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3 then
+        FIRE_FUEL_ITEMS["Fuel Canister"] = nil
+        FIRE_FUEL_ITEMS["Oil Barrel"] = nil
+        _G.WSM_PyroKeepFuel = true
+    end
+end
 local CRAFTING_BENCH_SKIP_FIRE = {}
 
 local function getCraftingTouchZone()
@@ -4063,7 +4080,8 @@ while currentLevel < maxLevel do
                 for _, item in ipairs(workspace.Items:GetChildren()) do
                     if item.Name == "Log" and item.Parent == workspace.Items and not warpedItems[item] then
                         warpItemToFire(item)
-                    elseif (item:GetAttribute("BurnFuel") or 0) > 0 and item.Parent == workspace.Items and not warpedItems[item] then
+                    elseif (item:GetAttribute("BurnFuel") or 0) > 0 and item.Parent == workspace.Items and not warpedItems[item]
+                        and not (_G.WSM_PyroKeepFuel and (item.Name:find("^Fuel Canister") or item.Name:find("^Oil Barrel"))) then
                         warpItemToFire(item)
                     end
                 end
@@ -4980,7 +4998,8 @@ do
             and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
             and ((_G.WSM_Witch.isWitch and table.find(Config.UpgradeClass, "Witch") ~= nil)
                 or (_G.WSM_GhostRanger.isGhostRanger and table.find(Config.UpgradeClass, "Ghost Ranger") ~= nil)
-                or (_G.WSM_Assassin.isAssassin and table.find(Config.UpgradeClass, "Assassin") ~= nil)))
+                or (_G.WSM_Assassin.isAssassin and table.find(Config.UpgradeClass, "Assassin") ~= nil)
+                or (_G.WSM_Pyromaniac.isPyromaniac and table.find(Config.UpgradeClass, "Pyromaniac") ~= nil)))
         or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
@@ -5138,6 +5157,9 @@ elseif _G.WSM_GhostRanger.isGhostRanger and not _G.WSM_GhostRanger.isAllQuestDon
 elseif _G.WSM_Assassin.isAssassin and not _G.WSM_Assassin.isAllQuestDone() then
     -- Assassin: hunt with the Katana and fly circles while waiting for the Stronghold
     _G.WSM_Assassin.runBackground()
+elseif _G.WSM_Pyromaniac.isPyromaniac and not _G.WSM_Pyromaniac.isAllQuestDone() then
+    -- Pyromaniac: zero the HP, then one Flamethrower shot for the EnemyKillsWithFire quest (outside farm + Stronghold fight)
+    _G.WSM_Pyromaniac.runBackground()
 elseif _G.WSM_FancyDressed.isFancyDressed and not _G.WSM_FancyDressed.isAllQuestDone() then
     -- Fancy Dressed: quests are progressed by AutoCandy; this only leaves to the Lobby after the Stronghold round
     _G.WSM_FancyDressed.runBackground()
