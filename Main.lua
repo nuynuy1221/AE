@@ -78,7 +78,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.22 (UpgradeClass : Pyromaniac)")
+print("Version - 1.2.23 (Horst : Classes Saved)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -329,6 +329,8 @@ end)
 -- GUI Setup
 -- ============================================
 
+local mainFrame, statusValueLabel, updateDiamondsLabel -- [locals-reduce P2-01] declared here, assigned inside the block below
+do -- [locals-reduce P2-01] scoped block start
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local screenGui = Instance.new("ScreenGui")
@@ -340,7 +342,7 @@ screenGui.IgnoreGuiInset = true
 screenGui.Parent = playerGui
 
 -- Main Frame (ขนาด/ตำแหน่งเป็น scale ทั้งหมด เพื่อปรับตามขนาดจอ - เหมือน Anime Expeditions)
-local mainFrame = Instance.new("Frame")
+mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
 mainFrame.Size = UDim2.new(0.6, 0, 0.6, 0)
 mainFrame.Position = UDim2.new(0.5, 0, 0.65, 0)
@@ -486,16 +488,17 @@ end
 
 -- Status Box (LayoutOrder 2)
 local diamondsValueLabel
-local statusValueLabel = createStatBox("Status", "Status", Color3.fromRGB(194, 144, 90), 2)
+statusValueLabel = createStatBox("Status", "Status", Color3.fromRGB(194, 144, 90), 2)
 statusValueLabel.Text = "Initializing..."
 
 -- Diamonds Box (LayoutOrder 3) - อ่านค่าจาก LocalPlayer.Diamonds attribute (ดูตาม diamond_checker_print.lua)
 diamondsValueLabel = createStatBox("Diamonds", "Diamonds", Color3.fromRGB(210, 180, 140), 3)
 
-local function updateDiamondsLabel()
+function updateDiamondsLabel()
     local diamonds = LocalPlayer:GetAttribute("Diamonds")
     diamondsValueLabel.Text = diamonds and formatNumber(diamonds) or "..."
 end
+end -- [locals-reduce P2-01] scoped block end
 
 -- ส่ง Description ให้ Horst
 -- CLASS_QUESTS ต้อง declare ก่อน (hoist) เพราะ function bodies ในบาง executor scope leak
@@ -527,11 +530,17 @@ local CLASS_QUESTS = {
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
 
+-- ค่า stat ล่าสุดของแต่ละคลาสจาก ClassStatUpdated (ดูตัว watcher ด้านล่าง)
+-- ประกาศไว้ตรงนี้เพราะบล็อกสร้างข้อความคลาสของ Description ด้านล่างต้องอ่านค่านี้
+local classStatCache = {}  -- [className] = { [statKey] = value }
+
 -- Throttle: ยิง Description ได้ครั้งเดียวทุก HORST_MIN_INTERVAL วิ
 -- ทุก call site ต้องผ่าน gate นี้: sendHorstDescription() + ClassStatUpdated (ยิงตรง)
 -- เหตุผล: Diamonds attribute เปลี่ยนทีละน้อย + ClassStatUpdated ยิงทุก stat
 --          = ไม่ throttle แล้วเตะ rate limit ของ on_loaded.lua
-local HORST_MIN_INTERVAL = 30
+local HORST_MIN_INTERVAL, sendHorstDescription -- [locals-reduce P2-02] declared here, assigned inside the block below
+do -- [locals-reduce P2-02] scoped block start
+HORST_MIN_INTERVAL = 30
 local horstLastSend = 0
 
 local function horstThrottle(force)
@@ -613,7 +622,202 @@ local function horstSend(text)
     _G.Horst_SetDescription(text, horstJson())
 end
 
-local function sendHorstDescription(force)
+-- ============================================
+-- ข้อความ Class ใน Description + ไฟล์เซฟคลาส (Lobby -> แมพฟาร์ม)
+-- ============================================
+-- แมพฟาร์มไม่มีโฟลเดอร์ ClassProgress จึงเช็คคลาสที่ไม่ได้ equip ไม่ได้
+-- Lobby จึงจดข้อมูลคลาสที่มีลงไฟล์ workspace รายบัญชี  Classes_<Username>.json
+-- แมพฟาร์มอ่านไฟล์นั้นมาแสดง และใช้ค่าสด (classStatCache) ทับเฉพาะคลาสที่ equip อยู่
+-- ไม่จดและไม่แสดงคลาสที่ยังไม่มี  ถ้าไม่มีไฟล์/executor ไม่มี writefile -> ใช้ข้อความเดิม
+-- อยู่ใน do-block เพื่อไม่กิน top-level local  เปิดให้ข้างนอกเรียกผ่าน _G.WSM_ClassText
+do
+    local safeName = tostring(LocalPlayer.Name):gsub("[^%w_%-]", "_")
+    local CLASSES_FILE = "Classes_" .. safeName .. ".json"
+    local LOBBY_ID = 79546208627805
+
+    local snapshot, snapshotLoaded = nil, false
+    local function loadSnapshot()
+        if snapshotLoaded then return snapshot end
+        snapshotLoaded = true
+        if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
+        local ok, data = pcall(function()
+            if not isfile(CLASSES_FILE) then return nil end
+            return HttpService:JSONDecode(readfile(CLASSES_FILE))
+        end)
+        if ok and type(data) == "table" and type(data.classes) == "table" then
+            snapshot = data
+        end
+        return snapshot
+    end
+
+    -- รายชื่อคลาสที่ตั้งไว้ (BuyClass ก่อน แล้ว UpgradeClass) ไม่ซ้ำ
+    local function configuredClasses()
+        local out, seen = {}, {}
+        for _, list in ipairs({ Config.BuyClass, Config.UpgradeClass }) do
+            if type(list) == "table" then
+                for _, c in ipairs(list) do
+                    if type(c) == "string" and not seen[c] then
+                        seen[c] = true
+                        out[#out + 1] = c
+                    end
+                end
+            end
+        end
+        return out
+    end
+
+    -- "Cyborg Lv2 (45%)" / "Cyborg Lv3 (MAX)" / "Cyborg Lv1" (คลาสที่ไม่มีข้อมูลเควสต์ -> ไม่โชว์ %)
+    local function formatClass(className, lvl, getStat, dev)
+        local text = className .. " Lv" .. lvl
+        if lvl >= 3 then return text .. " (MAX)" end
+        local targetLevel = lvl + 1
+        local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
+        if not reqs then return text end
+
+        local totalPct, count = 0, 0
+        for statKey, goal in pairs(reqs) do
+            local have = getStat(statKey) or 0
+            if type(have) == "number" and goal > 0 then
+                totalPct = totalPct + math.min(have / goal, 1) * 100
+                count = count + 1
+            end
+        end
+        if count == 0 then return text end
+
+        local avgPct = math.floor(totalPct / count)
+        if dev then
+            Log.dev(string.format("[Quest] %s -> Lv.%d: %d%% (avg)", className, targetLevel, avgPct))
+            for statKey, goal in pairs(reqs) do
+                local have = getStat(statKey) or 0
+                if type(have) == "number" and goal > 0 then
+                    Log.dev(string.format("  - %s: %d / %d", statKey, have, goal))
+                end
+            end
+        end
+        return text .. " (" .. avgPct .. "%)"
+    end
+
+    -- Lobby: อ่านจาก ClassProgress ตรงๆ (คลาสที่ยังไม่มี = ไม่มีโฟลเดอร์ = ไม่แสดง)
+    local function lobbyText()
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        if not cp then return "None" end
+        local lines = {}
+        for _, className in ipairs(configuredClasses()) do
+            local folder = cp:FindFirstChild(className)
+            if folder then
+                lines[#lines + 1] = formatClass(className, folder:GetAttribute("Level") or 1,
+                    function(k) return folder:GetAttribute(k) end, true)
+            end
+        end
+        return #lines > 0 and table.concat(lines, ", ") or "None"
+    end
+
+    -- ข้อความคลาสที่ equip อยู่ จากค่าสด (stat ใช้ classStatCache ก่อน แล้วค่อยใช้ค่าในไฟล์)
+    local function liveText(className, lvl, snapStats)
+        return formatClass(className, lvl, function(k)
+            local cached = classStatCache[className]
+            local v = cached and cached[k]
+            if v == nil and snapStats then v = snapStats[k] end
+            return v
+        end)
+    end
+
+    -- แมพฟาร์ม
+    local function farmText()
+        local equipped = LocalPlayer:GetAttribute("Class")
+        local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
+        local snap = loadSnapshot()
+        if not snap then
+            -- ยังไม่มีไฟล์จาก Lobby -> แสดงเฉพาะคลาสที่ equip เหมือนเดิม
+            if equipped then
+                return liveText(equipped, equippedLvl) .. " [Can't check classes during farming]"
+            end
+            return "None [Can't check classes during farming]"
+        end
+
+        local lines = {}
+        for _, className in ipairs(configuredClasses()) do
+            local entry = type(snap.classes[className]) == "table" and snap.classes[className] or nil
+            local stats = entry and type(entry.stats) == "table" and entry.stats or nil
+            if className == equipped then
+                lines[#lines + 1] = liveText(className, equippedLvl, stats)
+            elseif entry then
+                lines[#lines + 1] = formatClass(className, tonumber(entry.level) or 1,
+                    function(k) return stats and stats[k] end)
+            end
+        end
+        return #lines > 0 and table.concat(lines, ", ") or "None"
+    end
+
+    _G.WSM_ClassText = function(isLobby)
+        if isLobby then return lobbyText() end
+        return farmText()
+    end
+
+    -- ===== Lobby: เขียนไฟล์ =====
+    -- จดเฉพาะคลาสที่มี (มีโฟลเดอร์ใน ClassProgress) : เลเวล + ค่า stat ของเควสต์ถัดไป
+    local function buildClasses()
+        local cp = LocalPlayer:FindFirstChild("ClassProgress")
+        if not cp then return nil end
+        local classes, n = {}, 0
+        for _, folder in ipairs(cp:GetChildren()) do
+            local lvl = folder:GetAttribute("Level") or 1
+            local stats = {}
+            local quest = CLASS_QUESTS[folder.Name]
+            local reqs = lvl < 3 and quest and quest[lvl + 1]
+            if reqs then
+                for statKey in pairs(reqs) do
+                    local v = folder:GetAttribute(statKey)
+                    if type(v) == "number" then stats[statKey] = v end
+                end
+            end
+            classes[folder.Name] = { level = lvl, stats = stats }
+            n = n + 1
+        end
+        if n == 0 then return nil end
+        return classes
+    end
+
+    -- ลายเซ็นข้อมูลแบบเรียงลำดับคงที่ (ใช้เทียบว่าเปลี่ยนไหม ไม่พึ่งลำดับ pairs ของ JSON)
+    local function signature(classes)
+        local names = {}
+        for name in pairs(classes) do names[#names + 1] = name end
+        table.sort(names)
+        local parts = {}
+        for _, name in ipairs(names) do
+            local e = classes[name]
+            local keys = {}
+            for k in pairs(e.stats) do keys[#keys + 1] = k end
+            table.sort(keys)
+            local sp = {}
+            for _, k in ipairs(keys) do sp[#sp + 1] = k .. "=" .. tostring(e.stats[k]) end
+            parts[#parts + 1] = name .. ":" .. tostring(e.level) .. ":" .. table.concat(sp, ",")
+        end
+        return table.concat(parts, ";")
+    end
+
+    -- เขียนไฟล์เฉพาะตอนข้อมูลเปลี่ยน (เช็คทุก 3 วิ)
+    if game.PlaceId == LOBBY_ID and Config.Horst and type(writefile) == "function" then
+        task.spawn(function()
+            local lastSig = nil
+            while true do
+                local classes = buildClasses()
+                if classes then
+                    local sig = signature(classes)
+                    if sig ~= lastSig then
+                        local ok = pcall(function()
+                            writefile(CLASSES_FILE, HttpService:JSONEncode({ classes = classes }))
+                        end)
+                        if ok then lastSig = sig end
+                    end
+                end
+                task.wait(3)
+            end
+        end)
+    end
+end
+
+function sendHorstDescription(force)
     if not horstThrottle(force) then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
@@ -629,102 +833,12 @@ local function sendHorstDescription(force)
         return
     end
 
-    local classText
-    if isLobby then
-        local lines = {}
-        local ClassProgress = LocalPlayer:FindFirstChild("ClassProgress")
-        if ClassProgress then
-            local seen = {}
-            local classesToShow = {}
-            if Config.BuyClass then
-                for _, c in ipairs(Config.BuyClass) do classesToShow[#classesToShow + 1] = c end
-            end
-            if Config.UpgradeClass then
-                for _, c in ipairs(Config.UpgradeClass) do classesToShow[#classesToShow + 1] = c end
-            end
-            for _, className in ipairs(classesToShow) do
-                if not seen[className] then
-                    seen[className] = true
-                    local folder = ClassProgress:FindFirstChild(className)
-                    if folder then
-                        local lvl = folder:GetAttribute("Level") or 1
-                        local classStr = className .. " Lv" .. lvl
-                        -- คำนวณ % quest progress (Lv < 3)
-                        if lvl < 3 then
-                            local targetLevel = lvl + 1
-                            local reqs = CLASS_QUESTS[className] and CLASS_QUESTS[className][targetLevel]
-                            if reqs then
-                                local totalPct, count = 0, 0
-                                for statKey, goal in pairs(reqs) do
-                                    local have = folder:GetAttribute(statKey) or 0
-                                    if type(have) == "number" and goal > 0 then
-                                        totalPct = totalPct + math.min(have / goal, 1) * 100
-                                        count = count + 1
-                                    end
-                                end
-                                if count > 0 then
-                                    local avgPct = math.floor(totalPct / count)
-                                    classStr = classStr .. " (" .. avgPct .. "%)"
-                                    -- Dev Logs: แสดงแต่ละ stat แยก
-                                    Log.dev(string.format("[Quest] %s -> Lv.%d: %d%% (avg)",
-                                        className, targetLevel, avgPct))
-                                    for statKey, goal in pairs(reqs) do
-                                        local have = folder:GetAttribute(statKey) or 0
-                                        if type(have) == "number" and goal > 0 then
-                                            Log.dev(string.format("  - %s: %d / %d",
-                                                statKey, have, goal))
-                                        end
-                                    end
-                                end
-                            end
-                        else
-                            classStr = classStr .. " (MAX)"
-                        end
-                        table.insert(lines, classStr)
-                    else
-                        table.insert(lines, className .. " (not owned)")
-                    end
-                end
-            end
-        end
-        classText = #lines > 0 and table.concat(lines, ", ") or "None"
-    else
-        -- แมพฟาร์ม: เช็คเฉพาะ class ที่กำลัง equip + คำนวณ % quest progress
-        local equipped = LocalPlayer:GetAttribute("Class")
-        if equipped then
-            local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-            local classTextPart = equipped .. " Lv" .. lvl
-            -- คำนวณ % ของ quest ถัดไป (ใช้ CLASS_QUESTS ที่ฝังไว้)
-            local targetLevel = math.min(lvl + 1, 3)
-            local reqs = CLASS_QUESTS[equipped] and CLASS_QUESTS[equipped][targetLevel]
-            if reqs and lvl < 3 then
-                local cp = LocalPlayer:FindFirstChild("ClassProgress")
-                local folder = cp and cp:FindFirstChild(equipped)
-                if folder then
-                    local totalPct, count = 0, 0
-                    for statKey, goal in pairs(reqs) do
-                        local have = folder:GetAttribute(statKey) or 0
-                        if type(have) == "number" and goal > 0 then
-                            totalPct = totalPct + math.min(have / goal, 1) * 100
-                            count = count + 1
-                        end
-                    end
-                    if count > 0 then
-                        classTextPart = classTextPart .. " (" .. math.floor(totalPct / count) .. "%)"
-                    end
-                end
-                classText = classTextPart .. " [Can't check classes during farming]"
-            else
-                classText = classTextPart .. " (MAX) [Can't check classes during farming]"
-            end
-        else
-            classText = "None [Can't check classes during farming]"
-        end
-    end
+    local classText = _G.WSM_ClassText(isLobby)
 
     horstSend(string.format(
         "🌲 99 Nights • Diamonds: %d • Candy: %d • Class: %s", diamonds, candy, classText))
 end
+end -- [locals-reduce P2-02] scoped block end
 
 local function checkDiamondsGoalAndSendDone()
     sendHorstDescription()
@@ -739,7 +853,7 @@ updateDiamondsLabel()
 
 -- ClassStatUpdated Remote watcher: ดัก event จาก server → อัปเดต quest % real-time
 -- signature: ClassStatUpdated:FireClient(player, className, statKey, value, delta)
-local classStatCache = {}  -- [className] = { [statKey] = value }
+do -- [locals-reduce P2-03] scoped block start
 local questDoneReported = {} -- ["Class:Lv"] = true once the quest-complete line was printed
 
 -- Shared quest-complete message, the same format for every class (called by each class module):
@@ -770,6 +884,7 @@ _G.WSM_QuestDone = function(className)
     print(string.format("[Quest] Done : %s Lv.%d - %s", className, lvl, table.concat(parts, ", ")))
     return true
 end
+end -- [locals-reduce P2-03] scoped block end
 
 pcall(function()
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -799,40 +914,8 @@ pcall(function()
                     if clsName == className then isTracked = true break end
                 end
                 if isTracked then
-                    local mainClass = className
-                    local lvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-                    -- ClassProgress may not exist in the farm map; never index it directly
-                    local cpf = LocalPlayer:FindFirstChild("ClassProgress")
-                    local cpc = cpf and cpf:FindFirstChild(mainClass)
-                    if lvl < 3 then
-                        local reqs = CLASS_QUESTS[mainClass] and CLASS_QUESTS[mainClass][lvl + 1]
-                        if reqs then
-                            local totalPct, count = 0, 0
-                            for sk, goal in pairs(reqs) do
-                                local have = classStatCache[mainClass][sk]
-                                    or (cpc and cpc:GetAttribute(sk))
-                                    or 0
-                                if type(have) == "number" and goal > 0 then
-                                    totalPct = totalPct + math.min(have / goal, 1) * 100
-                                    count = count + 1
-                                end
-                            end
-                            if count > 0 then
-                                local avgPct = math.floor(totalPct / count)
-                                local equipped = LocalPlayer:GetAttribute("Class")
-                                local equippedLvl = LocalPlayer:GetAttribute("ClassLevel") or 1
-                                local classTextPart = equipped and (equipped .. " Lv" .. equippedLvl .. " (" .. avgPct .. "%)")
-                                    or mainClass .. " Lv" .. lvl .. " (" .. avgPct .. "%)"
-                                if horstThrottle() then
-                                    local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-                                    local candy = _G.WSM_GetCandy()
-                                    horstSend(string.format(
-                                        "🌲 99 Nights • Diamonds: %d • Candy: %d • Class: %s [Can't check classes during farming]",
-                                        diamonds, candy, classTextPart))
-                                end
-                            end
-                        end
-                    end
+                    -- ข้อความสร้างจาก _G.WSM_ClassText (ค่าสดจาก classStatCache) และ throttle อยู่ใน sendHorstDescription
+                    sendHorstDescription()
                 end
             end
         end)
@@ -949,6 +1032,7 @@ end
 -- ============================================
 -- Toggle GUI/Render3D ด้วยปุ่ม N
 -- ============================================
+do -- [locals-reduce P2-04] scoped block start
 local UserInputService = game:GetService("UserInputService")
 local isGuiVisible = true
 
@@ -1005,6 +1089,7 @@ hubPadding.PaddingRight = UDim.new(0.03, 0)
 hubPadding.PaddingTop = UDim.new(0.15, 0)
 hubPadding.PaddingBottom = UDim.new(0.15, 0)
 hubPadding.Parent = hubLabel
+end -- [locals-reduce P2-04] scoped block end
 
 -- Update Status Function (pcall กันพัง ถ้า label ถูก Destroy ไปแล้วจะไม่ทำให้ script ทั้งเส้นตายไปด้วย)
 local function updateStatus(text)
@@ -1045,6 +1130,8 @@ end
 -- สร้างแบบ WELD ติดกับ HumanoidRootPart => ขยับตาม "ทันที" ในระดับ physics
 -- (แม้ FPS เหลือ 5 ก็ตามสนิท เพราะเป็นชิ้นส่วนเดียวกันกับตัวละคร ไม่ต้องรอ loop ขยับ)
 -- ============================================
+local destroyShield, buildShield, setShieldSolid -- [locals-reduce P2-05] declared here, assigned inside the block below
+do -- [locals-reduce P2-05] scoped block start
 local SHIELD_SIZE = 8     -- ครึ่งรัศมี 4 รอบ HRP = พอดีคลุมหัวถึงเท้า
 local SHIELD_THICK = 1
 -- shieldSolid = true เปิดกายภาพ 4 ด้านข้าง = "กันมอนเดินเข้ามาหาเรา" (ดันมอนออกนอกโล่)
@@ -1056,14 +1143,14 @@ local shieldSolid = true
 
 local shieldFolder = nil
 
-local function destroyShield()
+function destroyShield()
     if shieldFolder then
         pcall(function() shieldFolder:Destroy() end)
         shieldFolder = nil
     end
 end
 
-local function buildShield()
+function buildShield()
     destroyShield()
 
     local char = LocalPlayer.Character
@@ -1111,7 +1198,7 @@ end
 
 -- สลับโหมดโล่: true = ชนมอนได้ (กันมอนเดินเข้ามา), false = โปร่ง (ไม่ชนอะไรเลย แค่ดักกระสุน)
 -- เรียกแล้ว rebuild โล่ทันทีถ้ากำลังสร้างอยู่ (ตายเกิดใหม่ก็จะได้โหมดล่าสุดเสมอ)
-local function setShieldSolid(enabled)
+function setShieldSolid(enabled)
     if shieldSolid == enabled then return end
     shieldSolid = enabled
     if shieldFolder then
@@ -1119,6 +1206,7 @@ local function setShieldSolid(enabled)
         buildShield()
     end
 end
+end -- [locals-reduce P2-05] scoped block end
 
 -- ตายเกิดใหม่ = สร้างโล่ใหม่ให้อัตโนมัติ
 LocalPlayer.CharacterAdded:Connect(function(char)
@@ -2611,6 +2699,8 @@ buildShield()
 --      เดิมเตะกลับ Lobby เอาห้องใหม่ -> เลิกแล้ว รอต่อ
 --      เหตุผลที่รอไม่ได้: MainFire = จุดยึดทั้งสคริปต์ firePos ใช้วางแพลตฟอร์ม วาร์ปของ และวนเก็บทรัพยากร
 local mainFire = nil
+local firePos -- [locals-reduce P3-11] declared here, assigned inside the block below
+do -- [locals-reduce P3-11] scoped block start
 local waitedFire = 0
 while not mainFire do
     local map = workspace:FindFirstChild("Map")
@@ -2631,21 +2721,13 @@ local firePart = retryUntil("find Fire part", function()
     return mainFire:FindFirstChildWhichIsA("BasePart", true)
 end)
 
-local firePos = firePart.Position
+firePos = firePart.Position
+end -- [locals-reduce P3-11] scoped block end
 updateStatus("Finding Trees...")
 
 -- บูตครบแล้ว (God mode/Anti-Share/Auto-Eat/shield/MainFire พร้อม) = ปลด watchdog
 _G.KaitunExecuted = true
 
-local CHOPPABLE_TREE_NAMES = {
-    "Small Tree",
-    "Fairy Small Tree",
-    "Snowy Small Tree",
-    "Birch Tree",
-    "Dead Tree1",
-    "Dead Tree2",
-    "Dead Tree3",
-}
 
 local trees = retryUntil("find Trees", function()
     local found = {}
@@ -3038,10 +3120,12 @@ _G.CLASS_QUESTS = CLASS_QUESTS
 _G.classStatCache = classStatCache
 
 -- Expose Dissolve remote (ใช้ใน Module_Alien)
+do -- [locals-reduce P3-01] scoped block start
 local dissolveRemote_outer = game:GetService("ReplicatedStorage")
     :FindFirstChild("RemoteEvents")
     and game:GetService("ReplicatedStorage").RemoteEvents:FindFirstChild("RequestDissolveEnemy")
 _G.dissolveRemote = dissolveRemote_outer
+end -- [locals-reduce P3-01] scoped block end
 
 -- Load class modules จาก GitHub (จะ obfuscator ทีหลัง)
 local function loadClassModule(name, flagName)
@@ -3083,7 +3167,6 @@ _G.__WSM_currentClass = __currentClass
 local Vampire = loadClassModule("Module_Vampire.lua", "isVampire")
 local Alien = loadClassModule("Module_Alien.lua", "isAlienScientist")
 local BGH = loadClassModule("Module_BGH.lua", "isBigGameHunter")
-local BGH_Module = BGH
 local Necromancer = loadClassModule("Module_Necromancer.lua", "isNecromancer")
 _G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purpose: no free local slots left
 _G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger")  -- global on purpose: no free local slots left
@@ -3101,7 +3184,7 @@ local isVampireAllQuestDone = Vampire.isAllQuestDone
 local vampireScythe = (LocalPlayer:FindFirstChild("Inventory")
     and LocalPlayer.Inventory:FindFirstChild("Vampire Scythe"))
 
-local toolHandle = retryUntil("equip axe", function()
+retryUntil("equip axe", function()
     Client.InventoryHandler.RequestEquipItem(bestAxeChop)
     for _ = 1, 10 do
         local char = LocalPlayer.Character
@@ -3118,7 +3201,7 @@ local axe = bestAxeCombat
 local currentClass = LocalPlayer:GetAttribute("Class")
 local currentLevel = LocalPlayer:GetAttribute("ClassLevel") or 1
 Log.dev(string.format("[Class] Using: %s (Level %d)", tostring(currentClass), currentLevel))
-local myChar = workspace:WaitForChild(LocalPlayer.Name)
+workspace:WaitForChild(LocalPlayer.Name)
 
 -- ============================================
 -- ALIEN SCIENTIST CLASS HELPERS  (โหลดจาก Module_Alien.lua)
@@ -3127,6 +3210,7 @@ local myChar = workspace:WaitForChild(LocalPlayer.Name)
 -- ============================================
 -- Big Game Hunter helpers are provided by Module_BGH.lua.
 
+do -- [locals-reduce P3-02] scoped block start
 local HP_SKIP_THRESHOLD = 100  -- ข้าม NPC ที่ HP > 100 (Mossy Mammoth, etc.)
 
 local function findNightMonsters()
@@ -3172,8 +3256,10 @@ local function findNightMonsters()
     return list
 end
 _G.findNightMonsters = findNightMonsters  -- ponytail: expose after definition
+end -- [locals-reduce P3-02] scoped block end
 
 -- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
+do -- [locals-reduce P3-03] scoped block start
 local function checkAnyCultistSpawned()
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return false end
@@ -3185,7 +3271,10 @@ local function checkAnyCultistSpawned()
     return false
 end
 _G.checkAnyCultistSpawned = checkAnyCultistSpawned  -- ponytail: expose after definition; module uses _G
+end -- [locals-reduce P3-03] scoped block end
 
+local textLabel -- [locals-reduce P3-04] declared here, assigned inside the block below
+do -- [locals-reduce P3-04] scoped block start
 local fireFrame = retryUntil("find MainFire BillboardGui", function()
     local center = mainFire:FindFirstChild("Center")
     local gui = center and center:FindFirstChild("BillboardGui")
@@ -3196,8 +3285,9 @@ local fireFrame = retryUntil("find MainFire BillboardGui", function()
     return nil
 end, 0.3)
 
-local textLabel = fireFrame.TextLabel
-local timerLabel = fireFrame.RealTimer
+textLabel = fireFrame.TextLabel
+local _ = fireFrame.RealTimer
+end -- [locals-reduce P3-04] scoped block end
 
 local maxLevel = 7
 
@@ -3241,7 +3331,6 @@ do
         _G.WSM_PyroKeepFuel = true
     end
 end
-local CRAFTING_BENCH_SKIP_FIRE = {}
 
 local function getCraftingTouchZone()
     local bench = workspace:FindFirstChild("Map")
@@ -3277,27 +3366,6 @@ end
 
 -- ดึง item ทีละชิ้นไปยังตำแหน่งเป้าหมาย (sequential — รอ Drag เสร็จก่อนตัวถัดไป)
 -- Pattern เดียวกับ pullBGHPelt: RequestStartDraggingItem → PivotTo → StopDraggingItem
-local function dragItemToTarget(item, targetPos)
-    if warpedItems[item] then return end
-    if not (item and item.Parent) then return end
-
-    local StartDrag = ReplicatedStorage.RemoteEvents.RequestStartDraggingItem
-    local StopDrag = ReplicatedStorage.RemoteEvents.StopDraggingItem
-    if not (StartDrag and StopDrag) then return end
-
-    pcall(function()
-        StartDrag:FireServer(item)
-        task.wait(0.1)
-        if item:IsA("Model") then
-            item:PivotTo(CFrame.new(targetPos))
-        else
-            item.CFrame = CFrame.new(targetPos)
-        end
-        task.wait(0.1)
-        StopDrag:FireServer(item)
-    end)
-    warpedItems[item] = true
-end
 
 local function warpItemToFire(item)
     warpItemToTarget(item, firePos + Vector3.new(0, 10, 0))
@@ -3364,13 +3432,15 @@ task.spawn(function()
     end
 end)
 
+local LOST_CHILD_TOTAL, collectLostChildren, allChildrenCollected, dropAllLostChildren -- [locals-reduce P3-05] declared here, assigned inside the block below
+do -- [locals-reduce P3-05] scoped block start
 local LOST_CHILD_NAMES = {
     "Lost Child",
     "Lost Child2",
     "Lost Child3",
     "Lost Child4",
 }
-local LOST_CHILD_TOTAL = #LOST_CHILD_NAMES
+LOST_CHILD_TOTAL = #LOST_CHILD_NAMES
 
 -- เช็คสถานะเด็กจาก attribute (อ้างอิงจาก decompile ของเกม: KidClueClient/_DinoKidQuestClient/GiveKidItemClient)
 -- ยังไม่ช่วย = Lost=true + Interaction="CanBeBagged" / ช่วยแล้ว = Lost=false, Interaction="Befriend"..KidId (+Rescued/Friending)
@@ -3386,7 +3456,7 @@ local function kidStillLost(c)
     return c:GetAttribute("Lost") == true and c:GetAttribute("Interaction") == "CanBeBagged"
 end
 
-local function collectLostChildren()
+function collectLostChildren()
     local chars = workspace:FindFirstChild("Characters")
     if not chars then return end
 
@@ -3442,14 +3512,14 @@ local function collectLostChildren()
     end
 end
 
-local function allChildrenCollected()
+function allChildrenCollected()
     for _, name in ipairs(LOST_CHILD_NAMES) do
         if not collectedChildren[name] then return false end
     end
     return true
 end
 
-local function dropAllLostChildren(retryDepth)
+function dropAllLostChildren(retryDepth)
     retryDepth = retryDepth or 0 -- เพดานความลึกของ retry: เดิมเรียกซ้ำไม่จำกัด (ลิมิต 5 รอบใน for ไม่มีวันทำงานจริง)
 
     -- Inner function: ปล่อยเด็ก 1 รอบ (เรียกซ้ำได้โดยไม่ recursive ทั้งฟังก์ชัน)
@@ -3603,6 +3673,7 @@ local function dropAllLostChildren(retryDepth)
     -- re-equip axe หลังปล่อย
     Client.InventoryHandler.RequestEquipItem(bestAxeChop)
 end
+end -- [locals-reduce P3-05] scoped block end
 
 local platform = Instance.new("Part")
 platform.Size = Vector3.new(10, 1, 10)
@@ -3617,6 +3688,7 @@ platform.Parent = workspace
 -- 6000 = รัศมี 3000 ที่กลางกองไฟ ครอบวงบินที่ไกลสุด (radius 1500) เหลือ 2 เท่า
 -- CanQuery = false: ตั้งใจให้เกม raycast มองไม่เห็น (getFloorInfo/ระบบเล็ง) แต่ตัวละคร/มอนชนได้
 -- CanTouch = false: ไม่ต้องยิง Touched ให้มอนเดินตาม
+do -- [locals-reduce P3-06] scoped block start
 local FALL_FLOOR_SIZE = 6000
 local FALL_FLOOR_DROP = 50
 local fallFloor = Instance.new("Part")
@@ -3630,6 +3702,7 @@ fallFloor.Material = Enum.Material.SmoothPlastic
 fallFloor.Transparency = 1
 fallFloor.Position = firePos - Vector3.new(0, FALL_FLOOR_DROP, 0)
 fallFloor.Parent = workspace
+end -- [locals-reduce P3-06] scoped block end
 
 -- (กำแพงป้องกันเดิมถูกแทนด้วย GLOBAL SHIELD แบบ weld ติดตัวด้านบนแล้ว)
 local airHeight = 20
@@ -4118,10 +4191,13 @@ dropAllLostChildren()
 Log.dev("\n[Step 3.5] Checking resources for crafting...")
 
 local CraftEvent = ReplicatedStorage.RemoteEvents.CraftItem
+local getTotalScrap, getTotalWood -- [locals-reduce P3-07] declared here, assigned inside the block below
+do -- [locals-reduce P3-07] scoped block start
 local campground = workspace.Map.Campground
 
-local function getTotalScrap() return campground:GetAttribute("TotalScrap") or 0 end
-local function getTotalWood()  return campground:GetAttribute("TotalWood")  or 0 end
+function getTotalScrap() return campground:GetAttribute("TotalScrap") or 0 end
+function getTotalWood()  return campground:GetAttribute("TotalWood")  or 0 end
+end -- [locals-reduce P3-07] scoped block end
 
 -- หา Wood ที่ขาด: ตัดต้นไม้แล้วดึงไม้ไปโต๊ะคราฟ
 if getTotalWood() < NEED_WOOD then
@@ -4316,6 +4392,7 @@ pcall(function() CraftEvent:InvokeServer("Crafting Bench 3") end)
 task.wait(0.5)
 
 -- วางเตียง: หา blueprint nil แล้ว InvokeServer RequestPlaceStructure
+do -- [locals-reduce P3-08] scoped block start
 local PlaceEvent = ReplicatedStorage.RemoteEvents.RequestPlaceStructure
 local alecCircle = workspace.Map.Campground:FindFirstChild("alecCircle")
 
@@ -4420,6 +4497,7 @@ for _, bedName in ipairs(BED_ITEMS) do
     end
     task.wait(0.3)
 end
+end -- [locals-reduce P3-08] scoped block end
 
 Log.dev("[Step 3.5] Crafting complete!")
 updateStatus("Crafting done!")
@@ -4430,6 +4508,8 @@ updateStatus("Crafting done!")
 -- Shared: Stronghold helpers
 -- ============================================
 
+local getStrongholdFunctional, getFloorInfo, strongholdFloorPos, warpToStrongholdFloor, getStrongholdTimeRemaining -- [locals-reduce P3-12] declared here, assigned inside the block below
+do -- [locals-reduce P3-12] scoped block start
 local function getStrongholdRoot()
     local map = workspace:FindFirstChild("Map")
     local landmarks = map and map:FindFirstChild("Landmarks")
@@ -4441,13 +4521,13 @@ local function getStrongholdBuilding()
     return sh and sh:FindFirstChild("Building")
 end
 
-local function getStrongholdFunctional()
+function getStrongholdFunctional()
     local sh = getStrongholdRoot()
     return sh and sh:FindFirstChild("Functional")
 end
 
 -- คืน center + size ของ Floor (ใช้ GetBoundingBox เพราะ pivot อาจไม่อยู่กลางจริง)
-local function getFloorInfo()
+function getFloorInfo()
     local building = getStrongholdBuilding()
     if not building then return nil end
 
@@ -4485,9 +4565,9 @@ local function flySearchStronghold()
     return getStrongholdBuilding() ~= nil
 end
 
-local strongholdFloorPos = nil
+strongholdFloorPos = nil
 
-local function warpToStrongholdFloor(holdSeconds)
+function warpToStrongholdFloor(holdSeconds)
     local center, size = getFloorInfo()
 
     if not center then
@@ -4521,7 +4601,7 @@ local function warpToStrongholdFloor(holdSeconds)
     return true
 end
 
-local function getStrongholdTimeRemaining()
+function getStrongholdTimeRemaining()
     for _, sh in ipairs(CollectionService:GetTagged("Stronghold")) do
         if sh.Name ~= "AlienMothership" then
             local f = sh:FindFirstChild("Functional")
@@ -4553,6 +4633,7 @@ end, 1)
 retryUntil("warp to Stronghold Floor", function()
     return warpToStrongholdFloor(2)
 end, 1)
+end -- [locals-reduce P3-12] scoped block end
 
 ----------------------------------------------------------------
 -- STEP 3.6b: Equip Laser Cannon + ยิงแทนตี
@@ -5096,6 +5177,8 @@ do
 end
 
 -- จับตำแหน่ง FinalGate ตอนเข้า Stronghold ครั้งแรก ถ้าค่าเปลี่ยน = เคลียร์แล้ว
+local finalGateBasePos -- [locals-reduce P3-09] declared here, assigned inside the block below
+do -- [locals-reduce P3-09] scoped block start
 local function getFinalGatePos()
     local map = workspace:FindFirstChild("Map")
     local landmarks = map and map:FindFirstChild("Landmarks")
@@ -5114,7 +5197,8 @@ local function getFinalGatePos()
     return part and part.Position or nil
 end
 
-local finalGateBasePos = retryUntil("find FinalGate", getFinalGatePos, 0.2)
+finalGateBasePos = retryUntil("find FinalGate", getFinalGatePos, 0.2)
+end -- [locals-reduce P3-09] scoped block end
 _G.airHeight = airHeight
 _G.finalGateBasePos = finalGateBasePos
 
@@ -5207,6 +5291,8 @@ local function getLiveParts()
     return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
 end
 
+local warpToTriggerZone -- [locals-reduce P3-10] declared here, assigned inside the block below
+do -- [locals-reduce P3-10] scoped block start
 local triggerZone = retryUntil("find Wave1 TriggerZone", function()
     local functional = getStrongholdFunctional()
     local tz = functional
@@ -5238,7 +5324,7 @@ end
 
 local tzWaitPos = tzPos + Vector3.new(0, 3, 0) -- วาร์ปสูงกว่า TriggerZone 3 studs ตอนรอมอนเกิด ให้ตกลงมาโดน TriggerZone จริงๆ
 
-local function warpToTriggerZone()
+function warpToTriggerZone()
     local hrp = getLiveParts()
     if hrp then
         hrp.CFrame = CFrame.new(tzWaitPos)
@@ -5248,6 +5334,7 @@ end
 warpToTriggerZone()
 task.wait(0.3)
 Log.dev(string.format("✅ Warped to Wave1 TriggerZone: %.1f, %.1f, %.1f", tzPos.X, tzPos.Y, tzPos.Z))
+end -- [locals-reduce P3-10] scoped block end
 
 -- Equip Old Sack เพื่อ trigger TriggerZone แล้วกลับไปใช้ axe เดิม
 do
@@ -5352,8 +5439,10 @@ local strongholdContext = {
     zeroEnemyHealth = zeroEnemyHealth,
 }
 
+do -- [locals-reduce P1-07] scoped block start
 local ok, err = pcall(function() Stronghold.run(strongholdContext) end)
 if not ok then
     Log.err("[Stronghold] module failed: " .. tostring(err), "the Stronghold flow is stopped")
 end
+end -- [locals-reduce P1-07] scoped block end
 _G.WSM_StrongholdRound = false -- never leave Module_Witch waiting for a round that is over
