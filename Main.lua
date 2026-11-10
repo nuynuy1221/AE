@@ -632,7 +632,19 @@ end
 -- อยู่ใน do-block เพื่อไม่กิน top-level local  เปิดให้ข้างนอกเรียกผ่าน _G.WSM_ClassText
 do
     local safeName = tostring(LocalPlayer.Name):gsub("[^%w_%-]", "_")
-    local CLASSES_FILE = "Classes_" .. safeName .. ".json"
+    local OLD_CLASSES_FILE = "Classes_" .. safeName .. ".json"  -- old location (workspace root), read as a fallback only
+    local SAVE_DIR = "Sugar Hub/99 Night (Kaitun)"
+    local CLASSES_FILE = SAVE_DIR .. "/" .. OLD_CLASSES_FILE
+    -- Create "Sugar Hub" and "Sugar Hub/99 Night (Kaitun)" in the workspace when missing.
+    -- Returns true when the folder exists; false when the executor has no folder functions (then the old root path is used).
+    local function ensureSaveDir()
+        if type(makefolder) ~= "function" or type(isfolder) ~= "function" then return false end
+        local ok = pcall(function()
+            if not isfolder("Sugar Hub") then makefolder("Sugar Hub") end
+            if not isfolder(SAVE_DIR) then makefolder(SAVE_DIR) end
+        end)
+        return ok and isfolder(SAVE_DIR) == true
+    end
     local LOBBY_ID = 79546208627805
 
     local snapshot, snapshotLoaded = nil, false
@@ -641,8 +653,14 @@ do
         snapshotLoaded = true
         if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
         local ok, data = pcall(function()
-            if not isfile(CLASSES_FILE) then return nil end
-            return HttpService:JSONDecode(readfile(CLASSES_FILE))
+            if isfile(CLASSES_FILE) then
+                return HttpService:JSONDecode(readfile(CLASSES_FILE))
+            end
+            -- file saved by an older version of this script (workspace root)
+            if isfile(OLD_CLASSES_FILE) then
+                return HttpService:JSONDecode(readfile(OLD_CLASSES_FILE))
+            end
+            return nil
         end)
         if ok and type(data) == "table" and type(data.classes) == "table" then
             snapshot = data
@@ -806,7 +824,8 @@ do
                     local sig = signature(classes)
                     if sig ~= lastSig then
                         local ok = pcall(function()
-                            writefile(CLASSES_FILE, HttpService:JSONEncode({ classes = classes }))
+                            local path = ensureSaveDir() and CLASSES_FILE or OLD_CLASSES_FILE
+                            writefile(path, HttpService:JSONEncode({ classes = classes }))
                         end)
                         if ok then lastSig = sig end
                     end
