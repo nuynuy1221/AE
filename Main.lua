@@ -32,9 +32,10 @@ do
 end
 
 -- ============================================
--- HIDE "is player, return yes?" (game debug line)
+-- HIDE "is player, return yes?" and "make explosive" (game debug lines)
 -- The game prints this line once per shot. Only a message whose FIRST argument contains both
 -- "is player" and "return yes" is dropped; every other print/warn passes through untouched.
+-- A message whose first argument contains "make explosive" is dropped the same way.
 -- With DevPrint = true the line is NOT hidden: it passes through and the first 3 callers are traced,
 -- so the source can be found. Needs hookfunction + newcclosure; without them nothing is hooked.
 -- Only reaches print/warn calls made from this Lua VM (another VM/Actor is not covered).
@@ -49,6 +50,14 @@ do
                 local first = ...
                 if type(first) == "string" then
                     local low = first:lower()
+                    -- "make explosive" (game debug line): hidden unless DevPrint = true
+                    if low:find("make explosive", 1, true) then
+                        local cfgE = _G.Config
+                        if type(cfgE) == "table" and cfgE.DevPrint == true then
+                            return old(...)
+                        end
+                        return -- hidden
+                    end
                     if low:find("is player", 1, true) and low:find("return yes", 1, true) then
                         local cfg = _G.Config
                         if type(cfg) == "table" and cfg.DevPrint == true then
