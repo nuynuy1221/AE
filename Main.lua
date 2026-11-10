@@ -78,7 +78,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.23 (Horst : Classes Saved)")
+print("Version - 1.2.24 (UpgradeClass : Gunslinger)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -526,6 +526,10 @@ local CLASS_QUESTS = {
     Pyromaniac = {
         [2] = { EnemyKillsWithFire = 150 },
         [3] = { EnemyKillsWithFire = 400 },
+    },
+    Gunslinger = {
+        [2] = { TrustyRevolverKills = 250 },
+        [3] = { TrustyRevolverKills = 500 },
     },
     -- ... (จะ merge เพิ่มด้านล่าง)
 }
@@ -1028,6 +1032,8 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                             -- Module_Assassin decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Pyromaniac" and _G.WSM_Pyromaniac and _G.WSM_Pyromaniac.isPyromaniac then
                             -- Module_Pyromaniac decides when to leave (it waits for the Stronghold round to finish)
+                        elseif equipped == "Gunslinger" and _G.WSM_Gunslinger and _G.WSM_Gunslinger.isGunslinger then
+                            -- Module_Gunslinger decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Fancy Dressed" and _G.WSM_FancyDressed and _G.WSM_FancyDressed.isFancyDressed then
                             -- Module_FancyDressed decides when to leave (it waits for the Stronghold round to finish)
                         elseif folder and folder:GetAttribute("CanLevelUp") == true then
@@ -2630,6 +2636,9 @@ local function zeroEnemyHealth(model)
     -- Ghost Ranger with an unfinished GhostCrossbowHits quest: crossbow only, never zero the cultists' HP
     local ghostModule = _G.WSM_GhostRanger
     if ghostModule and ghostModule.specialWeaponOnly and ghostModule.specialWeaponOnly() then return false end
+    -- Gunslinger in plain hit mode (a zeroed monster did not count for TrustyRevolverKills): never zero the HP
+    local gunslingerModule = _G.WSM_Gunslinger
+    if gunslingerModule and gunslingerModule.noZero and gunslingerModule.noZero() then return false end
     if LocalPlayer:GetAttribute("Class") == "Necromancer"
         and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
         and (LocalPlayer:GetAttribute("CurrentPets") or 0) > 0
@@ -3220,6 +3229,7 @@ _G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger") 
 _G.WSM_Assassin = loadClassModule("Module_Assassin.lua", "isAssassin")  -- global on purpose: no free local slots left
 _G.WSM_FancyDressed = loadClassModule("Module_FancyDressed.lua", "isFancyDressed")  -- global on purpose: no free local slots left
 _G.WSM_Pyromaniac = loadClassModule("Module_Pyromaniac.lua", "isPyromaniac")  -- global on purpose: no free local slots left
+_G.WSM_Gunslinger = loadClassModule("Module_Gunslinger.lua", "isGunslinger")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
 
 -- Vampire state and helpers are owned by Module_Vampire.lua.
@@ -4680,6 +4690,19 @@ end, 1)
 retryUntil("warp to Stronghold Floor", function()
     return warpToStrongholdFloor(2)
 end, 1)
+
+-- Gunslinger (UpgradeClass, not Lv.3 yet): open every chest in the map and collect all ammo before hunting starts.
+-- Module_Gunslinger.prepare() does not move the character; a failure is logged and the boot continues.
+if _G.WSM_Gunslinger.isGunslinger
+    and type(Config.UpgradeClass) == "table"
+    and table.find(Config.UpgradeClass, "Gunslinger") ~= nil
+    and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3
+    and not _G.WSM_Gunslinger.isAllQuestDone() then
+    local okPrepare, errPrepare = pcall(_G.WSM_Gunslinger.prepare)
+    if not okPrepare then
+        Log.err("[Gunslinger] prepare failed: " .. tostring(errPrepare), "continuing without it")
+    end
+end
 end -- [locals-reduce P3-12] scoped block end
 
 ----------------------------------------------------------------
@@ -5127,7 +5150,8 @@ do
             and ((_G.WSM_Witch.isWitch and table.find(Config.UpgradeClass, "Witch") ~= nil)
                 or (_G.WSM_GhostRanger.isGhostRanger and table.find(Config.UpgradeClass, "Ghost Ranger") ~= nil)
                 or (_G.WSM_Assassin.isAssassin and table.find(Config.UpgradeClass, "Assassin") ~= nil)
-                or (_G.WSM_Pyromaniac.isPyromaniac and table.find(Config.UpgradeClass, "Pyromaniac") ~= nil)))
+                or (_G.WSM_Pyromaniac.isPyromaniac and table.find(Config.UpgradeClass, "Pyromaniac") ~= nil)
+                or (_G.WSM_Gunslinger.isGunslinger and table.find(Config.UpgradeClass, "Gunslinger") ~= nil)))
         or keepWoodsmanResources
     local map = workspace:FindFirstChild("Map")
     if map then
@@ -5291,6 +5315,9 @@ elseif _G.WSM_Assassin.isAssassin and not _G.WSM_Assassin.isAllQuestDone() then
 elseif _G.WSM_Pyromaniac.isPyromaniac and not _G.WSM_Pyromaniac.isAllQuestDone() then
     -- Pyromaniac: zero the HP, then one Flamethrower shot for the EnemyKillsWithFire quest (outside farm + Stronghold fight)
     _G.WSM_Pyromaniac.runBackground()
+elseif _G.WSM_Gunslinger.isGunslinger and not _G.WSM_Gunslinger.isAllQuestDone() then
+    -- Gunslinger: zero the HP, then one Trusty Revolver shot for the TrustyRevolverKills quest (outside farm + Stronghold fight)
+    _G.WSM_Gunslinger.runBackground()
 elseif _G.WSM_FancyDressed.isFancyDressed and not _G.WSM_FancyDressed.isAllQuestDone() then
     -- Fancy Dressed: quests are progressed by AutoCandy; this only leaves to the Lobby after the Stronghold round
     _G.WSM_FancyDressed.runBackground()
