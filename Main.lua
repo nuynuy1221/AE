@@ -5268,6 +5268,70 @@ elseif _G.WSM_FancyDressed.isFancyDressed and not _G.WSM_FancyDressed.isAllQuest
     _G.WSM_FancyDressed.runBackground()
 end
 
+-- ============================================================
+-- HALLOWEEN EVENT ONLY - lag cleaner for AutoCandy drops
+-- Every door AutoCandy knocks on (Trick or Treat) can randomly give a reward, and the rewards pile up in
+-- workspace.Items as lots of Coin Stacks, chairs and Blueprints, which makes the game lag. From the start of
+-- the Stronghold wait phase this deletes those drops on the client for the rest of the run (new items as they appear, plus a sweep every 10s)
+-- (so every round is covered).
+-- Everything here belongs to the Halloween event: when the event is over (AutoCandy is removed) this whole
+-- do-block can be deleted safely. Set Config.CleanHalloweenDrops = false to turn it off without editing.
+-- Matched by name (the _2, _3 suffix is ignored): "Coin Stack", any name containing "Chair"
+-- (Spooky Chair, Bone Claw Chair, ...) and any name ending with "Blueprint" (Spooky/Bone/Webbed/Grave/Cage ...).
+-- Costume pieces (Interaction = "Costume") are never touched, AutoCandy still needs them.
+-- The names are the known Halloween reward items; add any other random knock reward to isHalloweenDrop below.
+-- ============================================================
+do
+    if Config.CleanHalloweenDrops ~= false and game.PlaceId ~= 79546208627805 then
+        local function isHalloweenDrop(item)
+            if item:GetAttribute("Interaction") == "Costume" then return false end
+            local name = item.Name:gsub("_%d+$", "")
+            return name == "Coin Stack"
+                or string.find(name, "Chair", 1, true) ~= nil
+                or string.find(name, "Blueprint$") ~= nil
+        end
+
+        local removedTotal = 0
+        local function sweepOne(item)
+            if item.Parent and isHalloweenDrop(item) then
+                pcall(function() item:Destroy() end)
+                removedTotal += 1
+                return true
+            end
+            return false
+        end
+
+        -- Event driven: only the item that just appeared is checked, no polling of the whole folder.
+        -- Deferred one step so the item has its final name / attributes when it is checked.
+        local watched = nil
+        local function watchItems(items)
+            watched = items
+            items.ChildAdded:Connect(function(item)
+                task.defer(function() pcall(sweepOne, item) end)
+            end)
+        end
+
+        task.spawn(function()
+            while true do
+                pcall(function()
+                    local items = workspace:FindFirstChild("Items")
+                    if not items then return end
+                    if items ~= watched then watchItems(items) end
+                    -- safety sweep every 10s: catches anything that was already there or changed name later
+                    local before = removedTotal
+                    for _, item in ipairs(items:GetChildren()) do
+                        sweepOne(item)
+                    end
+                    if removedTotal > before then
+                        Log.dev(string.format("[HalloweenClean] removed %d event drops (total %d)", removedTotal - before, removedTotal))
+                    end
+                end)
+                task.wait(10)
+            end
+        end)
+    end
+end
+
 Log.dev("\n[Step 4] Waiting for Stronghold to open...")
 updateStatus("Waiting for Stronghold...")
 
