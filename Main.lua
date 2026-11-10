@@ -684,6 +684,25 @@ do
         return out
     end
 
+    -- เรียงชื่อคลาสที่จะแสดง: คลาสที่ตั้งไว้ใน Config (BuyClass ก่อน แล้ว UpgradeClass) มาก่อน
+    -- แล้วตามด้วยคลาสอื่นที่มีทั้งหมดเรียงตามตัวอักษร  (owned = set { [className] = true })
+    local function orderedClassNames(owned)
+        local out, seen = {}, {}
+        for _, c in ipairs(configuredClasses()) do
+            if owned[c] then
+                seen[c] = true
+                out[#out + 1] = c
+            end
+        end
+        local rest = {}
+        for c in pairs(owned) do
+            if not seen[c] then rest[#rest + 1] = c end
+        end
+        table.sort(rest)
+        for _, c in ipairs(rest) do out[#out + 1] = c end
+        return out
+    end
+
     -- "Cyborg Lv2 (45%)" / "Cyborg Lv3 (MAX)" / "Cyborg Lv1" (คลาสที่ไม่มีข้อมูลเควสต์ -> ไม่โชว์ %)
     local function formatClass(className, lvl, getStat, dev)
         local text = className .. " Lv" .. lvl
@@ -715,12 +734,14 @@ do
         return text .. " (" .. avgPct .. "%)"
     end
 
-    -- Lobby: อ่านจาก ClassProgress ตรงๆ (คลาสที่ยังไม่มี = ไม่มีโฟลเดอร์ = ไม่แสดง)
+    -- Lobby: อ่านจาก ClassProgress ตรงๆ แสดง "ทุกคลาสที่มี" (คลาสที่ยังไม่มี = ไม่มีโฟลเดอร์ = ไม่แสดง)
     local function lobbyText()
         local cp = LocalPlayer:FindFirstChild("ClassProgress")
         if not cp then return "None" end
+        local owned = {}
+        for _, folder in ipairs(cp:GetChildren()) do owned[folder.Name] = true end
         local lines = {}
-        for _, className in ipairs(configuredClasses()) do
+        for _, className in ipairs(orderedClassNames(owned)) do
             local folder = cp:FindFirstChild(className)
             if folder then
                 lines[#lines + 1] = formatClass(className, folder:GetAttribute("Level") or 1,
@@ -753,8 +774,15 @@ do
             return "None [Can't check classes during farming]"
         end
 
+        -- แสดงทุกคลาสที่มีในไฟล์ + คลาสที่ equip อยู่ตอนนี้ (เผื่อยังไม่ถูกจดลงไฟล์)
+        local owned = {}
+        for className, entry in pairs(snap.classes) do
+            if type(entry) == "table" then owned[className] = true end
+        end
+        if equipped then owned[equipped] = true end
+
         local lines = {}
-        for _, className in ipairs(configuredClasses()) do
+        for _, className in ipairs(orderedClassNames(owned)) do
             local entry = type(snap.classes[className]) == "table" and snap.classes[className] or nil
             local stats = entry and type(entry.stats) == "table" and entry.stats or nil
             if className == equipped then
