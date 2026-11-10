@@ -3144,7 +3144,7 @@ _G.Event = Event  -- ponytail: expose for remote Woodsman InvokeServer; upgrade 
 _G.ownerId = ownerId
 
 -- Combat constants (shared กับ Vampire/Alien/BGH modules)
-local HOVER_HEIGHT = 10
+local HOVER_HEIGHT = 20
 local function getToolCooldown(tool)
     local cooldown = tool and tool:GetAttribute("ToolCooldown")
     return type(cooldown) == "number" and cooldown > 0 and cooldown or 0.5
