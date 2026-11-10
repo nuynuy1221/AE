@@ -3792,7 +3792,16 @@ local function flyAndWarpItems()
         return levelCache >= maxLevel and kidsDoneCache
     end
 
-    for radius = 20, 1000, 40 do
+    -- Gunslinger (UpgradeClass, not Lv.3 yet): search radius 1500 instead of the default 1000
+    local maxSearchRadius = 1000
+    if _G.WSM_Gunslinger.isGunslinger
+        and type(Config.UpgradeClass) == "table"
+        and table.find(Config.UpgradeClass, "Gunslinger") ~= nil
+        and (LocalPlayer:GetAttribute("ClassLevel") or 1) < 3 then
+        maxSearchRadius = 1500
+    end
+
+    for radius = 20, maxSearchRadius, 40 do
         local steps = 50 + math.floor(radius / 40) * 5
         local circumference = 2 * math.pi * radius
         local speed = 1000
