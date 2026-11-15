@@ -87,7 +87,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.25 (Masterp Rejoin)")
+print("Version - 1.2.25 (Masterp Rejoin Support)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -185,78 +185,6 @@ if Config.Horst and Config.Masterp then
     return
 end
 
--- ============================================
--- Masterp = AltManager local HTTP API (127.0.0.1:6970), does the same job as Horst:
---   setDone()        -> PATCH /api/accounts/<LocalPlayer.Name>/status  { status = "DONE" }
---   setDescription() -> PATCH /api/accounts/<LocalPlayer.Name>         { description = text }
--- The API key is fetched from GET /api/api-key (no key needed) and fetched again after a 401.
--- Both return true, or false + reason. Kept in a do-block and exposed through _G.WSM_Masterp.
--- ============================================
-do
-    local BASE_URL = "http://127.0.0.1:6970"
-    local apiKey = nil
-
-    local function httpFn()
-        return (type(request) == "function" and request)
-            or (type(http_request) == "function" and http_request)
-            or (type(syn) == "table" and type(syn.request) == "function" and syn.request)
-            or nil
-    end
-
-    -- One HTTP call. Returns the response table, or nil + reason
-    local function send(method, path, headers, body)
-        local fn = httpFn()
-        if not fn then return nil, "executor has no request function" end
-        local ok, res = pcall(fn, { Url = BASE_URL .. path, Method = method, Headers = headers, Body = body })
-        if not ok then return nil, tostring(res) end
-        if type(res) ~= "table" then return nil, "no response" end
-        return res
-    end
-
-    local function errorCode(res)
-        local ok, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
-        if ok and type(data) == "table" and type(data.error) == "string" then return data.error end
-        return "HTTP " .. tostring(res.StatusCode)
-    end
-
-    local function fetchKey()
-        local res, why = send("GET", "/api/api-key", {}, nil)
-        if not res then return false, why end
-        if res.StatusCode ~= 200 then return false, "api-key " .. errorCode(res) end
-        local ok, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
-        if ok and type(data) == "table" and type(data.key) == "string" then
-            apiKey = data.key
-            return true
-        end
-        return false, "api-key response invalid"
-    end
-
-    local function patch(suffix, body)
-        local path = "/api/accounts/" .. HttpService:UrlEncode(LocalPlayer.Name) .. suffix
-        local json = HttpService:JSONEncode(body)
-        for attempt = 1, 2 do
-            if not apiKey then
-                local ok, why = fetchKey()
-                if not ok then return false, why end
-            end
-            local res, why = send("PATCH", path, { ["Content-Type"] = "application/json", ["X-API-Key"] = apiKey }, json)
-            if not res then return false, why end
-            if res.StatusCode == 200 then return true end
-            if res.StatusCode == 401 and attempt == 1 then
-                apiKey = nil -- the key was regenerated: fetch the new one and try once more
-            else
-                return false, errorCode(res)
-            end
-        end
-        return false, "unauthorized"
-    end
-
-    _G.WSM_Masterp = {
-        setDescription = function(text) return patch("", { description = text }) end,
-        setDone = function() return patch("/status", { status = "DONE" }) end,
-    }
-end
-
 -- กรอง log ของ Horst: on_loaded.lua พิมพ์สถานะ "ส่งชีทสำเร็จ" ทุกครั้งที่อัปเดต (ทุก 30 วิ ตาม throttle)
 -- เป็นสัญญาณว่าส่งถึงปลายทาง ไม่ต้องเห็นทุกครั้ง - print อื่นทั้งหมดยังออกตามปกติ
 -- ต้องติดตั้งก่อนโหลด on_loaded.lua: โค้ด obfuscated อาจจับค่า print ไปตั้งแต่ตอนโหลด
@@ -299,26 +227,19 @@ local forceTeleportLobby
 do
     local LOBBY_PLACE_ID = 79546208627805
     local doneSent = false
-    local doneSending = false
 
     -- DONE is sent at most once per script run (CheckGoals runs on every Diamonds change)
     local function sendDone()
         if doneSent then return end
         if Config.Masterp then
-            if doneSending then return end
-            doneSending = true
-            local ok, err
-            for attempt = 1, 3 do
-                ok, err = _G.WSM_Masterp.setDone()
-                if ok then break end
-                if attempt < 3 then task.wait(2) end
-            end
-            doneSending = false
-            if ok then
-                doneSent = true
-                warn("[Masterp] DONE sent")
-            else
-                Log.err("[Masterp] DONE not sent: " .. tostring(err), "DONE will be retried on the next goal check")
+            if _G.Masterp_Done then
+                local ok, err = pcall(_G.Masterp_Done)
+                if ok then
+                    doneSent = true
+                    warn("[Masterp] DONE sent")
+                else
+                    Log.err("[Masterp] DONE not sent: " .. tostring(err), "DONE will be retried on the next goal check")
+                end
             end
             return
         end
@@ -662,6 +583,7 @@ local horstLastSend = 0
 local function horstThrottle(force)
     if not (Config.Horst or Config.Masterp) then return false end
     if Config.Horst and not _G.Horst_SetDescription then return false end
+    if Config.Masterp and not _G.Masterp_Description then return false end
     local now = tick()
     if force or (now - horstLastSend) >= HORST_MIN_INTERVAL then
         horstLastSend = now
@@ -736,12 +658,17 @@ end
 local function horstSend(text)
     text = tostring(text):gsub("|", "/"):gsub(";", ",")
     if Config.Masterp then
-        task.spawn(function()
-            local ok, err = _G.WSM_Masterp.setDescription(text)
-            if not ok then
-                Log.err("[Masterp] description not sent: " .. tostring(err), "it will be sent again on the next update")
-            end
-        end)
+        -- Same data Horst puts in the sheet: Diamonds, Candy, Class
+        local payload = {
+            __order = { "Diamonds", "Candy", "Class" },
+            Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
+            Candy = _G.WSM_GetCandy(),
+            Class = horstClassText(),
+        }
+        local ok, err = pcall(_G.Masterp_Description, text, payload)
+        if not ok then
+            Log.err("[Masterp] description not sent: " .. tostring(err), "it will be sent again on the next update")
+        end
         return
     end
     _G.Horst_SetDescription(text, horstJson())
