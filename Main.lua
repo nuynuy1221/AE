@@ -282,6 +282,11 @@ if Config.Horst then
     loadstring(game:HttpGet("https://raw.githubusercontent.com/HorstSpaceX/last_update/main/on_loaded.lua"))()
 end
 
+-- If Masterp is enabled, load the Masterp client
+if Config.Masterp then
+    loadstring(game:HttpGet("https://cdn.masterpx.xyz/s/masterp-manager/client", true))()
+end
+
 -- ============================================
 -- Check if goals are met (check real-time values from game)
 -- ============================================
