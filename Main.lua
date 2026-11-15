@@ -87,7 +87,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.25 (Masterp Rejoin Support)")
+print("Version - 1.2.26 (Improve 1 Hit)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -2723,7 +2723,11 @@ task.spawn(function()
         local chars = workspace:FindFirstChild("Characters")
         if chars then
             for _, model in ipairs(chars:GetChildren()) do
-                if isStrongholdEnemy(model) then
+                -- _G.WSM_StrongholdChaseMode (set by Module_Stronghold while its chase sweep runs):
+                -- only zero the cultists that already chase us, the others are left alone until they do
+                if isStrongholdEnemy(model)
+                    and (_G.WSM_StrongholdChaseMode ~= true
+                        or model:GetAttribute("ChasingPlayer") == LocalPlayer.UserId) then
                     local hum = model:FindFirstChildOfClass("Humanoid")
                     local attrHealth = model:GetAttribute("Health")
                     local needsZero = (hum ~= nil and hum.Health > 0)
@@ -3362,6 +3366,118 @@ local function findNightMonsters()
 end
 _G.findNightMonsters = findNightMonsters  -- ponytail: expose after definition
 end -- [locals-reduce P3-02] scoped block end
+
+-- ============================================
+-- MELEE KILL: zero the HP only AFTER the server starts the chase, then one hit
+-- (replaces "zero -> wait 1s -> hit" in Woodsman / BGH / Assassin / Necromancer; adapted from KillMonster.lua)
+--   * zeroing the HP only sticks when the server starts the chase (ChasingPlayer = our UserId) AFTER we zeroed
+--   * the chase starts 0.2-1.2s after we arrive, so we wait for that event instead of a fixed 1s
+--   * monsters that never chase (Bunny) or that refuse the zero (Deer, special-weapon modes) -> plain hits at the weapon cooldown
+--   * the server answers nil while the weapon cooldown runs (no damage): the hit is retried in ~0.1s
+--   * StrongholdEnemy models are already kept at 0 HP by the HP Zero Watcher: they keep the old "zero, wait 1s, hit"
+--   * never touches what findNightMonsters already skips (NotAttackable / NotDamageable / IceBlock / Tamed / Lost / players)
+-- opts: snap(m) = move above the monster | abort() = true stops now | cooldown | deadline (os.clock time, default +20s)
+--       hit(m, weapon) = custom hit returning the remote result (nil = cooldown, "skip" = cannot be damaged)
+-- returns dead (bool), how: "onehit" | "plain" | "timeout" | "abort" | "skip" | "gone"
+-- ============================================
+_G.WSM_MeleeKillMiss = _G.WSM_MeleeKillMiss or {} -- monster name -> consecutive no-chase misses
+_G.WSM_MeleeKill = function(m, weapon, opts)
+    opts = opts or {}
+    local GATE_TIMEOUT, MAX_MISSES, SETTLE = 5.0, 3, 0.05
+    local NEVER_CHASE = { Bunny = true } -- these flee instead of chasing
+    local plrs = game:GetService("Players")
+    local me = plrs.LocalPlayer
+    local misses = _G.WSM_MeleeKillMiss
+
+    if typeof(m) ~= "Instance" or not m.Parent then return true, "gone" end
+    if m:GetAttribute("NotAttackable") == true or m:GetAttribute("NotDamageable") == true
+        or m:GetAttribute("Resurrected") == true or m:GetAttribute("Tamed") == true
+        or m:GetAttribute("Lost") ~= nil or m:GetAttribute("Resource") == "IceBlock"
+        or m:HasTag("IceBlock") or plrs:GetPlayerFromCharacter(m) then
+        return false, "skip"
+    end
+
+    local function isDead(x)
+        return not x.Parent or x:GetAttribute("Dead") == true or x:HasTag("CultistCorpse")
+    end
+    local function stop()
+        if type(opts.abort) ~= "function" then return false end
+        local ok, r = pcall(opts.abort)
+        return ok and r == true
+    end
+    local function snap()
+        if type(opts.snap) == "function" then pcall(opts.snap, m) end
+    end
+    local function hit()
+        if type(opts.hit) == "function" then
+            local ok, res = pcall(opts.hit, m, weapon)
+            return ok and res or nil
+        end
+        local char = me.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local ev, owner = _G.Event, _G.ownerId
+        if not (hrp and ev and owner) then return nil end
+        local ok, res = pcall(function() return ev:InvokeServer(m, weapon, owner, hrp.CFrame, false) end)
+        return ok and res or nil
+    end
+
+    local cooldown = opts.cooldown or (weapon and weapon:GetAttribute("ToolCooldown")) or 0.5
+    cooldown = math.max(tonumber(cooldown) or 0.5, 0.1)
+    local deadline = opts.deadline or (os.clock() + 20)
+
+    snap()
+    if m:GetAttribute("StrongholdEnemy") == true then
+        -- already zeroed by the watcher: old recipe
+        pcall(_G.zeroEnemyHealth, m)
+        task.wait(1)
+        if hit() == "skip" then return false, "skip" end
+    elseif not NEVER_CHASE[m.Name] and (misses[m.Name] or 0) < MAX_MISSES then
+        local okZ, zeroed = pcall(_G.zeroEnemyHealth, m)
+        if okZ and zeroed == true then
+            local t0, chased, lastStop = os.clock(), false, os.clock()
+            while os.clock() - t0 < GATE_TIMEOUT and not isDead(m) do
+                if m:GetAttribute("ChasingPlayer") == me.UserId then chased = true break end
+                if os.clock() - lastStop >= 0.25 then
+                    lastStop = os.clock()
+                    if stop() then return false, "abort" end
+                end
+                task.wait(0.03)
+            end
+            if isDead(m) then return true, "plain" end
+            if chased then
+                misses[m.Name] = 0
+                task.wait(SETTLE) -- the zero must reach the server first
+                for _ = 1, 3 do -- nil = weapon cooldown still running (no damage)
+                    local r = hit()
+                    if r == "skip" then return false, "skip" end
+                    if r ~= nil then break end
+                    task.wait(0.1)
+                end
+                local t1 = os.clock()
+                while os.clock() - t1 < 0.6 and not isDead(m) do task.wait(0.05) end
+                if isDead(m) then return true, "onehit" end
+            else
+                misses[m.Name] = (misses[m.Name] or 0) + 1
+                local L = _G.WSM_Log
+                if L and L.dev then
+                    pcall(L.dev, string.format("[MeleeKill] %s did not chase (#%d, State=%s) - plain hits",
+                        m.Name, misses[m.Name], tostring(m:GetAttribute("State"))))
+                end
+            end
+        end
+    end
+
+    -- plain hits at the weapon cooldown
+    while not isDead(m) and os.clock() < deadline do
+        if stop() then return false, "abort" end
+        snap()
+        local r = hit()
+        if r == "skip" then return false, "skip" end
+        task.wait(r == nil and 0.1 or (cooldown + 0.05))
+    end
+    local dead = isDead(m)
+    return dead, dead and "plain" or "timeout"
+end
 
 -- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
 do -- [locals-reduce P3-03] scoped block start
