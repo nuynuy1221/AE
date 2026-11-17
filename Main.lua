@@ -87,7 +87,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.26 (Improve 1-Hit Monster)")
+print("Version - 1.2.27 (Remove Halloween Event)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -174,8 +174,6 @@ Config.BuyClass = Config.BuyClass or {}  -- Table of class names to buy, e.g. {"
 -- ถ้าไม่ตั้ง = ฟาร์มปกติ (ตีต้นไม้ด้วยขวาน)
 Config.UpgradeClass = Config.UpgradeClass or {}  -- Table เช่น {"Cyborg"} - ตอนนี้ใช้แค่ตัวแรก
 -- Config.Diamonds: no default (if not set externally = nil = never send DONE)
--- Config.BuyGems: default on. In the Lobby, buy the Halloween "Gem Pack" with HalloweenCandy until it is sold out.
---   Gems are bought first, before BuyClass. Set false to disable.
 -- Config.AutoReturnLobby: default on. In a farm map, teleport back to Lobby when a class level-up is ready
 --   or all goals are met (so the Lobby can upgrade the class / send DONE). Set false to disable.
 
@@ -540,10 +538,6 @@ local CLASS_QUESTS = {
         [2] = { AlienTechKills = 200, MultiDamageShots = 50 },
         [3] = { AlienTechKills = 350, MultiDamageShots = 100 },
     },
-    ["Fancy Dressed"] = {
-        [2] = { CollectCostumePiece = 40, TrickOrTreat = 50 },
-        [3] = { CollectCostumePiece = 120, TrickOrTreat = 100 },
-    },
     ["Ghost Ranger"] = {
         [2] = { GhostCrossbowHits = 100 },
         [3] = { GhostCrossbowHits = 300 },
@@ -617,37 +611,9 @@ local function horstClassText()
     return string.format("%s (Lv.%d)", cls, lvl)
 end
 
--- Candy amount for Horst. The Lobby shop uses the "HalloweenCandy" attribute while the farm-map HUD uses "Candy",
--- so each place reads its own attribute first and falls back to the other one, then to any numeric attribute or
--- leaderstats value whose name contains "candy". Stored in _G (no free top-level local left).
-do
-    local function num(v) return type(v) == "number" and v or nil end
-    _G.WSM_GetCandy = function()
-        local lobby = game.PlaceId == 79546208627805
-        local names = lobby and { "HalloweenCandy", "Candy" } or { "Candy", "HalloweenCandy" }
-        for _, n in ipairs(names) do
-            local v = num(LocalPlayer:GetAttribute(n))
-            if v then return v end
-        end
-        local ok, found = pcall(function()
-            for k, v in pairs(LocalPlayer:GetAttributes()) do
-                if num(v) and tostring(k):lower():find("candy", 1, true) then return v end
-            end
-            local ls = LocalPlayer:FindFirstChild("leaderstats")
-            if ls then
-                for _, c in ipairs(ls:GetChildren()) do
-                    if c.Name:lower():find("candy", 1, true) and num(c.Value) then return c.Value end
-                end
-            end
-        end)
-        return ok and found or 0
-    end
-end
-
 local function horstJson()
     local data = {
         Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
-        Candy = _G.WSM_GetCandy(),
         Class = horstClassText(),
     }
     local ok, json = pcall(function() return HttpService:JSONEncode(data) end)
@@ -658,11 +624,10 @@ end
 local function horstSend(text)
     text = tostring(text):gsub("|", "/"):gsub(";", ",")
     if Config.Masterp then
-        -- Same data Horst puts in the sheet: Diamonds, Candy, Class
+        -- Same data Horst puts in the sheet: Diamonds, Class
         local payload = {
-            __order = { "Diamonds", "Candy", "Class" },
+            __order = { "Diamonds", "Class" },
             Diamonds = LocalPlayer:GetAttribute("Diamonds") or 0,
-            Candy = _G.WSM_GetCandy(),
             Class = horstClassText(),
         }
         local ok, err = pcall(_G.Masterp_Description, text, payload)
@@ -920,7 +885,6 @@ function sendHorstDescription(force)
     if not horstThrottle(force) then return end
 
     local diamonds = LocalPlayer:GetAttribute("Diamonds") or 0
-    local candy = _G.WSM_GetCandy()
 
     local isLobby = game.PlaceId == 79546208627805
     local hasConfig = (Config.BuyClass and #Config.BuyClass > 0) or
@@ -928,14 +892,14 @@ function sendHorstDescription(force)
 
     -- ถ้าไม่มี config เลย → ไม่ต้องแสดง Class
     if not hasConfig then
-        horstSend(string.format("🌲 99 Nights • Diamonds: %d • Candy: %d", diamonds, candy))
+        horstSend(string.format("🌲 99 Nights • Diamonds: %d", diamonds))
         return
     end
 
     local classText = _G.WSM_ClassText(isLobby)
 
     horstSend(string.format(
-        "🌲 99 Nights • Diamonds: %d • Candy: %d • Class: %s", diamonds, candy, classText))
+        "🌲 99 Nights • Diamonds: %d • Class: %s", diamonds, classText))
 end
 end -- [locals-reduce P2-02] scoped block end
 
@@ -1082,8 +1046,6 @@ if Config.AutoReturnLobby ~= false and game.PlaceId ~= 79546208627805 then
                             -- Module_Pyromaniac decides when to leave (it waits for the Stronghold round to finish)
                         elseif equipped == "Gunslinger" and _G.WSM_Gunslinger and _G.WSM_Gunslinger.isGunslinger then
                             -- Module_Gunslinger decides when to leave (it waits for the Stronghold round to finish)
-                        elseif equipped == "Fancy Dressed" and _G.WSM_FancyDressed and _G.WSM_FancyDressed.isFancyDressed then
-                            -- Module_FancyDressed decides when to leave (it waits for the Stronghold round to finish)
                         elseif folder and folder:GetAttribute("CanLevelUp") == true then
                             reason = equipped .. " can level up (Lv." .. lvl .. ")"
                         else
@@ -1646,83 +1608,6 @@ if isLobby() then
     lobbyAutoLevelUp()
 
     -- ============================================
-    -- Auto-Buy Halloween Gems (Lobby only)
-    -- "GemPack1" is bought with HalloweenCandy. Price and purchase limit come from the HalloweenShop database.
-    -- Runs before the class auto-buy, so Gems get the candy first. Skips when sold out.
-    -- Config.BuyGems = false disables it.
-    -- ============================================
-    if Config.BuyGems ~= false then
-        local okGems, errGems = pcall(function()
-            local RS = game:GetService("ReplicatedStorage")
-            local dbFolder = RS:FindFirstChild("Databases")
-            local dbModule = dbFolder and dbFolder:FindFirstChild("HalloweenShop")
-            local remotes = RS:FindFirstChild("RemoteEvents")
-            local buyRemote = remotes and remotes:FindFirstChild("RequestPurchaseHalloweenItem")
-            if not (dbModule and buyRemote) then return end
-            local db = require(dbModule)
-            if type(db) ~= "table" then return end
-
-            local GEM_NAME = "GemPack1"
-            local item
-            for _, it in ipairs(db) do
-                if type(it) == "table" and it.Name == GEM_NAME then item = it break end
-            end
-            if not item then return end
-            local price, maxQty = item.Price or 0, item.Quantity or 1
-
-            -- cheap checks first (no waiting when there is nothing to spend)
-            local candy0 = LocalPlayer:GetAttribute("HalloweenCandy") or 0
-            if candy0 < price then
-                Log.dev(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy0))
-                return
-            end
-
-            -- the server keeps LocalPlayer.HalloweenShop.<item> with attribute Quantity = times bought
-            local function bought()
-                local hs = LocalPlayer:FindFirstChild("HalloweenShop")
-                local f = hs and hs:FindFirstChild(GEM_NAME)
-                return f and (f:GetAttribute("Quantity") or 1) or 0
-            end
-            LocalPlayer:WaitForChild("HalloweenShop", 5)
-            if bought() >= maxQty then return end -- sold out: skip
-
-            -- not released yet?
-            local Shop = RS:FindFirstChild("Shop")
-            local hall = Shop and Shop:FindFirstChild("Halloween")
-            local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. GEM_NAME)
-            local now = workspace:GetServerTimeNow()
-            if type(release) == "number" and now < release then
-                Log.dev(string.format("[Auto-Buy] Gems not released yet (%.1f hours left)", (release - now) / 3600))
-                return
-            end
-
-            while bought() < maxQty do
-                local candy = LocalPlayer:GetAttribute("HalloweenCandy") or 0
-                if candy < price then
-                    Log.dev(string.format("[Auto-Buy] Gems: need %d HalloweenCandy (have %d)", price, candy))
-                    break
-                end
-                local before = bought()
-                updateStatus(string.format("Buying Gems (%d/%d)", before + 1, maxQty))
-                buyRemote:FireServer(GEM_NAME)
-                local confirmed = false
-                for _ = 1, 10 do
-                    task.wait(0.5)
-                    if bought() > before then confirmed = true break end
-                end
-                if not confirmed then
-                    Log.err("[Auto-Buy] Gem Pack purchase was not confirmed by the server", "stopping Gem purchases for this Lobby visit")
-                    break
-                end
-                Log.dev(string.format("[Auto-Buy] Gems bought %d/%d", bought(), maxQty))
-            end
-        end)
-        if not okGems then
-            Log.err("[Auto-Buy] Gem Pack purchase crashed: " .. tostring(errGems), "skipping Gem purchases and continuing")
-        end
-    end
-
-    -- ============================================
     -- Auto-Buy Class (ก่อนสร้างห้อง)
     -- ============================================
     if Config.BuyClass and #Config.BuyClass > 0 then
@@ -1745,58 +1630,6 @@ if isLobby() then
                         return s == true
                     end
 
-                    -- Halloween Shop classes (e.g. "Fancy Dressed"): HiddenFromShop in the normal class shop.
-                    -- Bought with HalloweenCandy via RequestPurchaseHalloweenItem(name), same call as the shop UI.
-                    local function halloweenClassItem(name)
-                        local dbFolder = ReplicatedStorage:FindFirstChild("Databases")
-                        local dbModule = dbFolder and dbFolder:FindFirstChild("HalloweenShop")
-                        if not dbModule then return nil end
-                        local ok, db = pcall(require, dbModule)
-                        if not ok or type(db) ~= "table" then return nil end
-                        local best
-                        for _, it in ipairs(db) do
-                            if type(it) == "table" and it.Type == "Class" and it.Name == name and not it.Placeholder then
-                                -- the shop lists the same class several times; an entry without ReleaseTime is on sale now
-                                if not best then
-                                    best = it
-                                else
-                                    local a, b = it.ReleaseTime and 1 or 0, best.ReleaseTime and 1 or 0
-                                    if a < b or (a == b and (it.Price or 0) < (best.Price or 0)) then best = it end
-                                end
-                            end
-                        end
-                        return best
-                    end
-
-                    local function buyHalloweenClass(name, item)
-                        local price = item.Price or 0
-                        local candy = LocalPlayer:GetAttribute("HalloweenCandy") or 0
-                        -- the server publishes the release time as Shop.Halloween attribute Release_<Name_with_underscores>
-                        local hall = Shop:FindFirstChild("Halloween")
-                        local release = item.ReleaseTime and hall and hall:GetAttribute("Release_" .. (string.gsub(name, " ", "_")))
-                        local now = workspace:GetServerTimeNow()
-                        if type(release) == "number" and now < release then
-                            Log.dev(string.format("[Auto-Buy] %s not released yet (%.1f hours left)", name, (release - now) / 3600))
-                            return false
-                        end
-                        if candy < price then
-                            Log.dev(string.format("[Auto-Buy] %s needs %d HalloweenCandy (have %d)", name, price, candy))
-                            return false
-                        end
-                        Log.dev(string.format("[Auto-Buy] Buying (Halloween Shop): %s for %d candy", name, price))
-                        updateStatus(string.format("Buying: %s", name))
-                        Client.Events.RequestPurchaseHalloweenItem:FireServer(name)
-                        for _ = 1, 10 do
-                            task.wait(0.5)
-                            if ClassProgress:FindFirstChild(name) then
-                                Log.dev(string.format("[Auto-Buy] Bought: %s", name))
-                                return true
-                            end
-                        end
-                        Log.err(string.format("[Auto-Buy] buying %s from the Halloween shop was not granted by the server", name), "treating it as out of stock, retrying on the next Lobby visit")
-                        return false
-                    end
-
                     updateStatus("Buying Classes...")
 
                     local totalClasses = #Config.BuyClass
@@ -1805,13 +1638,8 @@ if isLobby() then
 
                     for _, className in ipairs(Config.BuyClass) do
                         if not ClassProgress:FindFirstChild(className) then
-                            local hItem = halloweenClassItem(className)
                             local classFolder = Classes:FindFirstChild(className)
-                            if hItem then
-                                if not buyHalloweenClass(className, hItem) then
-                                    table.insert(outOfStock, className)
-                                end
-                            elseif classFolder then
+                            if classFolder then
                                 local inStock = isInStock(classFolder)
                                 if inStock then
                                     Log.dev(string.format("[Auto-Buy] Buying: %s", className))
@@ -2377,8 +2205,7 @@ local function purgePrune(inst)
 	local keep = PURGE_KEEP[purgePathOf(inst)]
 	if not keep then return end
 	for _, child in ipairs(inst:GetChildren()) do
-		-- บ้านฮาโลวีนต้องอยู่: AutoCandy เคาะบ้าน + CostumeBoxSpawns อยู่ใต้บ้าน
-		if not keep[child.Name] and not CollectionService:HasTag(child, "HalloweenHouse") then
+		if not keep[child.Name] then
 			-- Landmarks: เก็บพื้นจริงของ landmark ไว้ (Ground/GrassFolder/Mud) กันพื้นเป็นรู
 			if inst == purgeMap:FindFirstChild("Landmarks") then
 				destroyKeepGround(child)
@@ -2919,275 +2746,6 @@ end
 updateStatus("Equipping Axe...")
 
 local Client = require(player.PlayerScripts.Client)
--- ============================================
--- AUTO CANDY (Halloween) — background thread แยกจากลูปฟาร์มหลัก
--- หลักการ (พิสูจน์จาก NoWarpKnock / KnockCooldownProbe):
---   - RequestKnockOnDoor:InvokeServer(knocker) ไม่เช็คระยะ (769 studs ยังผ่าน)
---     การวาร์ปอยู่ที่ RunCutscene ฝั่ง client (TrickOrTreatClient.lua:173) -> ไม่เรียกก็ไม่วาร์ป
---   - ห้ามยิง TrickOrTreatCutsceneStarted ก่อนเคาะ = บ้านถูกกิน (success=false)
---   - บ้าน activate เองตอน Night -> ไม่ต้องใช้ candle
---   - rejected ติดกัน = server cooldown ~3 วิ -> เคาะบ้านเดิมซ้ำได้หลัง 3 วิ
---   - allowance = res.Candy ของการเคาะล่าสุด -> เบิกทันทีด้วย RequestCollectCandy(999)
--- ============================================
-if game.PlaceId ~= 79546208627805 then
-    task.spawn(function()
-        local pcall2 = pcall
-        local SLOTS = { "Head", "Torso", "Foot", "Accessory" }
-        local COOLDOWN = 3      -- วิ ต่อบ้าน (server cooldown)
-        local BOX_GAP = 0.15    -- วิ ระหว่างกล่อง
-
-        -- รอจนกว่าจะมีครบ ไม่มี timeout (CostumeCloset โหลดช้ากว่าตัวละคร)
-        local Costume, Closet, Items
-        while not (Costume and Closet and Items) do
-            Costume = LocalPlayer:FindFirstChild("Costume")
-            Closet  = LocalPlayer:FindFirstChild("CostumeCloset")
-            Items   = workspace:FindFirstChild("Items")
-            if not (Costume and Closet and Items) then task.wait(2) end
-        end
-
-        local Wear   = Client.Events.RequestWearCostumePieces
-        local Store  = Client.Events.RequestStoreWornCostumePiece
-        local Equip  = Client.Events.RequestEquipCostume
-        local Open   = Client.Events.RequestOpenItemChest
-        local KNOCK  = Client.Events.RequestKnockOnDoor
-        local Collect = Client.Events.RequestCollectCandy
-
-        ------------------------------------------------------------
-        -- ชุด
-        ------------------------------------------------------------
-        -- รวมชิ้นส่วนทุกชิ้น (ที่สวมอยู่ + ใน Closet) แยกตาม CostumeId/slot
-        local function ownedBySet()
-            local owned = {}
-            for _, folder in ipairs({ Costume, Closet }) do
-                for _, p in ipairs(folder:GetChildren()) do
-                    local id, slot = p:GetAttribute("CostumeId"), p:GetAttribute("CostumeSlot")
-                    if id and slot then
-                        owned[id] = owned[id] or {}
-                        owned[id][slot] = owned[id][slot] or p
-                    end
-                end
-            end
-            return owned
-        end
-
-        -- สวมชุดครบเซ็ตเดียวอยู่ไหม (4 ชิ้น 4 slot ชุดเดียวกัน) -> คืน CostumeId
-        -- ชุดไม่ครบ = nil: เคาะตอนชุดไม่ครบ = Trick ไม่ได้ candy
-        -- shortcut: ไม่รองรับชุดผสมแบบ Head=X + อีก 3 ชิ้น=Y ที่เกมให้ Boost
-        --           (โค้ดเราสวมแต่ชุดเดียวกันเสมอ จึงไม่เกิด; อัปเกรดถ้าอยากรองรับ)
-        local function wornSetId()
-            local id, n = nil, 0
-            local slots = {}
-            for _, p in ipairs(Costume:GetChildren()) do
-                local pid, slot = p:GetAttribute("CostumeId"), p:GetAttribute("CostumeSlot")
-                if pid and slot then
-                    n = n + 1
-                    slots[slot] = true
-                    if id == nil then
-                        id = pid
-                    elseif id ~= pid then
-                        return nil
-                    end
-                end
-            end
-            if n ~= 4 then return nil end
-            for _, slot in ipairs(SLOTS) do
-                if not slots[slot] then return nil end
-            end
-            return id
-        end
-
-        -- true = สวมชุดครบเซ็ตอยู่ (หรือเพิ่งสวมให้ครบ), false = ชุดไม่พอ -> ห้ามเคาะ
-        -- ใช้ชุดจาก Closet เท่าที่มี: ของหมด = หยุดเคาะ ไม่เคาะทั้งที่ไม่มีชุด
-        local function ensureCostume()
-            local id = wornSetId()
-            if id then return true end
-            for setId, slots in pairs(ownedBySet()) do
-                local set = {}
-                for _, slot in ipairs(SLOTS) do
-                    if slots[slot] then table.insert(set, slots[slot]) end
-                end
-                if #set == 4 then
-                    -- ชิ้นที่สวมอยู่แต่คนละชุด = ถอดกลับเข้า Closet ก่อน (แบบ ApplyPreview)
-                    for _, p in ipairs(Costume:GetChildren()) do
-                        if p:GetAttribute("CostumeId") ~= setId then
-                            pcall2(function() Store:InvokeServer(p) end)
-                        end
-                    end
-                    task.wait(0.1)
-                    local missing = {}
-                    for _, p in ipairs(set) do
-                        if p.Parent == Closet then table.insert(missing, p) end
-                    end
-                    if #missing > 0 then
-                        pcall2(function() Wear:InvokeServer(missing) end)
-                        task.wait(0.6)
-                    end
-                    if wornSetId() == setId then return true end
-                end
-            end
-            return false
-        end
-
-        ------------------------------------------------------------
-        -- กล่องชุด
-        ------------------------------------------------------------
-        local function openBoxes()
-            local boxes = {}
-            for _, d in ipairs(Items:GetChildren()) do
-                if d:GetAttribute("LootTable") == "CostumeBox1" then
-                    table.insert(boxes, d)
-                end
-            end
-            if #boxes == 0 then return 0 end
-            for _, b in ipairs(boxes) do
-                pcall2(function() Open:FireServer(b) end)
-                task.wait(BOX_GAP)
-            end
-            return #boxes
-        end
-
-        -- เก็บชิ้นส่วนที่ตกอยู่ (ของเน่าจาก dupe เก่าจะ throw -> ข้าม)
-        local function collectDrops()
-            for _, d in ipairs(Items:GetChildren()) do
-                if d:GetAttribute("Interaction") == "Costume" then
-                    local ok, res = pcall2(function() return Equip:InvokeServer(d) end)
-                    if ok and type(res) == "table" and res.Success then
-                        if d.Parent then d.Parent = Closet end
-                    end
-                    task.wait(0.05)
-                end
-            end
-        end
-
-        ------------------------------------------------------------
-        -- บ้าน
-        ------------------------------------------------------------
-        local function isKnocker(node)
-            if not node:IsA("Model") or not node.PrimaryPart then return false end
-            local att = node.PrimaryPart:FindFirstChild("ProximityAttachment")
-            if not (att and att:FindFirstChildOfClass("ProximityPrompt")) then return false end
-            local blocker = node:FindFirstChild("Blocker")
-            if not (blocker and blocker:FindFirstChild("Particle")) then return false end
-            return node:FindFirstChild("Door") ~= nil
-        end
-
-        local function findKnocker(node, depth, seen)
-            depth, seen = depth or 0, seen or {}
-            if depth > 6 or seen[node] then return nil end
-            seen[node] = true
-            if isKnocker(node) then return node end
-            for _, child in pairs(node:GetChildren()) do
-                local f = findKnocker(child, depth + 1, seen)
-                if f then return f end
-            end
-            return nil
-        end
-
-        local nextKnock = {}
-        local lastNoCostumeLog = 0
-        local lastTrickLog = 0
-        -- ชุดที่เพิ่งใช้เคาะ + เวลาที่เคาะ: ยังใส่อยู่ = server ยังไม่กินชุด -> ห้ามเคาะซ้ำ
-        -- ลำดับที่ต้องการ: เคาะ -> รอชุดหาย -> ใส่ชุดใหม่ -> เคาะใหม่
-        -- server ไม่ได้หักชุดตอนตอบ แต่หักตอนจบ cutscene (~13 วิหลังเคาะ) -> เพดานต้องเกินนั้น
-        -- 10 วิเดิมสั้นเกิน: ปลด guard ก่อนชุดหลุด = เคาะซ้ำด้วยชุดเดิม = Trick
-        local lastKnockSet, lastKnockAt = nil, 0
-        local COSTUME_WAIT = 20
-        local stripTime = 0     -- วัดจริงรอบแรก แล้วใช้เป็นเพดานรอบถัดไป
-
-        -- เคาะสำเร็จ = server กินชุดที่ใส่อยู่ทั้งเซ็ต (ตอนจบ cutscene ไม่ใช่ตอนตอบ)
-        -- รอให้ชุดหลุดจากตัวก่อน ไม่งั้น tick ถัดไปยังเห็นชุดครบ -> เคาะซ้ำทั้งที่ไม่มีชุด
-        local function waitCostumeConsumed(setId)
-            local t0 = os.clock()
-            local limit = math.max(COSTUME_WAIT, stripTime * 2)
-            while wornSetId() == setId and os.clock() - t0 < limit do
-                task.wait(0.1)
-            end
-            if wornSetId() ~= setId then stripTime = os.clock() - t0 end
-        end
-
-        local function knockHouses()
-            -- เช็คทุกครั้งก่อนเคาะ: ไม่มีชุดครบใส่อยู่ = ไม่เคาะ (เคาะตอนไม่มีชุด = Trick)
-            -- ชุดมีจำกัด (1 เซ็ต = 1 ประตู) -> เซ็ตหมด = หยุดเคาะเอง
-            local setId = wornSetId()
-            if not setId then return false end
-            -- ชุดเซ็ตเดิมที่เพิ่งใช้เคาะยังไม่ถูก server กิน -> รอต่อ ห้ามเคาะซ้ำ
-            if lastKnockSet == setId then
-                if os.clock() - lastKnockAt < COSTUME_WAIT then return false end
-                lastKnockSet = nil   -- ค้างนานผิดปกติ: ปลด ไม่งั้นหยุดเคาะถาวร
-            end
-            local now = os.clock()
-            for _, house in ipairs(CollectionService:GetTagged("HalloweenHouse")) do
-                if now >= (nextKnock[house] or 0)
-                    and not house:GetAttribute("Visited_" .. LocalPlayer.UserId) then
-                    local kn = findKnocker(house)
-                    if kn then
-                        -- เช็คซ้ำอีกครั้งก่อนยิงจริง (ระหว่างหา knocker อาจมีอะไรเปลี่ยน)
-                        local idNow = wornSetId()
-                        if not idNow or idNow == lastKnockSet then return false end
-                        local ok, res = pcall2(function() return KNOCK:InvokeServer(kn) end)
-                        if ok and type(res) == "table" and res.Success then
-                            local promised = res.Candy or 0
-                            if promised > 0 then
-                                -- FireServer คิวทันที ไม่ต้องรอ: allowance ถูกตั้งตอน Knock ตอบแล้ว
-                                -- (เดิมรอ 0.7 วิ = ตายเปล่าทุกประตู)
-                                pcall2(function() Collect:FireServer(999, "TrickOrTreating") end)
-                            end
-                            lastKnockSet, lastKnockAt = idNow, os.clock()
-                            waitCostumeConsumed(idNow, house)
-                            -- ชุดหลุดแล้ว = server กินชุดนี้ไปแล้ว -> ปลด guard ให้ใส่ชุดใหม่ได้ทันที
-                            -- (ถ้ายังไม่หลุด เก็บ guard ไว้ กันเคาะซ้ำด้วยชุดเดิม)
-                            if wornSetId() ~= idNow then lastKnockSet = nil end
-                            nextKnock[house] = os.clock() + 120   -- ใช้แล้ว รอรอบถัดไป
-                            if res.TrickOrTreat ~= "Treat" and os.clock() - lastTrickLog > 15 then
-                                lastTrickLog = os.clock()
-                                Log.dev(string.format("[AutoCandy] Trick (candy=%d) - costume not consumed",
-                                    promised))
-                            end
-                        else
-                            nextKnock[house] = os.clock() + COOLDOWN  -- rejected = cooldown -> ลองใหม่
-                        end
-                        return true
-                    end
-                end
-            end
-            return false
-        end
-
-        ------------------------------------------------------------
-        -- MAIN LOOP
-        ------------------------------------------------------------
-        task.wait(2)
-
-        while true do
-            local ok, err = pcall2(function()
-                local night = workspace:GetAttribute("State") == "Night"
-
-                -- 1) เก็บของตกค้างก่อนเสมอ
-                collectDrops()
-
-                -- 2) กลางวัน = เปิดกล่องหาชุด; กลางคืน = เคาะบ้าน (ถ้ามีชุดครบ)
-                if not night then
-                    if openBoxes() == 0 then task.wait(3) end
-                else
-                    if ensureCostume() then
-                        if not knockHouses() then task.wait(1) end
-                    else
-                        -- ชุดไม่ครบ/ชุดหมด -> ห้ามเคาะ (เคาะตอนไม่มีชุด = Trick)
-                        if os.clock() - lastNoCostumeLog > 60 then
-                            lastNoCostumeLog = os.clock()
-                            Log.dev("[AutoCandy] No full costume set - knock skipped")
-                        end
-                        if openBoxes() == 0 then task.wait(3) end
-                    end
-                end
-            end)
-            if not ok then
-                task.wait(3)
-            end
-        end
-    end)
-end
-
 
 -- Globals ที่ Woodsman module ต้องการ
 local Event = ReplicatedStorage.RemoteEvents.ToolDamageObject
@@ -3249,7 +2807,6 @@ local function loadClassModule(name, flagName)
                 isAlienScientist = "Alien Scientist",
                 isBigGameHunter = "Big Game Hunter",
                 isGhostRanger = "Ghost Ranger",
-                isFancyDressed = "Fancy Dressed",
             }
             result[flagName] = (LocalPlayer:GetAttribute("Class") or "Unknown")
                 == (classNames[flagName] or name:match("Module_(.+)%.lua"))
@@ -3279,7 +2836,6 @@ local Necromancer = loadClassModule("Module_Necromancer.lua", "isNecromancer")
 _G.WSM_Witch = loadClassModule("Module_Witch.lua", "isWitch")  -- global on purpose: no free local slots left
 _G.WSM_GhostRanger = loadClassModule("Module_GhostRanger.lua", "isGhostRanger")  -- global on purpose: no free local slots left
 _G.WSM_Assassin = loadClassModule("Module_Assassin.lua", "isAssassin")  -- global on purpose: no free local slots left
-_G.WSM_FancyDressed = loadClassModule("Module_FancyDressed.lua", "isFancyDressed")  -- global on purpose: no free local slots left
 _G.WSM_Pyromaniac = loadClassModule("Module_Pyromaniac.lua", "isPyromaniac")  -- global on purpose: no free local slots left
 _G.WSM_Gunslinger = loadClassModule("Module_Gunslinger.lua", "isGunslinger")  -- global on purpose: no free local slots left
 _G.__WSM_currentClass = nil  -- cleanup
@@ -3477,43 +3033,6 @@ _G.WSM_MeleeKill = function(m, weapon, opts)
     end
     local dead = isDead(m)
     return dead, dead and "plain" or "timeout"
-end
-
--- ZERO AFTER CHASE for the ranged / special weapons (Pyromaniac, Gunslinger, Alien): zero the HP, then wait until the
--- server starts the chase (ChasingPlayer = our UserId) instead of a fixed 1s. The caller fires right after "chased".
--- opts: wait(seconds) = custom waiter (e.g. a hover-tracking wait) | abort() = true stops | timeout (default 5s)
--- returns "chased" (fire now, after a ~0.05s settle) | "miss" (no chase in time, already waited) |
---         "skip" (zero refused / Bunny / StrongholdEnemy / too many misses: the caller keeps its old fixed wait) |
---         "dead" | "abort"
-_G.WSM_ZeroAfterChase = function(m, opts)
-    opts = opts or {}
-    local me = game:GetService("Players").LocalPlayer
-    local misses = _G.WSM_MeleeKillMiss
-    local timeout = opts.timeout or 5.0
-    local function gone(x)
-        return not x.Parent or x:GetAttribute("Dead") == true or x:HasTag("CultistCorpse")
-    end
-    if typeof(m) ~= "Instance" or gone(m) then return "dead" end
-    local okZ, zeroed = pcall(_G.zeroEnemyHealth, m)
-    if m.Name == "Bunny" or m:GetAttribute("StrongholdEnemy") == true
-        or (misses[m.Name] or 0) >= 3 or not (okZ and zeroed == true) then
-        return "skip"
-    end
-    local t0 = os.clock()
-    while os.clock() - t0 < timeout do
-        if gone(m) then return "dead" end
-        if m:GetAttribute("ChasingPlayer") == me.UserId then
-            misses[m.Name] = 0
-            return "chased"
-        end
-        if type(opts.abort) == "function" then
-            local okA, a = pcall(opts.abort)
-            if okA and a == true then return "abort" end
-        end
-        if type(opts.wait) == "function" then pcall(opts.wait, 0.03) else task.wait(0.03) end
-    end
-    misses[m.Name] = (misses[m.Name] or 0) + 1
-    return "miss"
 end
 
 -- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
@@ -5393,9 +4912,7 @@ do
                 pcall(function()
                     for _, child in ipairs(folder:GetChildren()) do
                         -- ห้ามลบ workspace.Map.Landmarks.Stronghold
-                        -- ห้ามลบบ้านฮาโลวีน (AutoCandy ยังต้องเคาะหลังจบ Stronghold)
-                        if not (folderName == "Landmarks" and child.Name == "Stronghold")
-                            and not CollectionService:HasTag(child, "HalloweenHouse") then
+                        if not (folderName == "Landmarks" and child.Name == "Stronghold") then
                             -- Landmarks: เก็บพื้นจริงของ landmark ไว้ กันพื้นเป็นรูหลังลบแมพ
                             if folderName == "Landmarks" then
                                 destroyKeepGround(child)
@@ -5528,73 +5045,6 @@ elseif _G.WSM_Pyromaniac.isPyromaniac and not _G.WSM_Pyromaniac.isAllQuestDone()
 elseif _G.WSM_Gunslinger.isGunslinger and not _G.WSM_Gunslinger.isAllQuestDone() then
     -- Gunslinger: zero the HP, then one Trusty Revolver shot for the TrustyRevolverKills quest (outside farm + Stronghold fight)
     _G.WSM_Gunslinger.runBackground()
-elseif _G.WSM_FancyDressed.isFancyDressed and not _G.WSM_FancyDressed.isAllQuestDone() then
-    -- Fancy Dressed: quests are progressed by AutoCandy; this only leaves to the Lobby after the Stronghold round
-    _G.WSM_FancyDressed.runBackground()
-end
-
--- ============================================================
--- HALLOWEEN EVENT ONLY - lag cleaner for AutoCandy drops
--- Every door AutoCandy knocks on (Trick or Treat) can randomly give a reward, and the rewards pile up in
--- workspace.Items as lots of Coin Stacks, chairs and Blueprints, which makes the game lag. From the start of
--- the Stronghold wait phase this deletes those drops on the client for the rest of the run (new items as they appear, plus a sweep every 10s)
--- (so every round is covered).
--- Everything here belongs to the Halloween event: when the event is over (AutoCandy is removed) this whole
--- do-block can be deleted safely. Set Config.CleanHalloweenDrops = false to turn it off without editing.
--- Matched by name (the _2, _3 suffix is ignored): "Coin Stack", any name containing "Chair"
--- (Spooky Chair, Bone Claw Chair, ...) and any name ending with "Blueprint" (Spooky/Bone/Webbed/Grave/Cage ...).
--- Costume pieces (Interaction = "Costume") are never touched, AutoCandy still needs them.
--- The names are the known Halloween reward items; add any other random knock reward to isHalloweenDrop below.
--- ============================================================
-do
-    if Config.CleanHalloweenDrops ~= false and game.PlaceId ~= 79546208627805 then
-        local function isHalloweenDrop(item)
-            if item:GetAttribute("Interaction") == "Costume" then return false end
-            local name = item.Name:gsub("_%d+$", "")
-            return name == "Coin Stack"
-                or string.find(name, "Chair", 1, true) ~= nil
-                or string.find(name, "Blueprint$") ~= nil
-        end
-
-        local removedTotal = 0
-        local function sweepOne(item)
-            if item.Parent and isHalloweenDrop(item) then
-                pcall(function() item:Destroy() end)
-                removedTotal += 1
-                return true
-            end
-            return false
-        end
-
-        -- Event driven: only the item that just appeared is checked, no polling of the whole folder.
-        -- Deferred one step so the item has its final name / attributes when it is checked.
-        local watched = nil
-        local function watchItems(items)
-            watched = items
-            items.ChildAdded:Connect(function(item)
-                task.defer(function() pcall(sweepOne, item) end)
-            end)
-        end
-
-        task.spawn(function()
-            while true do
-                pcall(function()
-                    local items = workspace:FindFirstChild("Items")
-                    if not items then return end
-                    if items ~= watched then watchItems(items) end
-                    -- safety sweep every 10s: catches anything that was already there or changed name later
-                    local before = removedTotal
-                    for _, item in ipairs(items:GetChildren()) do
-                        sweepOne(item)
-                    end
-                    if removedTotal > before then
-                        Log.dev(string.format("[HalloweenClean] removed %d event drops (total %d)", removedTotal - before, removedTotal))
-                    end
-                end)
-                task.wait(10)
-            end
-        end)
-    end
 end
 
 Log.dev("\n[Step 4] Waiting for Stronghold to open...")
