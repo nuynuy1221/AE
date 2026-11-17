@@ -87,7 +87,7 @@ end
 
 local Log = _G.WSM_Log
 
-print("Version - 1.2.26 (Improve 1 Hit)")
+print("Version - 1.2.26 (Improve 1-Hit Monster)")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -3477,6 +3477,43 @@ _G.WSM_MeleeKill = function(m, weapon, opts)
     end
     local dead = isDead(m)
     return dead, dead and "plain" or "timeout"
+end
+
+-- ZERO AFTER CHASE for the ranged / special weapons (Pyromaniac, Gunslinger, Alien): zero the HP, then wait until the
+-- server starts the chase (ChasingPlayer = our UserId) instead of a fixed 1s. The caller fires right after "chased".
+-- opts: wait(seconds) = custom waiter (e.g. a hover-tracking wait) | abort() = true stops | timeout (default 5s)
+-- returns "chased" (fire now, after a ~0.05s settle) | "miss" (no chase in time, already waited) |
+--         "skip" (zero refused / Bunny / StrongholdEnemy / too many misses: the caller keeps its old fixed wait) |
+--         "dead" | "abort"
+_G.WSM_ZeroAfterChase = function(m, opts)
+    opts = opts or {}
+    local me = game:GetService("Players").LocalPlayer
+    local misses = _G.WSM_MeleeKillMiss
+    local timeout = opts.timeout or 5.0
+    local function gone(x)
+        return not x.Parent or x:GetAttribute("Dead") == true or x:HasTag("CultistCorpse")
+    end
+    if typeof(m) ~= "Instance" or gone(m) then return "dead" end
+    local okZ, zeroed = pcall(_G.zeroEnemyHealth, m)
+    if m.Name == "Bunny" or m:GetAttribute("StrongholdEnemy") == true
+        or (misses[m.Name] or 0) >= 3 or not (okZ and zeroed == true) then
+        return "skip"
+    end
+    local t0 = os.clock()
+    while os.clock() - t0 < timeout do
+        if gone(m) then return "dead" end
+        if m:GetAttribute("ChasingPlayer") == me.UserId then
+            misses[m.Name] = 0
+            return "chased"
+        end
+        if type(opts.abort) == "function" then
+            local okA, a = pcall(opts.abort)
+            if okA and a == true then return "abort" end
+        end
+        if type(opts.wait) == "function" then pcall(opts.wait, 0.03) else task.wait(0.03) end
+    end
+    misses[m.Name] = (misses[m.Name] or 0) + 1
+    return "miss"
 end
 
 -- Inline check: มี Cultist เกิดใน Characters ไหม (แทน anyCultistSpawned ที่อยู่ใน local scope)
